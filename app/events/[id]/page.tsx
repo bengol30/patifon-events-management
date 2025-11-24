@@ -3,11 +3,12 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw, MessageCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
+import TaskChat from "@/components/TaskChat";
 
 interface Task {
     id: string;
@@ -19,6 +20,9 @@ interface Task {
     priority: "NORMAL" | "HIGH" | "CRITICAL";
     currentStatus?: string;
     nextStep?: string;
+    lastMessageTime?: any;
+    lastMessageBy?: string;
+    readBy?: { [key: string]: any };
 }
 
 interface BudgetItem {
@@ -103,6 +107,9 @@ export default function EventDetailsPage() {
         itemId: null,
         title: ""
     });
+
+    // Chat State
+    const [chatTask, setChatTask] = useState<Task | null>(null);
 
     useEffect(() => {
         if (!id || !db) return;
@@ -484,6 +491,16 @@ export default function EventDetailsPage() {
                 </div>
             )}
 
+            {/* Task Chat Modal */}
+            {chatTask && (
+                <TaskChat
+                    eventId={id}
+                    taskId={chatTask.id}
+                    taskTitle={chatTask.title}
+                    onClose={() => setChatTask(null)}
+                />
+            )}
+
             {/* Edit Task Modal */}
             {editingTask && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -833,23 +850,28 @@ export default function EventDetailsPage() {
                         {tasks.length === 0 ? (
                             <p className="text-gray-500 text-center py-8">אין משימות עדיין. צור את המשימה הראשונה!</p>
                         ) : (
-                            tasks.map((task) => (
-                                <TaskCard
-                                    key={task.id}
-                                    id={task.id}
-                                    title={task.title}
-                                    description={task.description}
-                                    assignee={task.assignee || "לא משויך"}
-                                    status={task.status}
-                                    dueDate={task.dueDate}
-                                    priority={task.priority}
-                                    isSelected={selectedTasks.has(task.id)}
-                                    onSelect={(selected) => handleTaskSelect(task.id, selected)}
-                                    onDelete={() => confirmDeleteTask(task.id)}
-                                    onEdit={() => setEditingTask(task)}
-                                    onStatusChange={(status) => handleStatusChange(task.id, status)}
-                                />
-                            ))
+                            tasks.map((task) => {
+                                const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                                return (
+                                    <TaskCard
+                                        key={task.id}
+                                        id={task.id}
+                                        title={task.title}
+                                        description={task.description}
+                                        assignee={task.assignee || "לא משויך"}
+                                        status={task.status}
+                                        dueDate={task.dueDate}
+                                        priority={task.priority}
+                                        isSelected={selectedTasks.has(task.id)}
+                                        onSelect={(selected) => handleTaskSelect(task.id, selected)}
+                                        onDelete={() => confirmDeleteTask(task.id)}
+                                        onEdit={() => setEditingTask(task)}
+                                        onStatusChange={(status) => handleStatusChange(task.id, status)}
+                                        onChat={() => setChatTask(task)}
+                                        hasUnreadMessages={hasUnread}
+                                    />
+                                );
+                            })
                         )}
                     </div>
                 </div>

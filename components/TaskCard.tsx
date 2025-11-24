@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle, Circle, Clock, AlertTriangle, Trash2, Edit2, CheckSquare, Square } from "lucide-react";
+import { CheckCircle, Circle, Clock, AlertTriangle, Trash2, Edit2, CheckSquare, Square, MessageCircle } from "lucide-react";
 
 interface TaskProps {
     id: string;
@@ -15,6 +15,8 @@ interface TaskProps {
     onDelete?: () => void;
     onEdit?: () => void;
     onStatusChange?: (newStatus: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") => void;
+    onChat?: () => void;
+    hasUnreadMessages?: boolean;
 }
 
 export default function TaskCard({
@@ -29,7 +31,9 @@ export default function TaskCard({
     onSelect,
     onDelete,
     onEdit,
-    onStatusChange
+    onStatusChange,
+    onChat,
+    hasUnreadMessages
 }: TaskProps) {
     const getStatusIcon = () => {
         switch (status) {
@@ -98,6 +102,18 @@ export default function TaskCard({
                 )}
 
                 <div className="flex items-center gap-1">
+                    {onChat && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onChat(); }}
+                            className="text-gray-400 hover:text-purple-500 p-1 relative"
+                            title="צ'אט הודעות"
+                        >
+                            <MessageCircle size={16} />
+                            {hasUnreadMessages && (
+                                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                            )}
+                        </button>
+                    )}
                     {onEdit && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onEdit(); }}

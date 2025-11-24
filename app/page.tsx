@@ -4,9 +4,10 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X } from "lucide-react";
+import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc } from "firebase/firestore";
+import TaskChat from "@/components/TaskChat";
 
 interface Event {
   id: string;
@@ -27,6 +28,9 @@ interface Task {
   eventTitle: string;
   currentStatus?: string;
   nextStep?: string;
+  lastMessageTime?: any;
+  lastMessageBy?: string;
+  readBy?: { [key: string]: any };
 }
 
 export default function Dashboard() {
@@ -47,6 +51,9 @@ export default function Dashboard() {
   // Edit/Delete State
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+
+  // Chat State
+  const [chatTask, setChatTask] = useState<Task | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -235,6 +242,16 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {/* Task Chat Modal */}
+      {chatTask && (
+        <TaskChat
+          eventId={chatTask.eventId}
+          taskId={chatTask.id}
+          taskTitle={chatTask.title}
+          onClose={() => setChatTask(null)}
+        />
+      )}
+
       {/* Edit Task Modal */}
       {editingTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -407,6 +424,16 @@ export default function Dashboard() {
                       <div className="flex items-start justify-between">
                         <h4 className="font-medium text-gray-900">{task.title}</h4>
                         <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setChatTask(task)}
+                            className="p-1 text-purple-600 hover:bg-purple-100 rounded relative"
+                            title="צ'אט הודעות"
+                          >
+                            <MessageCircle size={16} />
+                            {task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid && (
+                              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                            )}
+                          </button>
                           <button
                             onClick={() => handleCompleteTask(task)}
                             className="p-1 text-green-600 hover:bg-green-100 rounded"
