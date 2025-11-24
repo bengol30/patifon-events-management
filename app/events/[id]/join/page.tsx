@@ -39,9 +39,14 @@ export default function JoinEventPage() {
                     return;
                 }
 
-                // Add user to members
+                // Add user to members and team
                 await updateDoc(eventRef, {
-                    members: arrayUnion(user.uid)
+                    members: arrayUnion(user.uid),
+                    team: arrayUnion({
+                        name: user.displayName || user.email?.split('@')[0] || "משתמש",
+                        role: "חבר צוות",
+                        email: user.email || ""
+                    })
                 });
 
                 setStatus("success");
