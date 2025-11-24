@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch } from "firebase/firestore";
@@ -359,54 +359,81 @@ export default function EventDetailsPage() {
         }
     };
 
-    const generateSuggestions = () => {
+    const generateSuggestions = (append = false) => {
         setIsGenerating(true);
-        setShowSuggestions(true);
+        if (!append) setShowSuggestions(true);
 
         // Simulate AI analysis delay
         setTimeout(() => {
             const suggestions: { title: string; description: string; priority: "NORMAL" | "HIGH" | "CRITICAL" }[] = [];
             const textToAnalyze = `${event?.title} ${event?.description} ${event?.location} ${event?.goal}`.toLowerCase();
 
-            // Keyword-based logic (Simulating AI)
+            // Expanded Keyword-based logic
             if (textToAnalyze.includes("חתונה") || textToAnalyze.includes("wedding")) {
                 suggestions.push({ title: "תיאום טעימות קייטרינג", description: "בחירת מנות לאירוע ותיאום מול הספק", priority: "HIGH" });
                 suggestions.push({ title: "בחירת שירי חופה", description: "תיאום מול הדיג'יי", priority: "NORMAL" });
+                suggestions.push({ title: "עיצוב חופה", description: "בחירת מעצב וסגירת קונספט", priority: "NORMAL" });
+                suggestions.push({ title: "אישורי הגעה", description: "טלפונים לאורחים שלא אישרו", priority: "CRITICAL" });
+                suggestions.push({ title: "סידורי הושבה", description: "שיבוץ אורחים לשולחנות", priority: "HIGH" });
             }
             if (textToAnalyze.includes("מסיבה") || textToAnalyze.includes("party")) {
                 suggestions.push({ title: "הכנת פלייליסט", description: "רשימת שירים לדיג'יי", priority: "NORMAL" });
                 suggestions.push({ title: "קניית אלכוהול", description: "חישוב כמויות ורכישה", priority: "HIGH" });
+                suggestions.push({ title: "קישוט המקום", description: "בלונים, שרשראות תאורה ודגלים", priority: "NORMAL" });
+                suggestions.push({ title: "תיאום צלם מגנטים", description: "סגירת ספק צילום", priority: "NORMAL" });
             }
             if (textToAnalyze.includes("כנס") || textToAnalyze.includes("conference")) {
                 suggestions.push({ title: "הדפסת תגים לשמות", description: "הכנת תגי שם לכל המשתתפים", priority: "NORMAL" });
                 suggestions.push({ title: "תיאום ציוד הגברה", description: "מיקרופונים, מקרן ומסך", priority: "CRITICAL" });
-            }
-            if (textToAnalyze.includes("טיול") || textToAnalyze.includes("trip")) {
-                suggestions.push({ title: "תיאום הסעות", description: "סגירת אוטובוסים ושעות איסוף", priority: "CRITICAL" });
-                suggestions.push({ title: "אישור ביטחוני", description: "תיאום מול חדר מצב/משטרה", priority: "CRITICAL" });
+                suggestions.push({ title: "הכנת מצגות", description: "איסוף מצגות מהמרצים", priority: "HIGH" });
+                suggestions.push({ title: "תיאום כיבוד", description: "קפה ומאפה לקבלת פנים", priority: "NORMAL" });
+                suggestions.push({ title: "רישום משתתפים", description: "הקמת עמדת רישום בכניסה", priority: "HIGH" });
             }
 
             // General suggestions based on context
             if (!event?.budget || event.budget === "0") {
                 suggestions.push({ title: "בניית תקציב מפורט", description: "הערכת עלויות לכל סעיף", priority: "HIGH" });
+                suggestions.push({ title: "חיפוש מקורות מימון", description: "חסויות או תמיכה מהרשות", priority: "NORMAL" });
             }
             if (!event?.team || event.team.length < 2) {
                 suggestions.push({ title: "גיוס מתנדבים/צוות", description: "פרסום קול קורא להצטרפות לצוות", priority: "HIGH" });
+                suggestions.push({ title: "חלוקת תפקידים", description: "הגדרת תחומי אחריות לכל איש צוות", priority: "HIGH" });
             }
 
-            // Always relevant suggestions
-            suggestions.push({ title: "אישור סופי מול ספקים", description: "וידוא הגעה שבוע לפני האירוע", priority: "CRITICAL" });
-            suggestions.push({ title: "פרסום ברשתות החברתיות", description: "העלאת פוסט וסטורי לקידום האירוע", priority: "NORMAL" });
-            suggestions.push({ title: "הכנת לו\"ז יום האירוע", description: "טבלה מפורטת של מה קורה בכל שעה", priority: "HIGH" });
-            suggestions.push({ title: "סיור מקדים בלוקיישן", description: "בדיקת תשתיות, חשמל ודרכי גישה", priority: "NORMAL" });
-            suggestions.push({ title: "שליחת תזכורת למשתתפים", description: "הודעת וואטסאפ/מייל יום לפני", priority: "NORMAL" });
-            suggestions.push({ title: "הכנת שלטי הכוונה", description: "שילוט למקום האירוע", priority: "NORMAL" });
+            // Always relevant suggestions (Pool of generic tasks)
+            const genericTasks = [
+                { title: "אישור סופי מול ספקים", description: "וידוא הגעה שבוע לפני האירוע", priority: "CRITICAL" },
+                { title: "פרסום ברשתות החברתיות", description: "העלאת פוסט וסטורי לקידום האירוע", priority: "NORMAL" },
+                { title: "הכנת לו\"ז יום האירוע", description: "טבלה מפורטת של מה קורה בכל שעה", priority: "HIGH" },
+                { title: "סיור מקדים בלוקיישן", description: "בדיקת תשתיות, חשמל ודרכי גישה", priority: "NORMAL" },
+                { title: "שליחת תזכורת למשתתפים", description: "הודעת וואטסאפ/מייל יום לפני", priority: "NORMAL" },
+                { title: "הכנת שלטי הכוונה", description: "שילוט למקום האירוע", priority: "NORMAL" },
+                { title: "בדיקת ביטוח", description: "וידוא שיש ביטוח צד ג' בתוקף", priority: "CRITICAL" },
+                { title: "תיאום ניקיון", description: "סגירת חברת ניקיון לפני ואחרי", priority: "NORMAL" },
+                { title: "רכישת ציוד מתכלה", description: "חד פעמי, מפיות, שקיות זבל", priority: "NORMAL" },
+                { title: "הכנת תיק עזרה ראשונה", description: "וידוא ציוד רפואי בסיסי", priority: "HIGH" },
+                { title: "תיאום חניה", description: "בדיקת אפשרויות חניה לאורחים", priority: "NORMAL" },
+                { title: "הכנת פלייליסט רקע", description: "מוזיקה לקבלת פנים", priority: "NORMAL" }
+            ];
 
-            // Shuffle and pick 10 unique
-            const uniqueSuggestions = Array.from(new Set(suggestions.map(s => JSON.stringify(s)))).map(s => JSON.parse(s));
-            setSuggestedTasks(uniqueSuggestions.slice(0, 10));
+            suggestions.push(...genericTasks as any);
+
+            // Shuffle and pick unique
+            const uniqueSuggestions = Array.from(new Set(suggestions.map(s => JSON.stringify(s))))
+                .map(s => JSON.parse(s))
+                .sort(() => 0.5 - Math.random()); // Shuffle
+
+            if (append) {
+                // Add 5 more unique tasks that are not already in the list
+                const currentTitles = new Set(suggestedTasks.map(t => t.title));
+                const newSuggestions = uniqueSuggestions.filter((s: any) => !currentTitles.has(s.title)).slice(0, 5);
+                setSuggestedTasks(prev => [...prev, ...newSuggestions]);
+            } else {
+                setSuggestedTasks(uniqueSuggestions.slice(0, 7));
+            }
+
             setIsGenerating(false);
-        }, 1500);
+        }, 1000);
     };
 
     const handleAcceptSuggestion = (suggestion: { title: string; description: string; priority: any }) => {
@@ -648,6 +675,14 @@ export default function EventDetailsPage() {
                                             </button>
                                         </div>
                                     ))}
+
+                                    <button
+                                        onClick={() => generateSuggestions(true)}
+                                        className="w-full py-3 mt-2 border border-dashed border-gray-300 rounded-lg text-gray-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition flex items-center justify-center gap-2 text-sm font-medium"
+                                    >
+                                        <RefreshCw size={16} />
+                                        טען עוד רעיונות
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -665,7 +700,7 @@ export default function EventDetailsPage() {
                         </div>
                         <div className="flex gap-2">
                             <button
-                                onClick={generateSuggestions}
+                                onClick={() => generateSuggestions(false)}
                                 className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-50 transition text-sm font-medium"
                             >
                                 <Sparkles size={18} />
