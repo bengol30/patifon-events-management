@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎭 Patifon Event Management System
 
-## Getting Started
+מערכת לניהול אירועים ומשימות עבור פטיפון - מרכז תרבות צעירים.
 
-First, run the development server:
+## ✨ תכונות
 
+- 📅 **ניהול אירועים** - יצירה, עריכה ומעקב אחר אירועים
+- ✅ **ניהול משימות** - משימות קבועות ומשימות לכל אירוע
+- 👥 **ניהול משתמשים** - אימות והרשאות דרך Firebase
+- 🎯 **תיוג משימות** - אפשרות לתייג אנשים למשימות
+- 📊 **דשבורד** - מעקב אחר כל האירועים והמשימות במקום אחד
+
+## 🚀 התחלה מהירה
+
+### דרישות מקדימות
+
+- Node.js 18+ 
+- חשבון Firebase
+- npm או yarn
+
+### התקנה מקומית
+
+1. שכפל את הפרויקט:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/[YOUR-USERNAME]/patifon-events-management.git
+cd patifon-events-management
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. התקן תלויות:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. הגדר משתני סביבה:
+```bash
+cp .env.example .env.local
+```
+ערוך את `.env.local` והוסף את פרטי Firebase שלך.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. הרץ את השרת המקומי:
+```bash
+npm run dev
+```
 
-## Learn More
+האתר יהיה זמין ב: `http://localhost:3000`
 
-To learn more about Next.js, take a look at the following resources:
+## 🌐 העלאה לאוויר (Deployment)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Vercel (מומלץ)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. התחבר ל-[Vercel](https://vercel.com)
+2. חבר את ה-repository מ-GitHub
+3. הוסף את משתני הסביבה מ-`.env.example`
+4. לחץ Deploy!
 
-## Deploy on Vercel
+הכתובת תהיה: `https://[your-project-name].vercel.app`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### הגדרת Firebase
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+אחרי ההעלאה, אל תשכח:
+1. Firebase Console > Authentication > Settings > Authorized domains
+2. הוסף את הדומיין של Vercel
+
+## 🛠️ טכנולוגיות
+
+- **Next.js 15** - React Framework
+- **TypeScript** - Type Safety
+- **Firebase** - Authentication & Database (Firestore)
+- **Tailwind CSS** - Styling
+- **Lucide React** - Icons
+
+## 📝 רישיון
+
+MIT License - ראה קובץ LICENSE לפרטים נוספים.
+
+## 👨‍💻 תמיכה
+
+לשאלות או בעיות, פתח Issue ב-GitHub.
+
+---
+
+Made with ❤️ for Patifon
