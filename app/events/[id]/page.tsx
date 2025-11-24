@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2 } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch } from "firebase/firestore";
@@ -340,6 +340,12 @@ export default function EventDetailsPage() {
             </div>
         );
     }
+
+    const copyInviteLink = () => {
+        const inviteLink = `${window.location.origin}/events/${id}/join`;
+        navigator.clipboard.writeText(inviteLink);
+        alert("קישור ההזמנה הועתק ללוח!");
+    };
 
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
 
