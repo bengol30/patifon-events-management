@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2 } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch } from "firebase/firestore";
@@ -51,6 +51,7 @@ export default function EventDetailsPage() {
     const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [copied, setCopied] = useState(false);
 
     // New Task State
     const [showNewTask, setShowNewTask] = useState(false);
@@ -341,10 +342,16 @@ export default function EventDetailsPage() {
         );
     }
 
-    const copyInviteLink = () => {
-        const inviteLink = `${window.location.origin}/events/${id}/join`;
-        navigator.clipboard.writeText(inviteLink);
-        alert("קישור ההזמנה הועתק ללוח!");
+    const copyInviteLink = async () => {
+        try {
+            const inviteLink = `${window.location.origin}/events/${id}/join`;
+            await navigator.clipboard.writeText(inviteLink);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error("Failed to copy:", err);
+            alert("לא הצלחנו להעתיק את הקישור. נסה להעתיק ידנית מהדפדפן.");
+        }
     };
 
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
@@ -505,15 +512,15 @@ export default function EventDetailsPage() {
                         </div>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                        <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
-                            {event.status === "PLANNING" ? "בתכנון" : event.status}
-                        </span>
                         <button
                             onClick={copyInviteLink}
-                            className="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm font-medium"
+                            className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm font-medium ${copied
+                                ? "bg-green-600 text-white hover:bg-green-700"
+                                : "bg-indigo-600 text-white hover:bg-indigo-700"
+                                }`}
                         >
-                            <Share2 size={18} />
-                            העתק קישור להזמנה
+                            {copied ? <Check size={18} /> : <Share2 size={18} />}
+                            {copied ? "הקישור הועתק!" : "העתק קישור להזמנה"}
                         </button>
                         <button
                             onClick={confirmDeleteEvent}
