@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare } from "lucide-react";
+import { Plus, Calendar, CheckSquare, Settings } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
 
@@ -70,13 +70,22 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-gray-900">שלום, {user.displayName || user.email}</h1>
           <p className="text-gray-500">ברוך הבא למערכת ניהול האירועים של פטיפון</p>
         </div>
-        <Link
-          href="/events/new"
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition"
-        >
-          <Plus size={20} />
-          אירוע חדש
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/settings"
+            className="bg-white text-gray-700 border border-gray-300 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-50 transition"
+          >
+            <Settings size={20} />
+            הגדרות
+          </Link>
+          <Link
+            href="/events/new"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition"
+          >
+            <Plus size={20} />
+            אירוע חדש
+          </Link>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

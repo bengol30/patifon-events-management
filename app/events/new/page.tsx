@@ -5,22 +5,8 @@ import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, getDocs, query } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
-
-const defaultTasks = [
-    { title: "גרפיקה (לעדכן מה צריך ומספיק זמן מראש)", priority: "HIGH" },
-    { title: "טופס הרשמה בגוגל פורמס", priority: "HIGH" },
-    { title: "פרסום האירוע ברשתות החברתיות (פייסבוק, אינסטגרם, וואצאפ)", priority: "HIGH" },
-    { title: "וידוא הגעה עם הנרשמים (שבוע לפני וביום האירוע)", priority: "NORMAL" },
-    { title: "פתיחת קבוצת וואצאפ למשתתפים", priority: "NORMAL" },
-    { title: "קבלת הצעות מחיר (מקום/אוכל/מתנה/אמן/מרצה)", priority: "HIGH" },
-    { title: "טופס פתיחת ספק (במידה ונדרש)", priority: "NORMAL" },
-    { title: "איסוף וצילום חשבוניות", priority: "NORMAL" },
-    { title: "תיעוד ומעקב תקציב", priority: "NORMAL" },
-    { title: "בניית לו\"ז לפרסום והפצה (שבועיים מראש)", priority: "HIGH" },
-    { title: "עדכון רוני וכרמל", priority: "CRITICAL" }
-];
 
 export default function NewEventPage() {
     const router = useRouter();
@@ -90,12 +76,16 @@ export default function NewEventPage() {
             const docRef = await addDoc(collection(db, "events"), eventData);
             console.log("Event created with ID:", docRef.id);
 
-            // Add default tasks
+            // Fetch default tasks from Firestore
+            const defaultTasksSnapshot = await getDocs(collection(db, "default_tasks"));
+            const defaultTasks = defaultTasksSnapshot.docs.map(doc => doc.data());
+
+            // Add default tasks to the new event
             const tasksCollection = collection(db, "events", docRef.id, "tasks");
             const taskPromises = defaultTasks.map(task =>
                 addDoc(tasksCollection, {
                     title: task.title,
-                    priority: task.priority,
+                    priority: task.priority || "NORMAL",
                     status: "TODO",
                     assignee: "",
                     dueDate: "",
