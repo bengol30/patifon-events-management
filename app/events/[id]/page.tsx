@@ -17,6 +17,8 @@ interface Task {
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
+    currentStatus?: string;
+    nextStep?: string;
 }
 
 interface BudgetItem {
@@ -174,7 +176,9 @@ export default function EventDetailsPage() {
                 assignee: editingTask.assignee,
                 dueDate: editingTask.dueDate,
                 priority: editingTask.priority,
-                status: editingTask.status
+                status: editingTask.status,
+                currentStatus: editingTask.currentStatus || "",
+                nextStep: editingTask.nextStep || "",
             });
             setEditingTask(null);
         } catch (err) {
@@ -545,6 +549,26 @@ export default function EventDetailsPage() {
                                     <option value="HIGH">גבוה</option>
                                     <option value="CRITICAL">דחוף מאוד</option>
                                 </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
+                                <textarea
+                                    className="w-full p-2 border rounded-lg text-sm"
+                                    rows={2}
+                                    placeholder="תאר את המצב הנוכחי של המשימה..."
+                                    value={editingTask.currentStatus || ""}
+                                    onChange={e => setEditingTask({ ...editingTask, currentStatus: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
+                                <textarea
+                                    className="w-full p-2 border rounded-lg text-sm"
+                                    rows={2}
+                                    placeholder="מה הצעד הבא שצריך לעשות..."
+                                    value={editingTask.nextStep || ""}
+                                    onChange={e => setEditingTask({ ...editingTask, nextStep: e.target.value })}
+                                />
                             </div>
                             <div className="flex justify-end gap-3 pt-4">
                                 <button

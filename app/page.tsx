@@ -25,6 +25,8 @@ interface Task {
   status: string;
   eventId: string;
   eventTitle: string;
+  currentStatus?: string;
+  nextStep?: string;
 }
 
 export default function Dashboard() {
@@ -40,6 +42,7 @@ export default function Dashboard() {
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
+  const [filterDeadline, setFilterDeadline] = useState<string>("all");
 
   // Edit/Delete State
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -128,11 +131,20 @@ export default function Dashboard() {
   }, [user]);
 
   // Filter tasks based on selected filters
-  const filteredTasks = myTasks.filter(task => {
+  let filteredTasks = myTasks.filter(task => {
     if (filterEvent !== "all" && task.eventId !== filterEvent) return false;
     if (filterPriority !== "all" && task.priority !== filterPriority) return false;
     return true;
   });
+
+  // Sort by deadline if filter is active
+  if (filterDeadline === "deadline") {
+    filteredTasks = [...filteredTasks].sort((a, b) => {
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    });
+  }
 
   const handleUpdateTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,6 +156,8 @@ export default function Dashboard() {
         title: editingTask.title,
         dueDate: editingTask.dueDate,
         priority: editingTask.priority,
+        currentStatus: editingTask.currentStatus || "",
+        nextStep: editingTask.nextStep || "",
       });
 
       // Update local state
@@ -263,6 +277,26 @@ export default function Dashboard() {
                   <option value="CRITICAL">דחוף מאוד</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
+                <textarea
+                  className="w-full p-2 border rounded-lg text-sm"
+                  rows={2}
+                  placeholder="תאר את המצב הנוכחי של המשימה..."
+                  value={editingTask.currentStatus || ""}
+                  onChange={e => setEditingTask({ ...editingTask, currentStatus: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
+                <textarea
+                  className="w-full p-2 border rounded-lg text-sm"
+                  rows={2}
+                  placeholder="מה הצעד הבא שצריך לעשות..."
+                  value={editingTask.nextStep || ""}
+                  onChange={e => setEditingTask({ ...editingTask, nextStep: e.target.value })}
+                />
+              </div>
               <div className="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
@@ -344,6 +378,15 @@ export default function Dashboard() {
               <option value="HIGH">גבוה</option>
               <option value="NORMAL">רגיל</option>
             </select>
+
+            <select
+              value={filterDeadline}
+              onChange={(e) => setFilterDeadline(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">ללא מיון</option>
+              <option value="deadline">מיון לפי דד ליין</option>
+            </select>
           </div>
 
           {loadingTasks ? (
@@ -398,6 +441,24 @@ export default function Dashboard() {
                           </span>
                         )}
                       </div>
+
+                      {/* Current Status and Next Step */}
+                      {(task.currentStatus || task.nextStep) && (
+                        <div className="mt-2 space-y-1">
+                          {task.currentStatus && (
+                            <div className="text-xs">
+                              <span className="font-medium text-gray-700">איפה זה עומד: </span>
+                              <span className="text-gray-600">{task.currentStatus}</span>
+                            </div>
+                          )}
+                          {task.nextStep && (
+                            <div className="text-xs">
+                              <span className="font-medium text-gray-700">הצעד הבא: </span>
+                              <span className="text-gray-600">{task.nextStep}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full shrink-0 mr-2 ${task.priority === 'CRITICAL' ? 'bg-red-100 text-red-700' :
                       task.priority === 'HIGH' ? 'bg-orange-100 text-orange-700' :
