@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb } from "lucide-react";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch } from "firebase/firestore";
@@ -52,6 +52,11 @@ export default function EventDetailsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [copied, setCopied] = useState(false);
+
+    // Suggestions State
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [suggestedTasks, setSuggestedTasks] = useState<{ title: string; description: string; priority: "NORMAL" | "HIGH" | "CRITICAL" }[]>([]);
+    const [isGenerating, setIsGenerating] = useState(false);
 
     // New Task State
     const [showNewTask, setShowNewTask] = useState(false);
@@ -354,6 +359,67 @@ export default function EventDetailsPage() {
         }
     };
 
+    const generateSuggestions = () => {
+        setIsGenerating(true);
+        setShowSuggestions(true);
+
+        // Simulate AI analysis delay
+        setTimeout(() => {
+            const suggestions: { title: string; description: string; priority: "NORMAL" | "HIGH" | "CRITICAL" }[] = [];
+            const textToAnalyze = `${event?.title} ${event?.description} ${event?.location} ${event?.goal}`.toLowerCase();
+
+            // Keyword-based logic (Simulating AI)
+            if (textToAnalyze.includes("חתונה") || textToAnalyze.includes("wedding")) {
+                suggestions.push({ title: "תיאום טעימות קייטרינג", description: "בחירת מנות לאירוע ותיאום מול הספק", priority: "HIGH" });
+                suggestions.push({ title: "בחירת שירי חופה", description: "תיאום מול הדיג'יי", priority: "NORMAL" });
+            }
+            if (textToAnalyze.includes("מסיבה") || textToAnalyze.includes("party")) {
+                suggestions.push({ title: "הכנת פלייליסט", description: "רשימת שירים לדיג'יי", priority: "NORMAL" });
+                suggestions.push({ title: "קניית אלכוהול", description: "חישוב כמויות ורכישה", priority: "HIGH" });
+            }
+            if (textToAnalyze.includes("כנס") || textToAnalyze.includes("conference")) {
+                suggestions.push({ title: "הדפסת תגים לשמות", description: "הכנת תגי שם לכל המשתתפים", priority: "NORMAL" });
+                suggestions.push({ title: "תיאום ציוד הגברה", description: "מיקרופונים, מקרן ומסך", priority: "CRITICAL" });
+            }
+            if (textToAnalyze.includes("טיול") || textToAnalyze.includes("trip")) {
+                suggestions.push({ title: "תיאום הסעות", description: "סגירת אוטובוסים ושעות איסוף", priority: "CRITICAL" });
+                suggestions.push({ title: "אישור ביטחוני", description: "תיאום מול חדר מצב/משטרה", priority: "CRITICAL" });
+            }
+
+            // General suggestions based on context
+            if (!event?.budget || event.budget === "0") {
+                suggestions.push({ title: "בניית תקציב מפורט", description: "הערכת עלויות לכל סעיף", priority: "HIGH" });
+            }
+            if (!event?.team || event.team.length < 2) {
+                suggestions.push({ title: "גיוס מתנדבים/צוות", description: "פרסום קול קורא להצטרפות לצוות", priority: "HIGH" });
+            }
+
+            // Always relevant suggestions
+            suggestions.push({ title: "אישור סופי מול ספקים", description: "וידוא הגעה שבוע לפני האירוע", priority: "CRITICAL" });
+            suggestions.push({ title: "פרסום ברשתות החברתיות", description: "העלאת פוסט וסטורי לקידום האירוע", priority: "NORMAL" });
+            suggestions.push({ title: "הכנת לו\"ז יום האירוע", description: "טבלה מפורטת של מה קורה בכל שעה", priority: "HIGH" });
+            suggestions.push({ title: "סיור מקדים בלוקיישן", description: "בדיקת תשתיות, חשמל ודרכי גישה", priority: "NORMAL" });
+            suggestions.push({ title: "שליחת תזכורת למשתתפים", description: "הודעת וואטסאפ/מייל יום לפני", priority: "NORMAL" });
+            suggestions.push({ title: "הכנת שלטי הכוונה", description: "שילוט למקום האירוע", priority: "NORMAL" });
+
+            // Shuffle and pick 10 unique
+            const uniqueSuggestions = Array.from(new Set(suggestions.map(s => JSON.stringify(s)))).map(s => JSON.parse(s));
+            setSuggestedTasks(uniqueSuggestions.slice(0, 10));
+            setIsGenerating(false);
+        }, 1500);
+    };
+
+    const handleAcceptSuggestion = (suggestion: { title: string; description: string; priority: any }) => {
+        setNewTask({
+            ...newTask,
+            title: suggestion.title,
+            description: suggestion.description,
+            priority: suggestion.priority
+        });
+        setShowSuggestions(false);
+        setShowNewTask(true);
+    };
+
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
 
     return (
@@ -538,6 +604,56 @@ export default function EventDetailsPage() {
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Suggestions Modal */}
+                {showSuggestions && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 animate-in fade-in zoom-in-95 duration-200 max-h-[80vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-6">
+                                <div className="flex items-center gap-2">
+                                    <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
+                                        <Sparkles size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-bold text-gray-900">משימות מוצעות לאירוע</h3>
+                                        <p className="text-sm text-gray-500">מבוסס על ניתוח פרטי האירוע שלך</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setShowSuggestions(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            {isGenerating ? (
+                                <div className="text-center py-12">
+                                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mx-auto mb-4"></div>
+                                    <p className="text-gray-600 animate-pulse">המערכת מנתחת את האירוע ומחפשת רעיונות...</p>
+                                </div>
+                            ) : (
+                                <div className="grid gap-3">
+                                    {suggestedTasks.map((suggestion, idx) => (
+                                        <div key={idx} className="flex items-start justify-between p-4 border border-gray-100 rounded-lg hover:bg-indigo-50 transition group">
+                                            <div>
+                                                <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                                                    {suggestion.title}
+                                                    {suggestion.priority === "CRITICAL" && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">דחוף</span>}
+                                                </h4>
+                                                <p className="text-sm text-gray-600 mt-1">{suggestion.description}</p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleAcceptSuggestion(suggestion)}
+                                                className="bg-white border border-indigo-200 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-600 hover:text-white transition flex items-center gap-1 shrink-0"
+                                            >
+                                                <Plus size={16} />
+                                                הוסף
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Main Content - Tasks */}
                 <div className="lg:col-span-2 space-y-6">
                     <div className="flex justify-between items-center">
@@ -547,13 +663,22 @@ export default function EventDetailsPage() {
                                 {tasks.filter(t => t.status !== 'DONE').length}
                             </span>
                         </div>
-                        <button
-                            onClick={() => setShowNewTask(!showNewTask)}
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition text-sm font-medium"
-                        >
-                            <Plus size={18} />
-                            משימה חדשה
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={generateSuggestions}
+                                className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-50 transition text-sm font-medium"
+                            >
+                                <Sparkles size={18} />
+                                רעיונות למשימות
+                            </button>
+                            <button
+                                onClick={() => setShowNewTask(!showNewTask)}
+                                className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition text-sm font-medium"
+                            >
+                                <Plus size={18} />
+                                משימה חדשה
+                            </button>
+                        </div>
                     </div>
 
                     {/* Bulk Actions Bar */}
