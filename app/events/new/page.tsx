@@ -4,29 +4,114 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { db } from "@/lib/firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { useAuth } from "@/context/AuthContext";
+
+const defaultTasks = [
+    { title: "גרפיקה (לעדכן מה צריך ומספיק זמן מראש)", priority: "HIGH" },
+    { title: "טופס הרשמה בגוגל פורמס", priority: "HIGH" },
+    { title: "פרסום האירוע ברשתות החברתיות (פייסבוק, אינסטגרם, וואצאפ)", priority: "HIGH" },
+    { title: "וידוא הגעה עם הנרשמים (שבוע לפני וביום האירוע)", priority: "NORMAL" },
+    { title: "פתיחת קבוצת וואצאפ למשתתפים", priority: "NORMAL" },
+    { title: "קבלת הצעות מחיר (מקום/אוכל/מתנה/אמן/מרצה)", priority: "HIGH" },
+    { title: "טופס פתיחת ספק (במידה ונדרש)", priority: "NORMAL" },
+    { title: "איסוף וצילום חשבוניות", priority: "NORMAL" },
+    { title: "תיעוד ומעקב תקציב", priority: "NORMAL" },
+    { title: "בניית לו\"ז לפרסום והפצה (שבועיים מראש)", priority: "HIGH" },
+    { title: "עדכון רוני וכרמל", priority: "CRITICAL" }
+];
 
 export default function NewEventPage() {
     const router = useRouter();
-    const [loading, setLoading] = useState(false);
+    const { user, loading: authLoading } = useAuth();
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState("");
     const [formData, setFormData] = useState({
         title: "",
         date: "",
         location: "",
         description: "",
+        participantsCount: "",
+        partners: "",
+        goal: "",
+        budget: "",
     });
+
+    // Redirect if not authenticated
+    if (!authLoading && !user) {
+        router.push("/login");
+        return null;
+    }
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+            </div>
+        );
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
+        setSubmitting(true);
+        setError("");
 
-        // TODO: Implement actual event creation logic (Firestore + Drive)
-        console.log("Creating event:", formData);
+        if (!db) {
+            setError("Firebase is not configured");
+            setSubmitting(false);
+            return;
+        }
 
-        // Simulate delay
-        setTimeout(() => {
-            setLoading(false);
+        if (!user) {
+            setError("עליך להתחבר כדי ליצור אירוע");
+            setSubmitting(false);
+            return;
+        }
+
+        try {
+            // Create event in Firestore
+            const eventData = {
+                title: formData.title,
+                location: formData.location,
+                startTime: new Date(formData.date),
+                endTime: new Date(formData.date),
+                description: formData.description,
+                participantsCount: formData.participantsCount,
+                partners: formData.partners,
+                goal: formData.goal,
+                budget: formData.budget,
+                status: "PLANNING",
+                createdBy: user.uid,
+                createdAt: serverTimestamp(),
+                responsibilities: [],
+            };
+
+            const docRef = await addDoc(collection(db, "events"), eventData);
+            console.log("Event created with ID:", docRef.id);
+
+            // Add default tasks
+            const tasksCollection = collection(db, "events", docRef.id, "tasks");
+            const taskPromises = defaultTasks.map(task =>
+                addDoc(tasksCollection, {
+                    title: task.title,
+                    priority: task.priority,
+                    status: "TODO",
+                    assignee: "",
+                    dueDate: "",
+                    createdAt: serverTimestamp(),
+                    createdBy: user.uid
+                })
+            );
+
+            await Promise.all(taskPromises);
+
             router.push("/");
-        }, 1000);
+        } catch (err: any) {
+            console.error("Error creating event:", err);
+            setError("שגיאה ביצירת האירוע: " + err.message);
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -41,6 +126,7 @@ export default function NewEventPage() {
                 </div>
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                    {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
@@ -78,8 +164,53 @@ export default function NewEventPage() {
                             </div>
                         </div>
 
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">כמות משתתפים רצויה</label>
+                                <input
+                                    type="number"
+                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                    value={formData.participantsCount}
+                                    onChange={(e) => setFormData({ ...formData, participantsCount: e.target.value })}
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תקציב משוער (₪)</label>
+                                <input
+                                    type="number"
+                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                    value={formData.budget}
+                                    onChange={(e) => setFormData({ ...formData, budget: e.target.value })}
+                                    placeholder="0"
+                                />
+                            </div>
+                        </div>
+
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">תיאור האירוע</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">שותפים (רכזת נוספת, ארגון וכו')</label>
+                            <input
+                                type="text"
+                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                value={formData.partners}
+                                onChange={(e) => setFormData({ ...formData, partners: e.target.value })}
+                                placeholder="שמות שותפים..."
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">מטרת האירוע</label>
+                            <textarea
+                                rows={3}
+                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                value={formData.goal}
+                                onChange={(e) => setFormData({ ...formData, goal: e.target.value })}
+                                placeholder="על איזה צורך עונה האירוע? עם איזה תחושות המשתתפים יצאו?"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">תיאור כללי</label>
                             <textarea
                                 rows={4}
                                 className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
@@ -92,10 +223,10 @@ export default function NewEventPage() {
                         <div className="pt-4 border-t border-gray-100">
                             <button
                                 type="submit"
-                                disabled={loading}
+                                disabled={submitting}
                                 className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                             >
-                                {loading ? "יוצר אירוע..." : "צור אירוע"}
+                                {submitting ? "יוצר אירוע..." : "צור אירוע"}
                             </button>
                         </div>
                     </form>

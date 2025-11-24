@@ -18,7 +18,8 @@ let auth: any;
 let db: any;
 let storage: any;
 
-if (typeof window !== "undefined" || process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
+// Only initialize if we have the configuration
+if (process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
   try {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
