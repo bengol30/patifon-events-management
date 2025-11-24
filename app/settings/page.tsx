@@ -4,26 +4,83 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X } from "lucide-react";
+import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc } from "firebase/firestore";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft } from "lucide-react";
 import Link from "next/link";
 
 interface DefaultTask {
     id: string;
     title: string;
+    description?: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
+    daysOffset?: number; // Days relative to event start (negative = before)
+    assigneeRole?: string; // e.g., "Producer", "Designer"
 }
 
 const PREDEFINED_TASKS = [
-    { title: "פתיחת ספק במערכת", priority: "NORMAL" },
-    { title: "הצעת מחיר (מעל 1500 הצעה נגדית)", priority: "HIGH" },
-    { title: "גרפיקה (אירוע גדול דרך בלה, קטן דרך רוני)", priority: "HIGH" },
-    { title: "לוודא שבכל גרפיקה יש את הלוגואים הרלוונטיים ואת הלשונית צעירים", priority: "NORMAL" },
-    { title: "הפצת האירוע (שבועיים מראש)", priority: "HIGH" },
-    { title: "פתיחת סמרט טיקט במידת הצורך דרך בלה", priority: "NORMAL" },
-    { title: "קביעת האירוע ביומן הרלוונטי (היכל התרבות/ בית החאן)", priority: "CRITICAL" },
-    { title: "לוודא שהפרסום מאושר על ידי בר לפני שמפיצים!", priority: "CRITICAL" },
-    { title: "אישור אלכוהול במידת הצורך (הילה/ בר)", priority: "NORMAL" }
+    {
+        title: "פתיחת ספק במערכת",
+        description: "יש לפתוח ספק במערכת הפיננסית לפני ביצוע תשלום",
+        priority: "NORMAL",
+        daysOffset: -7,
+        assigneeRole: "מנהל"
+    },
+    {
+        title: "הצעת מחיר (מעל 1500 הצעה נגדית)",
+        description: "לקבל הצעות מחיר ממספר ספקים ולהשוות. מעל 1500 ₪ חובה הצעה נגדית",
+        priority: "HIGH",
+        daysOffset: -14,
+        assigneeRole: "מפיק"
+    },
+    {
+        title: "גרפיקה (אירוע גדול דרך בלה, קטן דרך רוני)",
+        description: "הזמנת עיצוב גרפי - אירועים גדולים דרך בלה, קטנים דרך רוני",
+        priority: "HIGH",
+        daysOffset: -21,
+        assigneeRole: "מעצב"
+    },
+    {
+        title: "לוודא שבכל גרפיקה יש את הלוגואים הרלוונטיים ואת הלשונית צעירים",
+        description: "בדיקת איכות - וידוא שכל הלוגואים של השותפים והלשונית 'צעירים' מופיעים",
+        priority: "NORMAL",
+        daysOffset: -14,
+        assigneeRole: "מפיק"
+    },
+    {
+        title: "הפצת האירוע (שבועיים מראש)",
+        description: "פרסום האירוע בכל הערוצים: פייסבוק, אינסטגרם, וואטסאפ, ניוזלטר",
+        priority: "HIGH",
+        daysOffset: -14,
+        assigneeRole: "רכז תקשורת"
+    },
+    {
+        title: "פתיחת סמרט טיקט במידת הצורך דרך בלה",
+        description: "אם יש צורך במערכת כרטוס - לפתוח דרך בלה",
+        priority: "NORMAL",
+        daysOffset: -21,
+        assigneeRole: "מפיק"
+    },
+    {
+        title: "קביעת האירוע ביומן הרלוונטי (היכל התרבות/ בית החאן)",
+        description: "תיאום מקום ותאריך עם המקום הרלוונטי - חובה לעשות מוקדם!",
+        priority: "CRITICAL",
+        daysOffset: -30,
+        assigneeRole: "מנהל"
+    },
+    {
+        title: "לוודא שהפרסום מאושר על ידי בר לפני שמפיצים!",
+        description: "אישור סופי של בר על כל החומרים השיווקיים לפני פרסום",
+        priority: "CRITICAL",
+        daysOffset: -15,
+        assigneeRole: "מפיק"
+    },
+    {
+        title: "אישור אלכוהול במידת הצורך (הילה/ בר)",
+        description: "אם יש אלכוהול באירוע - לקבל אישור מהילה או בר",
+        priority: "NORMAL",
+        daysOffset: -10,
+        assigneeRole: "מפיק"
+    }
 ];
 
 export default function SettingsPage() {
@@ -31,13 +88,27 @@ export default function SettingsPage() {
     const { user, loading: authLoading } = useAuth();
     const [activeTab, setActiveTab] = useState("defaultTasks");
     const [defaultTasks, setDefaultTasks] = useState<DefaultTask[]>([]);
-    const [newTask, setNewTask] = useState({ title: "", priority: "NORMAL" });
     const [loading, setLoading] = useState(true);
 
     // UI State
     const [showSeedModal, setShowSeedModal] = useState(false);
     const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; taskId: string | null }>({ isOpen: false, taskId: null });
+    const [bulkDeleteModal, setBulkDeleteModal] = useState(false);
+    const [deleteAllModal, setDeleteAllModal] = useState(false);
     const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+    // Selection State
+    const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+
+    // Edit/Add Modal State
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingTask, setEditingTask] = useState<Partial<DefaultTask>>({
+        title: "",
+        description: "",
+        priority: "NORMAL",
+        daysOffset: 0,
+        assigneeRole: ""
+    });
 
     useEffect(() => {
         if (!authLoading && !user) {
@@ -69,22 +140,53 @@ export default function SettingsPage() {
         }
     }, [message]);
 
-    const handleAddTask = async (e: React.FormEvent) => {
+    const handleOpenAddModal = () => {
+        setEditingTask({
+            title: "",
+            description: "",
+            priority: "NORMAL",
+            daysOffset: 0,
+            assigneeRole: ""
+        });
+        setIsEditModalOpen(true);
+    };
+
+    const handleOpenEditModal = (task: DefaultTask) => {
+        setEditingTask({ ...task });
+        setIsEditModalOpen(true);
+    };
+
+    const handleSaveTask = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db || !user) return;
 
         try {
-            await addDoc(collection(db, "default_tasks"), {
-                title: newTask.title,
-                priority: newTask.priority,
-                createdAt: serverTimestamp(),
-                createdBy: user.uid
-            });
-            setNewTask({ title: "", priority: "NORMAL" });
-            setMessage({ text: "המשימה נוספה בהצלחה", type: "success" });
+            const taskData = {
+                title: editingTask.title,
+                description: editingTask.description || "",
+                priority: editingTask.priority,
+                daysOffset: Number(editingTask.daysOffset) || 0,
+                assigneeRole: editingTask.assigneeRole || "",
+                updatedAt: serverTimestamp()
+            };
+
+            if (editingTask.id) {
+                // Update existing task
+                await updateDoc(doc(db, "default_tasks", editingTask.id), taskData);
+                setMessage({ text: "המשימה עודכנה בהצלחה", type: "success" });
+            } else {
+                // Create new task
+                await addDoc(collection(db, "default_tasks"), {
+                    ...taskData,
+                    createdAt: serverTimestamp(),
+                    createdBy: user.uid
+                });
+                setMessage({ text: "המשימה נוספה בהצלחה", type: "success" });
+            }
+            setIsEditModalOpen(false);
         } catch (err) {
-            console.error("Error adding default task:", err);
-            setMessage({ text: "שגיאה בהוספת משימה", type: "error" });
+            console.error("Error saving default task:", err);
+            setMessage({ text: "שגיאה בשמירת המשימה", type: "error" });
         }
     };
 
@@ -104,7 +206,10 @@ export default function SettingsPage() {
                 const docRef = doc(collectionRef);
                 batch.set(docRef, {
                     title: task.title,
+                    description: task.description || "",
                     priority: task.priority,
+                    daysOffset: task.daysOffset || 0,
+                    assigneeRole: task.assigneeRole || "",
                     createdAt: serverTimestamp(),
                     createdBy: user.uid
                 });
@@ -134,6 +239,69 @@ export default function SettingsPage() {
         } catch (err) {
             console.error("Error deleting default task:", err);
             setMessage({ text: "שגיאה במחיקת משימה", type: "error" });
+        }
+    };
+
+    const handleTaskSelect = (taskId: string, isSelected: boolean) => {
+        const newSelected = new Set(selectedTasks);
+        if (isSelected) {
+            newSelected.add(taskId);
+        } else {
+            newSelected.delete(taskId);
+        }
+        setSelectedTasks(newSelected);
+    };
+
+    const handleSelectAll = () => {
+        if (selectedTasks.size === defaultTasks.length) {
+            setSelectedTasks(new Set());
+        } else {
+            setSelectedTasks(new Set(defaultTasks.map(t => t.id)));
+        }
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedTasks.size === 0) return;
+        setBulkDeleteModal(true);
+    };
+
+    const executeBulkDelete = async () => {
+        if (!db || selectedTasks.size === 0) return;
+        setBulkDeleteModal(false);
+
+        try {
+            const batch = writeBatch(db);
+            selectedTasks.forEach(taskId => {
+                batch.delete(doc(db, "default_tasks", taskId));
+            });
+            await batch.commit();
+            setSelectedTasks(new Set());
+            setMessage({ text: `${selectedTasks.size} משימות נמחקו בהצלחה`, type: "success" });
+        } catch (err) {
+            console.error("Error bulk deleting tasks:", err);
+            setMessage({ text: "שגיאה במחיקת משימות", type: "error" });
+        }
+    };
+
+    const handleDeleteAll = () => {
+        setDeleteAllModal(true);
+    };
+
+    const executeDeleteAll = async () => {
+        if (!db) return;
+        setDeleteAllModal(false);
+
+        try {
+            const batch = writeBatch(db);
+            defaultTasks.forEach(task => {
+                batch.delete(doc(db, "default_tasks", task.id));
+            });
+            await batch.commit();
+            setSelectedTasks(new Set());
+            setMessage({ text: "כל המשימות נמחקו בהצלחה", type: "success" });
+        } catch (err) {
+            console.error("Error deleting all tasks:", err);
+            setMessage({ text: "שגיאה במחיקת כל המשימות", type: "error" });
         }
     };
 
@@ -230,6 +398,179 @@ export default function SettingsPage() {
                 </div>
             )}
 
+            {/* Bulk Delete Confirmation Modal */}
+            {bulkDeleteModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="flex items-center gap-3 text-red-600">
+                                <div className="bg-red-100 p-2 rounded-full">
+                                    <Trash2 size={24} />
+                                </div>
+                                <h3 className="text-lg font-bold">מחיקת משימות מרובות</h3>
+                            </div>
+                            <button onClick={() => setBulkDeleteModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <p className="text-gray-600 mb-6">
+                            האם אתה בטוח שברצונך למחוק {selectedTasks.size} משימות נבחרות?
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setBulkDeleteModal(false)}
+                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
+                            >
+                                ביטול
+                            </button>
+                            <button
+                                onClick={executeBulkDelete}
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
+                            >
+                                מחק הכל
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete All Confirmation Modal */}
+            {deleteAllModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="flex items-center gap-3 text-red-600">
+                                <div className="bg-red-100 p-2 rounded-full">
+                                    <Trash2 size={24} />
+                                </div>
+                                <h3 className="text-lg font-bold">מחיקת כל המשימות</h3>
+                            </div>
+                            <button onClick={() => setDeleteAllModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <p className="text-gray-600 mb-6">
+                            האם אתה בטוח שברצונך למחוק את כל {defaultTasks.length} המשימות הקבועות?
+                            <br />
+                            <span className="text-red-600 font-semibold">פעולה זו אינה ניתנת לביטול!</span>
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setDeleteAllModal(false)}
+                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
+                            >
+                                ביטול
+                            </button>
+                            <button
+                                onClick={executeDeleteAll}
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
+                            >
+                                כן, מחק הכל
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add/Edit Task Modal */}
+            {isEditModalOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-start mb-6">
+                            <h3 className="text-xl font-bold text-gray-900">
+                                {editingTask.id ? "עריכת משימה" : "הוספת משימה חדשה"}
+                            </h3>
+                            <button onClick={() => setIsEditModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSaveTask} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">כותרת המשימה</label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={editingTask.title}
+                                    onChange={e => setEditingTask({ ...editingTask, title: e.target.value })}
+                                    placeholder="לדוגמה: הזמנת ציוד"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תיאור (אופציונלי)</label>
+                                <textarea
+                                    rows={3}
+                                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={editingTask.description}
+                                    onChange={e => setEditingTask({ ...editingTask, description: e.target.value })}
+                                    placeholder="פרטים נוספים על המשימה..."
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">עדיפות</label>
+                                    <select
+                                        className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        value={editingTask.priority}
+                                        onChange={e => setEditingTask({ ...editingTask, priority: e.target.value as any })}
+                                    >
+                                        <option value="NORMAL">רגיל</option>
+                                        <option value="HIGH">גבוה</option>
+                                        <option value="CRITICAL">דחוף</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תפקיד אחראי</label>
+                                    <input
+                                        type="text"
+                                        className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        value={editingTask.assigneeRole}
+                                        onChange={e => setEditingTask({ ...editingTask, assigneeRole: e.target.value })}
+                                        placeholder="לדוגמה: מפיק"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תזמון (ימים ביחס לאירוע)</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        value={editingTask.daysOffset}
+                                        onChange={e => setEditingTask({ ...editingTask, daysOffset: parseInt(e.target.value) })}
+                                    />
+                                    <span className="text-sm text-gray-500 whitespace-nowrap">
+                                        {editingTask.daysOffset === 0 ? "ביום האירוע" :
+                                            (editingTask.daysOffset || 0) < 0 ? "ימים לפני האירוע" : "ימים אחרי האירוע"}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-gray-400 mt-1">השתמש במספר שלילי לימים לפני האירוע (למשל -7 לשבוע לפני)</p>
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-4 border-t mt-6">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditModalOpen(false)}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
+                                >
+                                    ביטול
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition shadow-sm"
+                                >
+                                    {editingTask.id ? "שמור שינויים" : "צור משימה"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
             <div className="max-w-4xl mx-auto">
                 <div className="mb-6 flex items-center justify-between">
                     <div>
@@ -251,8 +592,8 @@ export default function SettingsPage() {
                             <button
                                 onClick={() => setActiveTab("defaultTasks")}
                                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "defaultTasks"
-                                        ? "bg-indigo-50 text-indigo-700"
-                                        : "text-gray-600 hover:bg-gray-50"
+                                    ? "bg-indigo-50 text-indigo-700"
+                                    : "text-gray-600 hover:bg-gray-50"
                                     }`}
                             >
                                 <List size={18} />
@@ -266,77 +607,143 @@ export default function SettingsPage() {
                     <div className="md:col-span-3">
                         {activeTab === "defaultTasks" && (
                             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                                <div className="mb-6 flex justify-between items-start">
+                                <div className="mb-6 flex justify-between items-center">
                                     <div>
                                         <h2 className="text-xl font-bold text-gray-900 mb-2">משימות קבועות</h2>
                                         <p className="text-gray-500 text-sm">
                                             משימות אלו יתווספו אוטומטית לכל אירוע חדש שייווצר במערכת.
                                         </p>
                                     </div>
-                                    <button
-                                        onClick={handleSeedTasks}
-                                        className="text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-2 border border-indigo-200"
-                                        title="טען רשימת משימות מומלצת"
-                                    >
-                                        <RefreshCw size={16} />
-                                        טען משימות מומלצות
-                                    </button>
-                                </div>
-
-                                {/* Add New Task Form */}
-                                <form onSubmit={handleAddTask} className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
-                                    <h3 className="text-sm font-semibold text-gray-700 mb-3">הוספת משימה חדשה</h3>
-                                    <div className="flex gap-3">
-                                        <input
-                                            type="text"
-                                            placeholder="כותרת המשימה"
-                                            required
-                                            className="flex-1 p-2 border rounded-lg text-sm"
-                                            value={newTask.title}
-                                            onChange={e => setNewTask({ ...newTask, title: e.target.value })}
-                                        />
-                                        <select
-                                            className="p-2 border rounded-lg text-sm w-32"
-                                            value={newTask.priority}
-                                            onChange={e => setNewTask({ ...newTask, priority: e.target.value })}
-                                        >
-                                            <option value="NORMAL">רגיל</option>
-                                            <option value="HIGH">גבוה</option>
-                                            <option value="CRITICAL">דחוף</option>
-                                        </select>
+                                    <div className="flex gap-2">
                                         <button
-                                            type="submit"
-                                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 text-sm font-medium"
+                                            onClick={handleSeedTasks}
+                                            className="text-indigo-600 hover:bg-indigo-50 px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 border border-indigo-200"
+                                            title="טען רשימת משימות מומלצת"
+                                        >
+                                            <RefreshCw size={16} />
+                                            <span className="hidden sm:inline">טען מומלצות</span>
+                                        </button>
+                                        <button
+                                            onClick={handleOpenAddModal}
+                                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 text-sm font-medium shadow-sm"
                                         >
                                             <Plus size={16} />
-                                            הוסף
+                                            משימה חדשה
                                         </button>
                                     </div>
-                                </form>
+                                </div>
+
+                                {/* Bulk Actions Bar */}
+                                {selectedTasks.size > 0 && (
+                                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-sm font-medium text-indigo-900">
+                                                {selectedTasks.size} משימות נבחרו
+                                            </span>
+                                            <button
+                                                onClick={() => setSelectedTasks(new Set())}
+                                                className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+                                            >
+                                                בטל בחירה
+                                            </button>
+                                        </div>
+                                        <button
+                                            onClick={handleBulkDelete}
+                                            className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 transition flex items-center gap-2 text-sm font-medium"
+                                        >
+                                            <Trash2 size={16} />
+                                            מחק נבחרים
+                                        </button>
+                                    </div>
+                                )}
 
                                 {/* Tasks List */}
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                     {defaultTasks.length === 0 ? (
-                                        <p className="text-center text-gray-500 py-8">אין משימות קבועות מוגדרות.</p>
+                                        <div className="text-center py-12 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+                                            <List className="mx-auto h-12 w-12 text-gray-300 mb-3" />
+                                            <p className="text-gray-500 font-medium">אין משימות קבועות מוגדרות.</p>
+                                            <p className="text-gray-400 text-sm mt-1">הוסף משימה חדשה או טען משימות מומלצות כדי להתחיל.</p>
+                                        </div>
                                     ) : (
-                                        defaultTasks.map((task) => (
-                                            <div key={task.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition group">
-                                                <div className="flex items-center gap-3">
-                                                    <span className={`w-2 h-2 rounded-full ${task.priority === 'CRITICAL' ? 'bg-red-500' :
-                                                            task.priority === 'HIGH' ? 'bg-orange-500' :
-                                                                'bg-gray-300'
-                                                        }`} />
-                                                    <span className="font-medium text-gray-700">{task.title}</span>
-                                                </div>
-                                                <button
-                                                    onClick={() => handleDeleteTask(task.id)}
-                                                    className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"
-                                                    title="מחק"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
+                                        <>
+                                            {/* Select All Row */}
+                                            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedTasks.size === defaultTasks.length && defaultTasks.length > 0}
+                                                    onChange={handleSelectAll}
+                                                    className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                                />
+                                                <span className="text-sm font-medium text-gray-700">בחר הכל</span>
+                                                {defaultTasks.length > 0 && (
+                                                    <button
+                                                        onClick={handleDeleteAll}
+                                                        className="mr-auto text-red-600 hover:text-red-700 text-sm font-medium flex items-center gap-1"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                        מחק הכל
+                                                    </button>
+                                                )}
                                             </div>
-                                        ))
+
+                                            {defaultTasks.map((task) => (
+                                                <div key={task.id} className="flex items-center gap-3 p-4 border border-gray-100 rounded-xl hover:bg-gray-50 transition group bg-white shadow-sm">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedTasks.has(task.id)}
+                                                        onChange={(e) => handleTaskSelect(task.id, e.target.checked)}
+                                                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                                    />
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-3 mb-1">
+                                                            <span className={`w-2.5 h-2.5 rounded-full ${task.priority === 'CRITICAL' ? 'bg-red-500' :
+                                                                    task.priority === 'HIGH' ? 'bg-orange-500' :
+                                                                        'bg-gray-300'
+                                                                }`} title={`עדיפות: ${task.priority === 'CRITICAL' ? 'דחוף' : task.priority === 'HIGH' ? 'גבוה' : 'רגיל'}`} />
+                                                            <span className="font-semibold text-gray-800">{task.title}</span>
+                                                            {task.assigneeRole && (
+                                                                <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                                    <User size={12} />
+                                                                    {task.assigneeRole}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-4 text-sm text-gray-500 pr-6">
+                                                            {task.daysOffset !== undefined && task.daysOffset !== 0 && (
+                                                                <span className="flex items-center gap-1">
+                                                                    <Clock size={14} />
+                                                                    {task.daysOffset < 0 ? `${Math.abs(task.daysOffset)} ימים לפני` : `${task.daysOffset} ימים אחרי`}
+                                                                </span>
+                                                            )}
+                                                            {task.description && (
+                                                                <span className="flex items-center gap-1 truncate max-w-[200px]" title={task.description}>
+                                                                    <AlignLeft size={14} />
+                                                                    {task.description}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button
+                                                            onClick={() => handleOpenEditModal(task)}
+                                                            className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                                                            title="ערוך"
+                                                        >
+                                                            <Edit2 size={18} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteTask(task.id)}
+                                                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                                                            title="מחק"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </>
                                     )}
                                 </div>
                             </div>
