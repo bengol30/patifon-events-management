@@ -510,10 +510,10 @@ export default function EventDetailsPage() {
                         </span>
                         <button
                             onClick={copyInviteLink}
-                            className="text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-lg text-sm flex items-center gap-1 transition"
+                            className="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm font-medium"
                         >
-                            <Share2 size={16} />
-                            הזמן משתתפים
+                            <Share2 size={18} />
+                            העתק קישור להזמנה
                         </button>
                         <button
                             onClick={confirmDeleteEvent}
@@ -526,265 +526,36 @@ export default function EventDetailsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
-                    {event.goal && (
-                        <div>
-                            <h3 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                                <Target size={14} />
-                                מטרת האירוע
-                            </h3>
-                            <p className="text-sm text-gray-600">{event.goal}</p>
-                        </div>
-                    )}
-                    {event.description && (
-                        <div>
-                            <h3 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                                <FileText size={14} />
-                                תיאור כללי
-                            </h3>
-                            <p className="text-sm text-gray-600">{event.description}</p>
-                        </div>
-                    )}
+                    {/* ... existing content ... */}
                 </div>
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Main Content - Tasks */}
-                <div className="lg:col-span-2 space-y-6">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                            <h2 className="text-xl font-semibold text-gray-800">משימות לביצוע</h2>
-                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-sm font-medium">
-                                {tasks.filter(t => t.status !== 'DONE').length}
-                            </span>
-                        </div>
-                        <button
-                            onClick={() => setShowNewTask(!showNewTask)}
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition text-sm font-medium"
-                        >
-                            <Plus size={18} />
-                            משימה חדשה
-                        </button>
-                    </div>
-
-                    {/* Bulk Actions Bar */}
-                    {selectedTasks.size > 0 && (
-                        <div className="bg-indigo-50 p-3 rounded-lg flex items-center justify-between border border-indigo-100 animate-in fade-in slide-in-from-top-2">
-                            <div className="flex items-center gap-2 text-indigo-900 font-medium text-sm">
-                                <CheckSquare size={18} />
-                                <span>{selectedTasks.size} משימות נבחרו</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={confirmBulkDelete}
-                                    className="text-red-600 hover:bg-red-100 px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1"
-                                >
-                                    <Trash2 size={16} />
-                                    מחק נבחרים
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {showNewTask && (
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 mb-4 animate-in fade-in slide-in-from-top-2">
-                            <h3 className="font-medium mb-3">הוספת משימה חדשה</h3>
-                            <form onSubmit={handleAddTask} className="space-y-3">
-                                <input
-                                    type="text"
-                                    placeholder="כותרת המשימה"
-                                    required
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    value={newTask.title}
-                                    onChange={e => setNewTask({ ...newTask, title: e.target.value })}
-                                />
-                                <div className="grid grid-cols-2 gap-3">
-                                    <select
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        value={newTask.assignee}
-                                        onChange={e => setNewTask({ ...newTask, assignee: e.target.value })}
-                                    >
-                                        <option value="">בחר אחראי...</option>
-                                        {event.team?.map((member, idx) => (
-                                            <option key={idx} value={member.name}>{member.name}</option>
-                                        ))}
-                                    </select>
-                                    <input
-                                        type="date"
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        value={newTask.dueDate}
-                                        onChange={e => setNewTask({ ...newTask, dueDate: e.target.value })}
-                                    />
-                                </div>
-                                <select
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    value={newTask.priority}
-                                    onChange={e => setNewTask({ ...newTask, priority: e.target.value })}
-                                >
-                                    <option value="NORMAL">רגיל</option>
-                                    <option value="HIGH">גבוה</option>
-                                    <option value="CRITICAL">דחוף מאוד</option>
-                                </select>
-                                <div className="flex justify-end gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowNewTask(false)}
-                                        className="px-3 py-1 text-gray-500 hover:bg-gray-100 rounded-lg text-sm"
-                                    >
-                                        ביטול
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
-                                    >
-                                        שמור משימה
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    )}
-
-                    <div className="space-y-3">
-                        {tasks.length > 0 && (
-                            <div className="flex items-center gap-2 mb-2 px-1">
-                                <button
-                                    onClick={handleSelectAll}
-                                    className="text-gray-500 hover:text-indigo-600 text-sm flex items-center gap-1"
-                                >
-                                    {selectedTasks.size === tasks.length ? <CheckSquare size={16} /> : <Square size={16} />}
-                                    בחר הכל
-                                </button>
-                            </div>
-                        )}
-
-                        {tasks.length === 0 ? (
-                            <p className="text-gray-500 text-center py-8">אין משימות עדיין. צור את המשימה הראשונה!</p>
-                        ) : (
-                            tasks.map((task) => (
-                                <TaskCard
-                                    key={task.id}
-                                    id={task.id}
-                                    title={task.title}
-                                    description={task.description}
-                                    assignee={task.assignee || "לא משויך"}
-                                    status={task.status}
-                                    dueDate={task.dueDate}
-                                    priority={task.priority}
-                                    isSelected={selectedTasks.has(task.id)}
-                                    onSelect={(selected) => handleTaskSelect(task.id, selected)}
-                                    onDelete={() => confirmDeleteTask(task.id)}
-                                    onEdit={() => setEditingTask(task)}
-                                    onStatusChange={(status) => handleStatusChange(task.id, status)}
-                                />
-                            ))
-                        )}
-                    </div>
-                </div>
+                {/* ... existing content ... */}
 
                 {/* Sidebar - Team, Budget & Files */}
                 <div className="space-y-6">
-                    {/* Budget Section */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                                <DollarSign size={18} />
-                                ניהול תקציב
-                            </h2>
-                            <button
-                                onClick={() => setShowAddBudget(!showAddBudget)}
-                                className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
-                            >
-                                <Plus size={18} />
-                            </button>
-                        </div>
-
-                        <div className="mb-4 text-sm">
-                            <div className="flex justify-between text-gray-600 mb-1">
-                                <span>תקציב משוער:</span>
-                                <span className="font-medium">₪{event?.budget || 0}</span>
-                            </div>
-                            <div className="flex justify-between text-gray-600">
-                                <span>נוצל בפועל:</span>
-                                <span className={`font-medium ${totalBudgetUsed > Number(event?.budget || 0) ? 'text-red-500' : 'text-green-600'}`}>
-                                    ₪{totalBudgetUsed}
-                                </span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                                <div
-                                    className={`h-2 rounded-full ${totalBudgetUsed > Number(event?.budget || 0) ? 'bg-red-500' : 'bg-green-500'}`}
-                                    style={{ width: `${Math.min((totalBudgetUsed / Number(event?.budget || 1)) * 100, 100)}%` }}
-                                ></div>
-                            </div>
-                        </div>
-
-                        {showAddBudget && (
-                            <div className="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                <form onSubmit={handleAddBudgetItem} className="space-y-2">
-                                    <input
-                                        type="text"
-                                        placeholder="עבור מה (פריט)"
-                                        required
-                                        className="w-full p-2 border rounded text-sm"
-                                        value={newBudgetItem.item}
-                                        onChange={e => setNewBudgetItem({ ...newBudgetItem, item: e.target.value })}
-                                    />
-                                    <input
-                                        type="number"
-                                        placeholder="סכום (₪)"
-                                        required
-                                        className="w-full p-2 border rounded text-sm"
-                                        value={newBudgetItem.amount}
-                                        onChange={e => setNewBudgetItem({ ...newBudgetItem, amount: e.target.value })}
-                                    />
-                                    <button
-                                        type="submit"
-                                        className="w-full bg-indigo-600 text-white py-1 rounded text-sm hover:bg-indigo-700"
-                                    >
-                                        הוסף
-                                    </button>
-                                </form>
-                            </div>
-                        )}
-
-                        <div className="space-y-2">
-                            {budgetItems.length > 0 ? (
-                                budgetItems.map((item) => (
-                                    <div key={item.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg group text-sm border border-gray-50 hover:border-gray-100 transition">
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => handleToggleInvoice(item.id, item.invoiceSubmitted)}
-                                                className={`text-gray-400 hover:text-indigo-600 transition ${item.invoiceSubmitted ? 'text-indigo-600' : ''}`}
-                                                title={item.invoiceSubmitted ? "חשבונית הוגשה" : "סמן שהוגשה חשבונית"}
-                                            >
-                                                {item.invoiceSubmitted ? <CheckSquare size={16} /> : <Square size={16} />}
-                                            </button>
-                                            <div>
-                                                <p className="font-medium text-gray-800">{item.item}</p>
-                                                <p className="text-xs text-gray-500">₪{item.amount}</p>
-                                            </div>
-                                        </div>
-                                        <button
-                                            onClick={() => confirmDeleteBudgetItem(item.id)}
-                                            className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
-                                        >
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </div>
-                                ))
-                            ) : (
-                                <p className="text-sm text-gray-500 text-center py-2">אין הוצאות רשומות</p>
-                            )}
-                        </div>
-                    </div>
+                    {/* ... existing budget section ... */}
 
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
-                            <button
-                                onClick={() => setShowAddTeam(!showAddTeam)}
-                                className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
-                            >
-                                <UserPlus size={18} />
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={copyInviteLink}
+                                    className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
+                                    title="העתק קישור להזמנה"
+                                >
+                                    <Share2 size={18} />
+                                </button>
+                                <button
+                                    onClick={() => setShowAddTeam(!showAddTeam)}
+                                    className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
+                                    title="הוסף איש צוות ידנית"
+                                >
+                                    <UserPlus size={18} />
+                                </button>
+                            </div>
                         </div>
 
                         {showAddTeam && (
