@@ -503,6 +503,13 @@ export default function EventDetailsPage() {
                             {event.status === "PLANNING" ? "בתכנון" : event.status}
                         </span>
                         <button
+                            onClick={copyInviteLink}
+                            className="text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-lg text-sm flex items-center gap-1 transition"
+                        >
+                            <Share2 size={16} />
+                            הזמן משתתפים
+                        </button>
+                        <button
                             onClick={confirmDeleteEvent}
                             className="text-red-500 hover:bg-red-50 px-3 py-1 rounded-lg text-sm flex items-center gap-1 transition"
                         >

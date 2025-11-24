@@ -39,7 +39,7 @@ export default function Dashboard() {
         const eventsRef = collection(db, "events");
         const q = query(
           eventsRef,
-          where("createdBy", "==", user.uid),
+          where("members", "array-contains", user.uid),
           orderBy("createdAt", "desc")
         );
         const querySnapshot = await getDocs(q);

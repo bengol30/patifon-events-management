@@ -12,6 +12,8 @@ export default function SignupPage() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const redirect = searchParams.get("redirect");
 
     const handleSignup = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -24,7 +26,11 @@ export default function SignupPage() {
             await updateProfile(userCredential.user, {
                 displayName: fullName,
             });
-            router.push("/");
+            if (redirect) {
+                router.push(decodeURIComponent(redirect));
+            } else {
+                router.push("/");
+            }
         } catch (err: any) {
             setError("שגיאה בהרשמה: " + err.message);
         }

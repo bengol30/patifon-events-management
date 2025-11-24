@@ -69,6 +69,7 @@ export default function NewEventPage() {
                 budget: formData.budget,
                 status: "PLANNING",
                 createdBy: user.uid,
+                members: [user.uid], // Add creator as a member
                 createdAt: serverTimestamp(),
                 responsibilities: [],
             };

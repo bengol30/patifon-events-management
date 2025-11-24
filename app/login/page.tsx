@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -11,6 +11,8 @@ export default function LoginPage() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const redirect = searchParams.get("redirect");
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -20,7 +22,11 @@ export default function LoginPage() {
         }
         try {
             await signInWithEmailAndPassword(auth, email, password);
-            router.push("/");
+            if (redirect) {
+                router.push(decodeURIComponent(redirect));
+            } else {
+                router.push("/");
+            }
         } catch (err: any) {
             setError("שגיאה בהתחברות: " + err.message);
         }
