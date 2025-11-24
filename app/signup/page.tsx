@@ -32,7 +32,20 @@ function SignupForm() {
                 router.push("/");
             }
         } catch (err: any) {
-            setError("שגיאה בהרשמה: " + err.message);
+            console.error("Signup error:", err);
+            let errorMessage = "שגיאה בהרשמה: " + err.message;
+
+            if (err.code === 'auth/email-already-in-use') {
+                errorMessage = "כתובת האימייל הזו כבר רשומה במערכת. נסה להתחבר.";
+            } else if (err.code === 'auth/weak-password') {
+                errorMessage = "הסיסמה חלשה מדי. יש להזין לפחות 6 תווים.";
+            } else if (err.code === 'auth/invalid-email') {
+                errorMessage = "כתובת האימייל אינה תקינה.";
+            } else if (err.code === 'auth/network-request-failed') {
+                errorMessage = "שגיאת תקשורת. בדוק את החיבור לאינטרנט.";
+            }
+
+            setError(errorMessage);
         }
     };
 

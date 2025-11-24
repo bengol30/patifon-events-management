@@ -28,7 +28,20 @@ function LoginForm() {
                 router.push("/");
             }
         } catch (err: any) {
-            setError("שגיאה בהתחברות: " + err.message);
+            console.error("Login error:", err);
+            let errorMessage = "שגיאה בהתחברות: " + err.message;
+
+            if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+                errorMessage = "האימייל או הסיסמה שגויים.";
+            } else if (err.code === 'auth/invalid-email') {
+                errorMessage = "כתובת האימייל אינה תקינה.";
+            } else if (err.code === 'auth/too-many-requests') {
+                errorMessage = "יותר מדי ניסיונות כושלים. נסה שוב מאוחר יותר.";
+            } else if (err.code === 'auth/network-request-failed') {
+                errorMessage = "שגיאת תקשורת. בדוק את החיבור לאינטרנט.";
+            }
+
+            setError(errorMessage);
         }
     };
 
