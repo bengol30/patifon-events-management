@@ -13,10 +13,20 @@ export default function SignupPage() {
     const [error, setError] = useState("");
     const router = useRouter();
 
+    // Debug check
+    if (typeof window !== 'undefined') {
+        console.log("Signup Page Loaded");
+        console.log("Auth initialized:", !!auth);
+        console.log("Env check:", {
+            apiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+            projectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+        });
+    }
+
     const handleSignup = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!auth) {
-            setError("Firebase configuration is missing.");
+            setError("Firebase configuration is missing. Please check console logs.");
             return;
         }
         try {
@@ -33,7 +43,8 @@ export default function SignupPage() {
     return (
         <div className="min-h-screen flex items-center justify-center bg-gray-100">
             <div className="bg-white p-8 rounded-lg shadow-md w-96">
-                <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">הרשמה למערכת</h1>
+                <h1 className="text-2xl font-bold mb-2 text-center text-gray-800">הרשמה למערכת</h1>
+                <p className="text-xs text-center text-gray-400 mb-6">v1.1</p>
                 {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
                 <form onSubmit={handleSignup} className="space-y-4">
                     <div>
