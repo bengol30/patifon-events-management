@@ -363,7 +363,7 @@ export default function Dashboard() {
                     <div className="flex-1">
                       <div className="flex items-start justify-between">
                         <h4 className="font-medium text-gray-900">{task.title}</h4>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleCompleteTask(task)}
                             className="p-1 text-green-600 hover:bg-green-100 rounded"
@@ -400,8 +400,8 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full shrink-0 mr-2 ${task.priority === 'CRITICAL' ? 'bg-red-100 text-red-700' :
-                        task.priority === 'HIGH' ? 'bg-orange-100 text-orange-700' :
-                          'bg-blue-100 text-blue-700'
+                      task.priority === 'HIGH' ? 'bg-orange-100 text-orange-700' :
+                        'bg-blue-100 text-blue-700'
                       }`}>
                       {task.priority === 'CRITICAL' ? 'דחוף' : task.priority === 'HIGH' ? 'גבוה' : 'רגיל'}
                     </span>
