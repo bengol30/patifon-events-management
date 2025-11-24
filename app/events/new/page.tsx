@@ -77,16 +77,23 @@ export default function NewEventPage() {
             const docRef = await addDoc(collection(db, "events"), eventData);
             console.log("Event created with ID:", docRef.id);
 
-            // Fetch default tasks from Firestore
-            const defaultTasksSnapshot = await getDocs(collection(db, "default_tasks"));
-            const defaultTasks = defaultTasksSnapshot.docs.map(doc => doc.data());
+            // Define default tasks (hardcoded for now)
+            const defaultTasks = [
+                { title: "בניית תקציב ראשוני", priority: "HIGH" },
+                { title: "גיוס צוות לאירוע", priority: "HIGH" },
+                { title: "סגירת לוקיישן", priority: "CRITICAL" },
+                { title: "בניית לו\"ז אירוע", priority: "NORMAL" },
+                { title: "פרסום ושיווק", priority: "NORMAL" },
+                { title: "הזמנת ציוד נדרש", priority: "NORMAL" },
+                { title: "תיאום ספקים", priority: "NORMAL" }
+            ];
 
             // Add default tasks to the new event
             const tasksCollection = collection(db, "events", docRef.id, "tasks");
             const taskPromises = defaultTasks.map(task =>
                 addDoc(tasksCollection, {
                     title: task.title,
-                    priority: task.priority || "NORMAL",
+                    priority: task.priority,
                     status: "TODO",
                     assignee: "",
                     dueDate: "",

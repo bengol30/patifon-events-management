@@ -538,7 +538,137 @@ export default function EventDetailsPage() {
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* ... existing content ... */}
+                {/* Main Content - Tasks */}
+                <div className="lg:col-span-2 space-y-6">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <h2 className="text-xl font-semibold text-gray-800">משימות לביצוע</h2>
+                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-sm font-medium">
+                                {tasks.filter(t => t.status !== 'DONE').length}
+                            </span>
+                        </div>
+                        <button
+                            onClick={() => setShowNewTask(!showNewTask)}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition text-sm font-medium"
+                        >
+                            <Plus size={18} />
+                            משימה חדשה
+                        </button>
+                    </div>
+
+                    {/* Bulk Actions Bar */}
+                    {selectedTasks.size > 0 && (
+                        <div className="bg-indigo-50 p-3 rounded-lg flex items-center justify-between border border-indigo-100 animate-in fade-in slide-in-from-top-2">
+                            <div className="flex items-center gap-2 text-indigo-900 font-medium text-sm">
+                                <CheckSquare size={18} />
+                                <span>{selectedTasks.size} משימות נבחרו</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={confirmBulkDelete}
+                                    className="text-red-600 hover:bg-red-100 px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1"
+                                >
+                                    <Trash2 size={16} />
+                                    מחק נבחרים
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {showNewTask && (
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 mb-4 animate-in fade-in slide-in-from-top-2">
+                            <h3 className="font-medium mb-3">הוספת משימה חדשה</h3>
+                            <form onSubmit={handleAddTask} className="space-y-3">
+                                <input
+                                    type="text"
+                                    placeholder="כותרת המשימה"
+                                    required
+                                    className="w-full p-2 border rounded-lg text-sm"
+                                    value={newTask.title}
+                                    onChange={e => setNewTask({ ...newTask, title: e.target.value })}
+                                />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <select
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        value={newTask.assignee}
+                                        onChange={e => setNewTask({ ...newTask, assignee: e.target.value })}
+                                    >
+                                        <option value="">בחר אחראי...</option>
+                                        {event.team?.map((member, idx) => (
+                                            <option key={idx} value={member.name}>{member.name}</option>
+                                        ))}
+                                    </select>
+                                    <input
+                                        type="date"
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        value={newTask.dueDate}
+                                        onChange={e => setNewTask({ ...newTask, dueDate: e.target.value })}
+                                    />
+                                </div>
+                                <select
+                                    className="w-full p-2 border rounded-lg text-sm"
+                                    value={newTask.priority}
+                                    onChange={e => setNewTask({ ...newTask, priority: e.target.value })}
+                                >
+                                    <option value="NORMAL">רגיל</option>
+                                    <option value="HIGH">גבוה</option>
+                                    <option value="CRITICAL">דחוף מאוד</option>
+                                </select>
+                                <div className="flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowNewTask(false)}
+                                        className="px-3 py-1 text-gray-500 hover:bg-gray-100 rounded-lg text-sm"
+                                    >
+                                        ביטול
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
+                                    >
+                                        שמור משימה
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    )}
+
+                    <div className="space-y-3">
+                        {tasks.length > 0 && (
+                            <div className="flex items-center gap-2 mb-2 px-1">
+                                <button
+                                    onClick={handleSelectAll}
+                                    className="text-gray-500 hover:text-indigo-600 text-sm flex items-center gap-1"
+                                >
+                                    {selectedTasks.size === tasks.length ? <CheckSquare size={16} /> : <Square size={16} />}
+                                    בחר הכל
+                                </button>
+                            </div>
+                        )}
+
+                        {tasks.length === 0 ? (
+                            <p className="text-gray-500 text-center py-8">אין משימות עדיין. צור את המשימה הראשונה!</p>
+                        ) : (
+                            tasks.map((task) => (
+                                <TaskCard
+                                    key={task.id}
+                                    id={task.id}
+                                    title={task.title}
+                                    description={task.description}
+                                    assignee={task.assignee || "לא משויך"}
+                                    status={task.status}
+                                    dueDate={task.dueDate}
+                                    priority={task.priority}
+                                    isSelected={selectedTasks.has(task.id)}
+                                    onSelect={(selected) => handleTaskSelect(task.id, selected)}
+                                    onDelete={() => confirmDeleteTask(task.id)}
+                                    onEdit={() => setEditingTask(task)}
+                                    onStatusChange={(status) => handleStatusChange(task.id, status)}
+                                />
+                            ))
+                        )}
+                    </div>
+                </div>
 
                 {/* Sidebar - Team, Budget & Files */}
                 <div className="space-y-6">
