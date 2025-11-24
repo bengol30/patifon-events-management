@@ -5,6 +5,7 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Music, Disc3 } from "lucide-react";
 
 function LoginForm() {
     const [email, setEmail] = useState("");
@@ -46,40 +47,86 @@ function LoginForm() {
     };
 
     return (
-        <div className="bg-white p-8 rounded-lg shadow-md w-96">
-            <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">התחברות למערכת</h1>
-            {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-            <form onSubmit={handleLogin} className="space-y-4">
+        <div className="bg-white p-10 rounded-2xl vinyl-shadow w-full max-w-md relative overflow-hidden" style={{ border: '3px solid var(--patifon-orange)' }}>
+            {/* Decorative vinyl records */}
+            <div className="absolute -top-10 -right-10 opacity-10">
+                <Disc3 size={120} style={{ color: 'var(--patifon-burgundy)' }} />
+            </div>
+            <div className="absolute -bottom-10 -left-10 opacity-10">
+                <Disc3 size={100} style={{ color: 'var(--patifon-orange)' }} />
+            </div>
+
+            {/* Logo and Title */}
+            <div className="text-center mb-8 relative z-10">
+                <div className="flex justify-center mb-4">
+                    <div className="patifon-gradient p-4 rounded-full">
+                        <Music size={40} className="text-white" />
+                    </div>
+                </div>
+                <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--patifon-burgundy)' }}>
+                    פטיפון
+                </h1>
+                <p className="text-sm" style={{ color: 'var(--patifon-orange)' }}>
+                    מוזיקה מקורית. קצת אחרת.
+                </p>
+            </div>
+
+            {error && (
+                <div className="mb-4 p-3 rounded-lg" style={{ background: '#fee', border: '2px solid #fcc' }}>
+                    <p className="text-red-600 text-sm text-center">{error}</p>
+                </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-5 relative z-10">
                 <div>
-                    <label className="block text-sm font-medium text-gray-700">אימייל</label>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--patifon-burgundy)' }}>
+                        אימייל
+                    </label>
                     <input
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
+                        className="w-full rounded-lg p-3 text-sm focus:outline-none focus:ring-2 transition"
+                        style={{
+                            border: '2px solid var(--patifon-cream-dark)',
+                            background: 'var(--patifon-cream)',
+                            color: 'var(--patifon-burgundy)'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = 'var(--patifon-orange)'}
+                        onBlur={(e) => e.target.style.borderColor = 'var(--patifon-cream-dark)'}
                         required
                     />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700">סיסמה</label>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--patifon-burgundy)' }}>
+                        סיסמה
+                    </label>
                     <input
                         type="password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
+                        className="w-full rounded-lg p-3 text-sm focus:outline-none focus:ring-2 transition"
+                        style={{
+                            border: '2px solid var(--patifon-cream-dark)',
+                            background: 'var(--patifon-cream)',
+                            color: 'var(--patifon-burgundy)'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = 'var(--patifon-orange)'}
+                        onBlur={(e) => e.target.style.borderColor = 'var(--patifon-cream-dark)'}
                         required
                     />
                 </div>
                 <button
                     type="submit"
-                    className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    className="w-full py-3 px-4 rounded-lg text-white font-medium hover:opacity-90 transition vinyl-shadow patifon-gradient"
                 >
-                    התחבר
+                    התחבר למערכת
                 </button>
             </form>
-            <p className="text-center text-sm text-gray-600 mt-4">
+
+            <p className="text-center text-sm mt-6 relative z-10" style={{ color: 'var(--patifon-burgundy)' }}>
                 אין לך חשבון?{" "}
-                <Link href="/signup" className="text-indigo-600 hover:text-indigo-500 font-medium">
+                <Link href="/signup" className="font-bold hover:underline" style={{ color: 'var(--patifon-red)' }}>
                     הירשם כאן
                 </Link>
             </p>
@@ -89,7 +136,20 @@ function LoginForm() {
 
 export default function LoginPage() {
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden" style={{ background: 'var(--patifon-cream)' }}>
+            {/* Background decorative elements */}
+            <div className="absolute inset-0 opacity-5">
+                <div className="absolute top-20 left-20">
+                    <Disc3 size={200} style={{ color: 'var(--patifon-burgundy)' }} />
+                </div>
+                <div className="absolute bottom-20 right-20">
+                    <Disc3 size={250} style={{ color: 'var(--patifon-orange)' }} />
+                </div>
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                    <Disc3 size={300} style={{ color: 'var(--patifon-red)' }} />
+                </div>
+            </div>
+
             <Suspense fallback={<div className="text-center">טוען...</div>}>
                 <LoginForm />
             </Suspense>

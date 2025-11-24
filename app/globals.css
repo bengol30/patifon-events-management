@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Patifon Retro Colors */
+  --patifon-burgundy: #4A1A2C;
+  --patifon-red: #C1272D;
+  --patifon-orange-dark: #E85D2A;
+  --patifon-orange: #F18F3A;
+  --patifon-yellow-orange: #F5B841;
+  --patifon-yellow: #F9D56E;
+  --patifon-cream: #F5E6D3;
+  --patifon-cream-dark: #E8D4BC;
+  
+  --background: #F5E6D3;
+  --foreground: #4A1A2C;
 }
 
 @theme inline {
@@ -10,17 +20,46 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  
+  /* Patifon Custom Colors */
+  --color-patifon-burgundy: var(--patifon-burgundy);
+  --color-patifon-red: var(--patifon-red);
+  --color-patifon-orange-dark: var(--patifon-orange-dark);
+  --color-patifon-orange: var(--patifon-orange);
+  --color-patifon-yellow-orange: var(--patifon-yellow-orange);
+  --color-patifon-yellow: var(--patifon-yellow);
+  --color-patifon-cream: var(--patifon-cream);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Retro gradient backgrounds */
+.patifon-gradient {
+  background: linear-gradient(135deg, 
+    var(--patifon-burgundy) 0%, 
+    var(--patifon-red) 25%, 
+    var(--patifon-orange-dark) 50%, 
+    var(--patifon-orange) 75%, 
+    var(--patifon-yellow-orange) 100%
+  );
+}
+
+.patifon-gradient-warm {
+  background: linear-gradient(135deg, 
+    var(--patifon-orange) 0%, 
+    var(--patifon-yellow-orange) 50%, 
+    var(--patifon-yellow) 100%
+  );
+}
+
+/* Vinyl record effect */
+.vinyl-shadow {
+  box-shadow: 
+    0 2px 4px rgba(74, 26, 44, 0.1),
+    0 4px 8px rgba(74, 26, 44, 0.08),
+    0 8px 16px rgba(74, 26, 44, 0.06);
 }

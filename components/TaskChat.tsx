@@ -100,24 +100,25 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full h-[600px] flex flex-col">
                 {/* Header */}
-                <div className="flex justify-between items-center p-4 border-b border-gray-200">
+                <div className="flex justify-between items-center p-4" style={{ borderBottom: '2px solid var(--patifon-cream-dark)' }}>
                     <div className="flex items-center gap-2">
-                        <MessageCircle className="text-indigo-600" size={24} />
+                        <MessageCircle style={{ color: 'var(--patifon-red)' }} size={24} />
                         <div>
-                            <h3 className="text-lg font-bold text-gray-900">צ'אט הודעות</h3>
-                            <p className="text-sm text-gray-500">{taskTitle}</p>
+                            <h3 className="text-lg font-bold" style={{ color: 'var(--patifon-burgundy)' }}>צ'אט הודעות</h3>
+                            <p className="text-sm" style={{ color: 'var(--patifon-orange)' }}>{taskTitle}</p>
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600 transition"
+                        className="hover:opacity-70 transition"
+                        style={{ color: 'var(--patifon-burgundy)' }}
                     >
                         <X size={24} />
                     </button>
                 </div>
 
                 {/* Messages Area */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+                <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ background: 'var(--patifon-cream)' }}>
                     {loading ? (
                         <div className="text-center text-gray-500 py-8">טוען הודעות...</div>
                     ) : messages.length === 0 ? (
@@ -133,13 +134,14 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                                     className={`flex ${isMyMessage ? "justify-end" : "justify-start"}`}
                                 >
                                     <div
-                                        className={`max-w-[70%] rounded-lg p-3 ${isMyMessage
-                                                ? "bg-indigo-600 text-white"
-                                                : "bg-white text-gray-900 border border-gray-200"
-                                            }`}
+                                        className="max-w-[70%] rounded-lg p-3"
+                                        style={isMyMessage
+                                            ? { background: 'linear-gradient(135deg, var(--patifon-orange), var(--patifon-yellow-orange))', color: 'white' }
+                                            : { background: 'white', color: 'var(--patifon-burgundy)', border: '2px solid var(--patifon-cream-dark)' }
+                                        }
                                     >
                                         {!isMyMessage && (
-                                            <p className="text-xs font-semibold mb-1 text-indigo-600">
+                                            <p className="text-xs font-semibold mb-1" style={{ color: 'var(--patifon-red)' }}>
                                                 {message.senderName}
                                             </p>
                                         )}
@@ -177,7 +179,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                         <button
                             type="submit"
                             disabled={!newMessage.trim()}
-                            className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            className="patifon-gradient text-white px-6 py-3 rounded-lg hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
                             <Send size={18} />
                             שלח
