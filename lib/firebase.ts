@@ -7,7 +7,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyCXfJ1ZOzHDpvgAjsWiTGeBLMwJKLQh7P4",
   authDomain: "patifon-events.firebaseapp.com",
   projectId: "patifon-events",
-  storageBucket: "patifon-events.firebasestorage.app",
+  storageBucket: "patifon-events.appspot.com",
   messagingSenderId: "61725615268",
   appId: "1:61725615268:web:922c1a8b73eaff31143231",
 };

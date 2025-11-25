@@ -22,6 +22,7 @@ export default function NewEventPage() {
         partners: "",
         goal: "",
         budget: "",
+        recurrence: "NONE" as "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
     });
 
     // Redirect if not authenticated
@@ -68,8 +69,17 @@ export default function NewEventPage() {
                 goal: formData.goal,
                 budget: formData.budget,
                 status: "PLANNING",
+                recurrence: formData.recurrence,
                 createdBy: user.uid,
                 members: [user.uid], // Add creator as a member
+                team: [
+                    {
+                        name: user.displayName || user.email?.split('@')[0] || "מנהל",
+                        role: "מנהל אירוע",
+                        email: user.email || "",
+                        userId: user.uid,
+                    }
+                ],
                 createdAt: serverTimestamp(),
                 responsibilities: [],
             };
@@ -159,6 +169,19 @@ export default function NewEventPage() {
                                     onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                                     placeholder="לדוגמה: פארק הזהב"
                                 />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תדירות חוזרת</label>
+                                <select
+                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                    value={formData.recurrence}
+                                    onChange={(e) => setFormData({ ...formData, recurrence: e.target.value as any })}
+                                >
+                                    <option value="NONE">חד פעמי</option>
+                                    <option value="WEEKLY">כל שבוע</option>
+                                    <option value="BIWEEKLY">כל שבועיים</option>
+                                    <option value="MONTHLY">כל חודש</option>
+                                </select>
                             </div>
                         </div>
 

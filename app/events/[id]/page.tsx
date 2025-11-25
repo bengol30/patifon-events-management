@@ -3,18 +3,26 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw, MessageCircle } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw, MessageCircle, User, Clock, Link as LinkIcon, List, Paperclip } from "lucide-react";
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
+import { db, storage } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import TaskChat from "@/components/TaskChat";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
+interface Assignee {
+    name: string;
+    userId?: string;
+}
 
 interface Task {
     id: string;
     title: string;
     description?: string;
     assignee: string;
+    assigneeId?: string;
+    assignees?: Assignee[];
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
@@ -32,6 +40,18 @@ interface BudgetItem {
     invoiceSubmitted: boolean;
 }
 
+interface CustomSection {
+    id?: string;
+    title: string;
+    content: string;
+}
+
+interface InfoBlock {
+    id: string;
+    label: string;
+    value: string;
+}
+
 interface EventData {
     title: string;
     location: string;
@@ -39,11 +59,20 @@ interface EventData {
     endTime: any;
     description: string;
     status: string;
-    team: { name: string; role: string; email?: string }[];
+    team: { name: string; role: string; email?: string; userId?: string }[];
     participantsCount?: string;
     partners?: string;
     goal?: string;
     budget?: string;
+    durationHours?: number;
+    recurrence?: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
+    contactPerson?: {
+        name?: string;
+        phone?: string;
+        email?: string;
+    };
+    customSections?: CustomSection[];
+    infoBlocks?: InfoBlock[];
 }
 
 export default function EventDetailsPage() {
@@ -58,6 +87,7 @@ export default function EventDetailsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [copied, setCopied] = useState(false);
+    const [copiedRegister, setCopiedRegister] = useState(false);
 
     // Suggestions State
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -70,14 +100,27 @@ export default function EventDetailsPage() {
         title: "",
         description: "",
         assignee: "",
+        assigneeId: "",
+        assignees: [] as Assignee[],
         dueDate: "",
         priority: "NORMAL",
     });
+    const [newTaskFiles, setNewTaskFiles] = useState<File[]>([]);
 
     // Edit Task State
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [editingStatusTask, setEditingStatusTask] = useState<Task | null>(null);
     const [editingDateTask, setEditingDateTask] = useState<Task | null>(null);
+    const [taggingTask, setTaggingTask] = useState<Task | null>(null);
+    const [tagSelection, setTagSelection] = useState<Assignee[]>([]);
+
+    const sanitizeAssigneesForWrite = (arr: Assignee[] = []) =>
+        (arr || [])
+            .filter(a => (a.name || "").trim())
+            .map(a => ({
+                name: (a.name || "").trim(),
+                ...(a.userId ? { userId: a.userId } : {})
+            }));
 
 
     // New Team Member State
@@ -111,6 +154,163 @@ export default function EventDetailsPage() {
     // Chat State
     const [chatTask, setChatTask] = useState<Task | null>(null);
 
+    // Event edit state
+    const [isEditEventOpen, setIsEditEventOpen] = useState(false);
+    const generateId = () =>
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : Math.random().toString(36).slice(2);
+
+    const [eventForm, setEventForm] = useState({
+        title: "",
+        location: "",
+        description: "",
+        participantsCount: "",
+        partners: "",
+        goal: "",
+        budget: "",
+        startTime: "",
+        durationHours: "",
+        status: "",
+        contactName: "",
+        contactPhone: "",
+        contactEmail: "",
+        recurrence: "NONE" as "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+        customSections: [] as CustomSection[],
+    });
+
+    const [editingInfoBlockId, setEditingInfoBlockId] = useState<string | null>(null);
+    const [infoBlockDraft, setInfoBlockDraft] = useState<InfoBlock | null>(null);
+    useEffect(() => {
+        if (taggingTask) {
+            setTagSelection(taggingTask.assignees || []);
+        }
+    }, [taggingTask]);
+
+    const handleAddCustomSection = () => {
+        setEventForm(prev => ({
+            ...prev,
+            customSections: [...(prev.customSections || []), { title: "", content: "" }]
+        }));
+    };
+
+    const handleUpdateCustomSection = (index: number, field: "title" | "content", value: string) => {
+        setEventForm(prev => {
+            const sections = [...(prev.customSections || [])];
+            sections[index] = { ...sections[index], [field]: value };
+            return { ...prev, customSections: sections };
+        });
+    };
+
+    const handleRemoveCustomSection = (index: number) => {
+        setEventForm(prev => {
+            const sections = [...(prev.customSections || [])];
+            sections.splice(index, 1);
+            return { ...prev, customSections: sections };
+        });
+    };
+
+    const handleStartInfoBlockEdit = (block: InfoBlock) => {
+        setEditingInfoBlockId(block.id);
+        setInfoBlockDraft({ ...block });
+    };
+
+    const handleInfoBlockDraftChange = (field: "label" | "value", value: string) => {
+        setInfoBlockDraft(prev => (prev ? { ...prev, [field]: value } : prev));
+    };
+
+    const handleCancelInfoBlockEdit = () => {
+        setEditingInfoBlockId(null);
+        setInfoBlockDraft(null);
+    };
+
+    const handleSaveInfoBlock = async () => {
+        if (!db || !event || !infoBlockDraft || !editingInfoBlockId) return;
+        const label = (infoBlockDraft.label || "").trim();
+        const value = (infoBlockDraft.value || "").trim();
+        if (!label || !value) {
+            alert("לא ניתן לשמור סעיף ללא כותרת ותוכן.");
+            return;
+        }
+
+        try {
+            const updatedBlocks = (event.infoBlocks || []).map(block =>
+                block.id === editingInfoBlockId ? { ...block, label, value } : block
+            );
+            await updateDoc(doc(db, "events", id), { infoBlocks: updatedBlocks });
+            setEditingInfoBlockId(null);
+            setInfoBlockDraft(null);
+        } catch (err) {
+            console.error("Error updating info block:", err);
+            alert("שגיאה בעדכון הסעיף");
+        }
+    };
+
+    const handleDeleteInfoBlock = async (blockId: string) => {
+        if (!db || !event) return;
+        const shouldDelete = confirm("למחוק את הסעיף הזה?");
+        if (!shouldDelete) return;
+
+        try {
+            const updatedBlocks = (event.infoBlocks || []).filter(block => block.id !== blockId);
+            await updateDoc(doc(db, "events", id), { infoBlocks: updatedBlocks });
+            if (editingInfoBlockId === blockId) {
+                setEditingInfoBlockId(null);
+                setInfoBlockDraft(null);
+            }
+        } catch (err) {
+            console.error("Error deleting info block:", err);
+            alert("שגיאה במחיקת הסעיף");
+        }
+    };
+
+    const handleToggleAssigneeSelection = (assignee: Assignee, target: "new" | "edit" | "tag") => {
+        if (target === "new") {
+            setNewTask(prev => {
+                const exists = prev.assignees.some(a => a.name === assignee.name);
+                const next = exists
+                    ? prev.assignees.filter(a => a.name !== assignee.name)
+                    : [...prev.assignees, assignee];
+                return { ...prev, assignees: next, assignee: next[0]?.name || "", assigneeId: next[0]?.userId || "" };
+            });
+            return;
+        }
+
+        if (target === "edit" && editingTask) {
+            const exists = editingTask.assignees?.some(a => a.name === assignee.name);
+            const next = exists
+                ? (editingTask.assignees || []).filter(a => a.name !== assignee.name)
+                : ([...(editingTask.assignees || []), assignee]);
+            setEditingTask({ ...editingTask, assignees: next, assignee: next[0]?.name || "", assigneeId: next[0]?.userId || "" });
+            return;
+        }
+
+        if (target === "tag") {
+            setTagSelection(prev => {
+                const exists = prev.some(a => a.name === assignee.name);
+                return exists ? prev.filter(a => a.name !== assignee.name) : [...prev, assignee];
+            });
+        }
+    };
+
+    const handleSaveTagging = async () => {
+        if (!db || !taggingTask) return;
+        const cleanAssignees = sanitizeAssigneesForWrite(tagSelection);
+        const primary = cleanAssignees[0];
+        try {
+            await updateDoc(doc(db, "events", id, "tasks", taggingTask.id), {
+                assignees: cleanAssignees,
+                assignee: primary?.name || "",
+                assigneeId: primary?.userId || null,
+            });
+            setTaggingTask(null);
+            setTagSelection([]);
+        } catch (err) {
+            console.error("Error updating assignees:", err);
+            alert("שגיאה בעדכון המוקצים");
+        }
+    };
+
     useEffect(() => {
         if (!id || !db) return;
 
@@ -131,7 +331,13 @@ export default function EventDetailsPage() {
         const unsubscribeTasks = onSnapshot(qTasks, (querySnapshot) => {
             const tasksData: Task[] = [];
             querySnapshot.forEach((doc) => {
-                tasksData.push({ id: doc.id, ...doc.data() } as Task);
+                const data = doc.data() as any;
+                tasksData.push({
+                    id: doc.id,
+                    ...data,
+                    assignee: data.assignee || (data.assignees && data.assignees[0]?.name) || "",
+                    assignees: data.assignees || (data.assignee ? [{ name: data.assignee, userId: data.assigneeId }] : []),
+                } as Task);
             });
             setTasks(tasksData);
         });
@@ -152,19 +358,81 @@ export default function EventDetailsPage() {
         };
     }, [id]);
 
+    useEffect(() => {
+        if (!event) return;
+
+        const toInputValue = (value: any) => {
+            if (!value) return "";
+            const date = value.seconds ? new Date(value.seconds * 1000) : new Date(value);
+            const offset = date.getTimezoneOffset();
+            return new Date(date.getTime() - offset * 60 * 1000).toISOString().slice(0, 16);
+        };
+
+        setEventForm({
+            title: event.title || "",
+            location: event.location || "",
+            description: event.description || "",
+            participantsCount: event.participantsCount || "",
+            partners: event.partners || "",
+            goal: event.goal || "",
+            budget: event.budget || "",
+            startTime: toInputValue(event.startTime),
+            durationHours: event.durationHours ? String(event.durationHours) : "",
+            status: event.status || "",
+            recurrence: (event.recurrence as any) || "NONE",
+            contactName: event.contactPerson?.name || "",
+            contactPhone: event.contactPerson?.phone || "",
+            contactEmail: event.contactPerson?.email || "",
+            customSections: event.customSections || [],
+        });
+    }, [event]);
+
+    const uploadTaskFiles = async (taskId: string, taskTitle: string, files: File[]) => {
+        if (!storage || !db || files.length === 0) return;
+        const uploadPromises = files.map(async (file) => {
+            const path = `events/${id}/tasks/${taskId}/${Date.now()}-${file.name}`;
+            const storageRef = ref(storage, path);
+            await uploadBytes(storageRef, file);
+            const url = await getDownloadURL(storageRef);
+            const fileData = {
+                name: file.name,
+                url,
+                storagePath: path,
+                taskId,
+                taskTitle,
+                createdAt: serverTimestamp(),
+            };
+            await Promise.all([
+                addDoc(collection(db, "events", id, "tasks", taskId, "files"), fileData),
+                addDoc(collection(db, "events", id, "files"), fileData),
+            ]);
+        });
+        await Promise.all(uploadPromises);
+    };
+
     const handleAddTask = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db || !user) return;
 
         try {
-            await addDoc(collection(db, "events", id, "tasks"), {
+            const cleanAssignees = sanitizeAssigneesForWrite(newTask.assignees);
+            const primary = cleanAssignees[0];
+            const docRef = await addDoc(collection(db, "events", id, "tasks"), {
                 ...newTask,
+                filesCount: newTaskFiles.length || 0,
+                assignees: cleanAssignees,
+                assignee: primary?.name || newTask.assignee,
+                assigneeId: primary?.userId || newTask.assigneeId || null,
                 status: "TODO",
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
             });
+            if (newTaskFiles.length) {
+                await uploadTaskFiles(docRef.id, newTask.title, newTaskFiles);
+            }
             setShowNewTask(false);
-            setNewTask({ title: "", description: "", assignee: "", dueDate: "", priority: "NORMAL" });
+            setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL" });
+            setNewTaskFiles([]);
         } catch (err) {
             console.error("Error adding task:", err);
             alert("שגיאה בהוספת משימה");
@@ -177,16 +445,20 @@ export default function EventDetailsPage() {
 
         try {
             const taskRef = doc(db, "events", id, "tasks", editingTask.id);
-            await updateDoc(taskRef, {
+            const cleanAssignees = sanitizeAssigneesForWrite(editingTask.assignees || []);
+            const updateData: any = {
                 title: editingTask.title,
                 description: editingTask.description || "",
-                assignee: editingTask.assignee || "",
+                assignee: cleanAssignees[0]?.name || editingTask.assignee || "",
+                assigneeId: cleanAssignees[0]?.userId || editingTask.assigneeId || null,
+                assignees: cleanAssignees,
                 dueDate: editingTask.dueDate,
                 priority: editingTask.priority,
                 status: editingTask.status,
                 currentStatus: editingTask.currentStatus || "",
                 nextStep: editingTask.nextStep || "",
-            });
+            };
+            await updateDoc(taskRef, updateData);
             setEditingTask(null);
         } catch (err) {
             console.error("Error updating task:", err);
@@ -263,6 +535,55 @@ export default function EventDetailsPage() {
         });
     };
 
+    const handleSaveEventDetails = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !event) return;
+
+        try {
+            const startTimeValue = eventForm.startTime ? new Date(eventForm.startTime) : event.startTime;
+            const duration = eventForm.durationHours ? parseFloat(eventForm.durationHours) : undefined;
+
+            let startDateForDuration: Date | null = null;
+            if (eventForm.startTime) {
+                startDateForDuration = new Date(eventForm.startTime);
+            } else if (event?.startTime?.seconds) {
+                startDateForDuration = new Date(event.startTime.seconds * 1000);
+            }
+
+            const calculatedEnd = duration && startDateForDuration && !isNaN(duration)
+                ? new Date(startDateForDuration.getTime() + duration * 60 * 60 * 1000)
+                : event.endTime;
+
+            await updateDoc(doc(db, "events", id), {
+                title: eventForm.title,
+                location: eventForm.location,
+                description: eventForm.description,
+                participantsCount: eventForm.participantsCount,
+                partners: eventForm.partners,
+                goal: eventForm.goal,
+                budget: eventForm.budget,
+                status: eventForm.status || event.status,
+                recurrence: eventForm.recurrence || "NONE",
+                startTime: startTimeValue,
+                endTime: calculatedEnd,
+                durationHours: duration && !isNaN(duration) ? duration : null,
+                contactPerson: {
+                    name: eventForm.contactName,
+                    phone: eventForm.contactPhone,
+                    email: eventForm.contactEmail,
+                },
+                customSections: (eventForm.customSections || []).map(section => ({
+                    title: section.title,
+                    content: section.content,
+                })),
+            });
+            setIsEditEventOpen(false);
+        } catch (err) {
+            console.error("Error updating event details:", err);
+            alert("שגיאה בעדכון פרטי האירוע");
+        }
+    };
+
     const executeDelete = async () => {
         if (!db) return;
 
@@ -333,6 +654,18 @@ export default function EventDetailsPage() {
         } catch (err) {
             console.error("Failed to copy:", err);
             alert("לא הצלחנו להעתיק את הקישור. נסה להעתיק ידנית מהדפדפן.");
+        }
+    };
+
+    const copyRegisterLink = async () => {
+        try {
+            const registerLink = `${window.location.origin}/events/${id}/register`;
+            await navigator.clipboard.writeText(registerLink);
+            setCopiedRegister(true);
+            setTimeout(() => setCopiedRegister(false), 2000);
+        } catch (err) {
+            console.error("Failed to copy register link:", err);
+            alert("לא הצלחנו להעתיק את הקישור לטופס ההרשמה.");
         }
     };
 
@@ -457,6 +790,227 @@ export default function EventDetailsPage() {
                 </div>
             )}
 
+            {/* Event Edit Modal */}
+            {isEditEventOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold">עריכת פרטי האירוע</h3>
+                            <button onClick={() => setIsEditEventOpen(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleSaveEventDetails} className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
+                                    <input
+                                        type="text"
+                                        value={eventForm.title}
+                                        onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מיקום</label>
+                                    <input
+                                        type="text"
+                                        value={eventForm.location}
+                                        onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תאריך ושעת האירוע</label>
+                                    <input
+                                        type="datetime-local"
+                                        value={eventForm.startTime}
+                                        onChange={(e) => setEventForm({ ...eventForm, startTime: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">משך האירוע (בשעות)</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.5"
+                                        value={eventForm.durationHours}
+                                        onChange={(e) => setEventForm({ ...eventForm, durationHours: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        placeholder="לדוגמה: 3.5"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תדירות חוזרת</label>
+                                    <select
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        value={eventForm.recurrence}
+                                        onChange={(e) => setEventForm({ ...eventForm, recurrence: e.target.value as any })}
+                                    >
+                                        <option value="NONE">חד פעמי</option>
+                                        <option value="WEEKLY">כל שבוע</option>
+                                        <option value="BIWEEKLY">כל שבועיים</option>
+                                        <option value="MONTHLY">כל חודש</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מספר משתתפים</label>
+                                    <input
+                                        type="text"
+                                        value={eventForm.participantsCount}
+                                        onChange={(e) => setEventForm({ ...eventForm, participantsCount: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">שותפים</label>
+                                    <input
+                                        type="text"
+                                        value={eventForm.partners}
+                                        onChange={(e) => setEventForm({ ...eventForm, partners: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מטרה</label>
+                                    <textarea
+                                        rows={2}
+                                        value={eventForm.goal}
+                                        onChange={(e) => setEventForm({ ...eventForm, goal: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תקציב</label>
+                                    <input
+                                        type="text"
+                                        value={eventForm.budget}
+                                        onChange={(e) => setEventForm({ ...eventForm, budget: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תיאור</label>
+                                <textarea
+                                    rows={3}
+                                    value={eventForm.description}
+                                    onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
+                                    className="w-full p-2 border rounded-lg text-sm"
+                                />
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">איש קשר - שם</label>
+                                    <input
+                                        type="text"
+                                        value={eventForm.contactName}
+                                        onChange={(e) => setEventForm({ ...eventForm, contactName: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        placeholder="לדוגמה: רוני כהן"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">טלפון</label>
+                                    <input
+                                        type="tel"
+                                        value={eventForm.contactPhone}
+                                        onChange={(e) => setEventForm({ ...eventForm, contactPhone: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        placeholder="050-0000000"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">אימייל</label>
+                                    <input
+                                        type="email"
+                                        value={eventForm.contactEmail}
+                                        onChange={(e) => setEventForm({ ...eventForm, contactEmail: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        placeholder="contact@patifon.co.il"
+                                    />
+                                </div>
+                            </div>
+                            <div className="pt-2 border-t border-gray-100">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-gray-800">סעיפים נוספים</p>
+                                        <p className="text-xs text-gray-500">הוסף מידע נוסף שרלוונטי לצוות (קווים מנחים, דרישות מיוחדות ועוד)</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleAddCustomSection}
+                                        className="flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                                    >
+                                        <Plus size={16} />
+                                        הוסף סעיף
+                                    </button>
+                                </div>
+                                {eventForm.customSections && eventForm.customSections.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {eventForm.customSections.map((section, index) => (
+                                            <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <p className="text-xs font-semibold text-gray-500">סעיף {index + 1}</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveCustomSection(index)}
+                                                        className="text-gray-400 hover:text-red-500"
+                                                        title="הסר סעיף"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    value={section.title}
+                                                    onChange={(e) => handleUpdateCustomSection(index, "title", e.target.value)}
+                                                    className="w-full p-2 border rounded-lg text-sm mb-2"
+                                                    placeholder="כותרת הסעיף"
+                                                />
+                                                <textarea
+                                                    rows={3}
+                                                    value={section.content}
+                                                    onChange={(e) => handleUpdateCustomSection(index, "content", e.target.value)}
+                                                    className="w-full p-2 border rounded-lg text-sm"
+                                                    placeholder="תוכן או הוראות רלוונטיות..."
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500">עדיין לא הוספת סעיפים מותאמים.</p>
+                                )}
+                            </div>
+                            <div className="flex justify-end gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditEventOpen(false)}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+                                >
+                                    ביטול
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+                                >
+                                    שמור
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
             {/* Task Chat Modal */}
             {chatTask && (
                 <TaskChat
@@ -465,6 +1019,53 @@ export default function EventDetailsPage() {
                     taskTitle={chatTask.title}
                     onClose={() => setChatTask(null)}
                 />
+            )}
+
+            {/* Assignee Tagging Modal */}
+            {taggingTask && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold">תיוג אחראים למשימה</h3>
+                            <button onClick={() => { setTaggingTask(null); setTagSelection([]); }} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-4">בחרו את אנשי הצוות למשימה "{taggingTask.title}". ניתן לבחור יותר מאחד.</p>
+                        <div className="flex flex-wrap gap-2 mb-4">
+                            {event.team?.map((member, idx) => {
+                                const checked = tagSelection.some(a => a.name === member.name);
+                                return (
+                                    <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId }, "tag")}
+                                        className={`px-3 py-1 rounded-full text-sm border transition ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                    >
+                                        {member.name}
+                                    </button>
+                                );
+                            })}
+                            {(!event.team || event.team.length === 0) && (
+                                <span className="text-sm text-gray-500">אין חברי צוות זמינים</span>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => { setTaggingTask(null); setTagSelection([]); }}
+                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+                            >
+                                ביטול
+                            </button>
+                            <button
+                                onClick={handleSaveTagging}
+                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+                            >
+                                שמור
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Edit Task Modal */}
@@ -499,17 +1100,30 @@ export default function EventDetailsPage() {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">אחראי</label>
-                                    <select
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        value={editingTask.assignee}
-                                        onChange={e => setEditingTask({ ...editingTask, assignee: e.target.value })}
-                                    >
-                                        <option value="">לא משויך</option>
-                                        {event.team?.map((member, idx) => (
-                                            <option key={idx} value={member.name}>{member.name}</option>
-                                        ))}
-                                    </select>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">אחראים</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {event.team?.map((member, idx) => {
+                                            const checked = editingTask.assignees?.some(a => a.name === member.name);
+                                            return (
+                                                <label
+                                                    key={idx}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                                    style={{ minWidth: '120px' }}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        className="accent-white w-4 h-4"
+                                                        checked={checked}
+                                                        onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId }, "edit")}
+                                                    />
+                                                    {member.name}
+                                                </label>
+                                            );
+                                        })}
+                                        {(!event.team || event.team.length === 0) && (
+                                            <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
@@ -597,6 +1211,12 @@ export default function EventDetailsPage() {
                                     {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' }) : ""}
                                 </span>
                             </div>
+                            {event.durationHours && (
+                                <div className="flex items-center gap-1">
+                                    <Clock size={16} />
+                                    <span>משך משוער: {event.durationHours} שעות</span>
+                                </div>
+                            )}
                             {event.participantsCount && (
                                 <div className="flex items-center gap-1">
                                     <Users size={16} />
@@ -612,7 +1232,15 @@ export default function EventDetailsPage() {
                         </div>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap justify-end">
+                            <button
+                                onClick={() => setIsEditEventOpen(true)}
+                                className="p-2 rounded-full transition hover:bg-indigo-50"
+                                style={{ color: 'var(--patifon-burgundy)', border: '1px solid var(--patifon-orange)' }}
+                                title="ערוך פרטי אירוע"
+                            >
+                                <Edit2 size={18} />
+                            </button>
                             <button
                                 onClick={copyInviteLink}
                                 className={`p-2 rounded-full transition vinyl-shadow text-white ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"
@@ -630,13 +1258,187 @@ export default function EventDetailsPage() {
                                 <Trash2 size={20} />
                             </button>
                         </div>
+                        <div className="flex flex-wrap gap-2 justify-end">
+                            <button
+                                onClick={() => router.push(`/events/${id}/registrants`)}
+                                className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                                style={{ background: 'var(--patifon-burgundy)' }}
+                            >
+                                נרשמים לאירוע
+                            </button>
+                            <button
+                                onClick={() => router.push(`/events/${id}/register`)}
+                                className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"
+                                style={{ border: '2px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                            >
+                                <LinkIcon size={16} />
+                                טופס רישום לקהל
+                            </button>
+                            <button
+                                onClick={copyRegisterLink}
+                                className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${copiedRegister ? "bg-green-600 text-white" : "bg-gray-100 text-gray-700"}`}
+                                title="העתק קישור לטופס רישום"
+                            >
+                                {copiedRegister ? <Check size={16} /> : <List size={16} />}
+                                {copiedRegister ? "קישור הועתק" : "העתק קישור"}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
-                    {/* ... existing content ... */}
+                    <div className="space-y-4">
+                        <div>
+                            <p className="text-xs font-semibold text-gray-500 mb-1">סטטוס</p>
+                            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
+                                <Square size={14} />
+                                {event.status || "לא הוגדר"}
+                            </span>
+                        </div>
+                        <div>
+                            <p className="text-xs font-semibold text-gray-500 mb-1">תאריך ושעה</p>
+                            <p className="text-sm text-gray-700">
+                                {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "לא הוגדר"}
+                            </p>
+                            {event.durationHours && (
+                                <p className="text-xs text-gray-500 mt-1">משך משוער: {event.durationHours} שעות</p>
+                            )}
+                            {event.recurrence && event.recurrence !== "NONE" && (
+                                <p className="text-xs text-indigo-600 mt-1">
+                                    תדירות: {event.recurrence === "WEEKLY" ? "כל שבוע" :
+                                        event.recurrence === "BIWEEKLY" ? "כל שבועיים" :
+                                            "כל חודש"}
+                                </p>
+                            )}
+                        </div>
+                        {event.description && (
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 mb-1">תיאור קצר</p>
+                                <p className="text-sm text-gray-700 leading-relaxed">{event.description}</p>
+                            </div>
+                        )}
+                    </div>
+                    <div className="space-y-4">
+                        {event.contactPerson?.name && (
+                            <div className="flex items-center gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
+                                    <User size={20} />
+                                </div>
+                                <div className="text-sm">
+                                    <p className="font-semibold text-gray-900">איש קשר: {event.contactPerson.name}</p>
+                                    <div className="text-gray-600 flex flex-col">
+                                        {event.contactPerson.phone && <span>טלפון: {event.contactPerson.phone}</span>}
+                                        {event.contactPerson.email && <span>אימייל: {event.contactPerson.email}</span>}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </header>
+
+            {(event.infoBlocks?.length || event.customSections?.length) && (
+                <div className="mb-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <FileText size={18} className="text-indigo-600" />
+                        מידע נוסף על האירוע
+                    </h3>
+                    {event.infoBlocks && event.infoBlocks.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            {event.infoBlocks.map((block) => {
+                                const isEditing = editingInfoBlockId === block.id;
+                                return (
+                                    <div
+                                        key={block.id}
+                                        className={`p-4 border border-gray-100 rounded-lg bg-gray-50 relative ${!isEditing ? "cursor-pointer group" : ""}`}
+                                        onClick={() => !isEditing && handleStartInfoBlockEdit(block)}
+                                    >
+                                        {!isEditing ? (
+                                            <>
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div>
+                                                        <p className="text-xs font-semibold text-gray-500 mb-1">{block.label}</p>
+                                                        <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{block.value}</p>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteInfoBlock(block.id);
+                                                        }}
+                                                        className="text-gray-400 hover:text-red-500 transition"
+                                                        title="מחק סעיף"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                                <p className="text-[11px] text-indigo-600 mt-2 opacity-0 group-hover:opacity-100 transition">
+                                                    לחצו כדי לערוך את הסעיף
+                                                </p>
+                                            </>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <div className="flex items-start justify-between">
+                                                    <p className="text-xs font-semibold text-gray-500">עריכת סעיף</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteInfoBlock(block.id)}
+                                                        className="text-gray-400 hover:text-red-500 transition"
+                                                        title="מחק סעיף"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    value={infoBlockDraft?.label || ""}
+                                                    onChange={(e) => handleInfoBlockDraftChange("label", e.target.value)}
+                                                    className="w-full p-2 border rounded-lg text-sm"
+                                                    placeholder="כותרת הסעיף"
+                                                    autoFocus
+                                                />
+                                                <textarea
+                                                    rows={2}
+                                                    value={infoBlockDraft?.value || ""}
+                                                    onChange={(e) => handleInfoBlockDraftChange("value", e.target.value)}
+                                                    className="w-full p-2 border rounded-lg text-sm"
+                                                    placeholder="תוכן הסעיף"
+                                                />
+                                                <div className="flex justify-end gap-2 pt-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleCancelInfoBlockEdit}
+                                                        className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                                                    >
+                                                        ביטול
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSaveInfoBlock}
+                                                        className="px-3 py-1 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                                    >
+                                                        שמור
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                    {event.customSections && event.customSections.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {event.customSections.map((section, idx) => (
+                                <div key={idx} className="p-4 border border-gray-100 rounded-lg bg-gray-50">
+                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">{section.title || `סעיף ${idx + 1}`}</h4>
+                                    <p className="text-sm text-gray-600 whitespace-pre-wrap">{section.content}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Suggestions Modal */}
@@ -737,22 +1539,54 @@ export default function EventDetailsPage() {
                                     value={newTask.title}
                                     onChange={e => setNewTask({ ...newTask, title: e.target.value })}
                                 />
-                                <div className="grid grid-cols-2 gap-3">
-                                    <select
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-semibold text-gray-600">אחראים</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {event.team?.map((member, idx) => {
+                                                const checked = newTask.assignees.some(a => a.name === member.name);
+                                                return (
+                                                    <label
+                                                        key={idx}
+                                                        className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                                        style={{ minWidth: '120px' }}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-white w-4 h-4"
+                                                            checked={checked}
+                                                            onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId }, "new")}
+                                                        />
+                                                        {member.name}
+                                                    </label>
+                                                );
+                                            })}
+                                            {(!event.team || event.team.length === 0) && (
+                                                <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                                        <div className="flex items-center gap-2 border rounded-lg px-2 py-1.5 bg-white">
+                                            <Clock size={16} className="text-gray-500 shrink-0" />
+                                            <input
+                                                type="date"
+                                                className="w-full text-sm focus:outline-none"
+                                                value={newTask.dueDate}
+                                                onChange={e => setNewTask({ ...newTask, dueDate: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תיאור המשימה</label>
+                                    <textarea
+                                        rows={3}
                                         className="w-full p-2 border rounded-lg text-sm"
-                                        value={newTask.assignee}
-                                        onChange={e => setNewTask({ ...newTask, assignee: e.target.value })}
-                                    >
-                                        <option value="">בחר אחראי...</option>
-                                        {event.team?.map((member, idx) => (
-                                            <option key={idx} value={member.name}>{member.name}</option>
-                                        ))}
-                                    </select>
-                                    <input
-                                        type="date"
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        value={newTask.dueDate}
-                                        onChange={e => setNewTask({ ...newTask, dueDate: e.target.value })}
+                                        placeholder="מה צריך לעשות? ציינו פרטים חשובים, קישורים או בקשות מיוחדות."
+                                        value={newTask.description}
+                                        onChange={e => setNewTask({ ...newTask, description: e.target.value })}
                                     />
                                 </div>
                                 <select
@@ -764,6 +1598,24 @@ export default function EventDetailsPage() {
                                     <option value="HIGH">גבוה</option>
                                     <option value="CRITICAL">דחוף מאוד</option>
                                 </select>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                                        <Paperclip size={16} />
+                                        צרף קבצים למשימה (אופציונלי)
+                                    </label>
+                                    <input
+                                        type="file"
+                                        multiple
+                                        onChange={(e) => {
+                                            const files = e.target.files ? Array.from(e.target.files) : [];
+                                            setNewTaskFiles(files);
+                                        }}
+                                        className="w-full text-sm text-gray-700"
+                                    />
+                                    {newTaskFiles.length > 0 && (
+                                        <p className="text-xs text-gray-500 mt-1">{newTaskFiles.length} קבצים יועלו אחרי שמירה</p>
+                                    )}
+                                </div>
                                 <div className="flex justify-end gap-2">
                                     <button
                                         type="button"
@@ -798,6 +1650,7 @@ export default function EventDetailsPage() {
                                         currentStatus={task.currentStatus}
                                         nextStep={task.nextStep}
                                         assignee={task.assignee || "לא משויך"}
+                                        assignees={task.assignees}
                                         status={task.status}
                                         dueDate={task.dueDate}
                                         priority={task.priority}
@@ -808,6 +1661,10 @@ export default function EventDetailsPage() {
                                         hasUnreadMessages={hasUnread}
                                         onEditStatus={() => setEditingStatusTask(task)}
                                         onEditDate={() => setEditingDateTask(task)}
+                                        onManageAssignees={() => {
+                                            setTaggingTask(task);
+                                            setTagSelection(task.assignees || []);
+                                        }}
                                     />
                                 );
                             })

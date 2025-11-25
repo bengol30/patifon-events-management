@@ -45,7 +45,8 @@ export default function JoinEventPage() {
                     team: arrayUnion({
                         name: user.displayName || user.email?.split('@')[0] || "משתמש",
                         role: "חבר צוות",
-                        email: user.email || ""
+                        email: user.email || "",
+                        userId: user.uid
                     })
                 });
 

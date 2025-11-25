@@ -1,18 +1,27 @@
 "use client";
 
 import { useAuth } from "@/context/AuthContext";
-import { useRouter, useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
 import Link from "next/link";
 import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send } from "lucide-react";
+import { storage } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
+interface Assignee {
+    name: string;
+    userId?: string;
+}
 
 interface Task {
     id: string;
     title: string;
     description?: string;
     assignee: string;
+    assigneeId?: string;
+    assignees?: Assignee[];
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
@@ -22,12 +31,21 @@ interface Task {
     eventTitle?: string;
 }
 
+interface EventTeamMember {
+    name: string;
+    role: string;
+    email?: string;
+    userId?: string;
+}
+
 interface ChatMessage {
     id: string;
     text: string;
-    senderId: string;
+    senderId?: string;
+    senderUid?: string;
     senderName: string;
-    createdAt: any;
+    createdAt?: any;
+    timestamp?: any;
 }
 
 export default function TaskDetailPage() {
@@ -35,12 +53,25 @@ export default function TaskDetailPage() {
     const router = useRouter();
     const params = useParams();
     const taskId = params?.id as string;
+    const searchParams = useSearchParams();
+    const hintedEventId = searchParams?.get("eventId") || null;
+    const focusSection = searchParams?.get("focus");
+    const assigneeSectionRef = useRef<HTMLDivElement | null>(null);
 
     const [task, setTask] = useState<Task | null>(null);
     const [loadingTask, setLoadingTask] = useState(true);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [newMessage, setNewMessage] = useState("");
     const [error, setError] = useState("");
+    const [eventTeam, setEventTeam] = useState<EventTeamMember[]>([]);
+    const [attachments, setAttachments] = useState<any[]>([]);
+    const [uploading, setUploading] = useState(false);
+    const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+
+    const normalizeAssignees = (data: any): Assignee[] => {
+        if (!data) return [];
+        return data.assignees || (data.assignee ? [{ name: data.assignee, userId: data.assigneeId }] : []);
+    };
 
     // We need to find the eventId for this task since tasks are subcollections of events.
     // In a real app, we might pass eventId in query params or have a global tasks index.
@@ -69,34 +100,64 @@ export default function TaskDetailPage() {
             // Strategy: We'll fetch all events and look for the task. 
             // Note: This is inefficient for production but works for this MVP phase.
             try {
-                // We can't easily do collectionGroup query for a single doc ID without an index or knowing the parent.
-                // Let's try to get the task from the URL query param if available, otherwise search.
-                // Actually, let's just search all events for now.
-
-                // Optimization: If we had a global 'tasks' collection that points to the real location, that would be best.
-                // For now, let's iterate events (assuming not too many events).
-
-                const { collection, getDocs } = await import("firebase/firestore");
-                const eventsRef = collection(db, "events");
-                const eventsSnap = await getDocs(eventsRef);
+                const fetchByEventId = async (eventId: string) => {
+                    const taskRef = doc(db, "events", eventId, "tasks", taskId);
+                    const taskSnap = await getDoc(taskRef);
+                    if (!taskSnap.exists()) return null;
+                    const eventDoc = await getDoc(doc(db, "events", eventId));
+                    if (!eventDoc.exists()) return null;
+                    const eventData = eventDoc.data();
+                    const taskData = taskSnap.data();
+                    return {
+                        task: {
+                            id: taskSnap.id,
+                            ...taskData,
+                            assignee: taskData.assignee || normalizeAssignees(taskData)[0]?.name || "",
+                            assignees: normalizeAssignees(taskData),
+                            eventId
+                        } as Task,
+                        eventTitle: (eventData as any).title,
+                        eventTeam: ((eventData as any).team as EventTeamMember[]) || [],
+                    };
+                };
 
                 let foundTask: Task | null = null;
                 let foundEventId = "";
                 let foundEventTitle = "";
+                let foundEventTeam: EventTeamMember[] = [];
 
-                for (const eventDoc of eventsSnap.docs) {
-                    const taskRef = doc(db, "events", eventDoc.id, "tasks", taskId);
-                    const taskSnap = await getDoc(taskRef);
-                    if (taskSnap.exists()) {
-                        foundTask = { id: taskSnap.id, ...taskSnap.data(), eventId: eventDoc.id } as Task;
-                        foundEventId = eventDoc.id;
-                        foundEventTitle = eventDoc.data().title;
-                        break;
+                // Try hinted eventId first (passed from card)
+                if (hintedEventId) {
+                    const res = await fetchByEventId(hintedEventId);
+                    if (res) {
+                        foundTask = res.task;
+                        foundEventId = hintedEventId;
+                        foundEventTitle = res.eventTitle;
+                        foundEventTeam = res.eventTeam;
+                    }
+                }
+
+                // Fallback: iterate events (legacy behavior)
+                if (!foundTask) {
+                    const { collection, getDocs } = await import("firebase/firestore");
+                    const eventsRef = collection(db, "events");
+                    const eventsSnap = await getDocs(eventsRef);
+
+                    for (const eventDoc of eventsSnap.docs) {
+                        const res = await fetchByEventId(eventDoc.id);
+                        if (res) {
+                            foundTask = res.task;
+                            foundEventId = eventDoc.id;
+                            foundEventTitle = res.eventTitle;
+                            foundEventTeam = res.eventTeam;
+                            break;
+                        }
                     }
                 }
 
                 if (foundTask) {
                     setTask({ ...foundTask, eventTitle: foundEventTitle });
+                    setEventTeam(foundEventTeam);
 
                     // Subscribe to chat
                     const qChat = query(
@@ -106,21 +167,55 @@ export default function TaskDetailPage() {
                     const unsubscribeChat = onSnapshot(qChat, (snapshot) => {
                         const msgs = snapshot.docs.map(doc => ({
                             id: doc.id,
-                            ...doc.data()
+                            ...doc.data(),
+                            createdAt: doc.data().createdAt || doc.data().timestamp,
+                            senderId: doc.data().senderId || doc.data().senderUid,
+                            senderUid: doc.data().senderUid || doc.data().senderId,
                         })) as ChatMessage[];
+                        // Backfill legacy messages to createdAt for consistent ordering
+                        snapshot.docs.forEach(d => {
+                            const data = d.data();
+                            if (!data.createdAt && data.timestamp) {
+                                updateDoc(d.ref, { createdAt: data.timestamp }).catch(() => { /* ignore */ });
+                            }
+                        });
                         setMessages(msgs);
                     });
 
                     // Subscribe to task updates
                     const unsubscribeTask = onSnapshot(doc(db, "events", foundEventId, "tasks", taskId), (docSnap) => {
                         if (docSnap.exists()) {
-                            setTask(prev => ({ ...prev!, ...docSnap.data() } as Task));
+                            const data = docSnap.data();
+                            setTask(prev => ({
+                                ...prev!,
+                                ...data,
+                                assignee: data.assignee || normalizeAssignees(data)[0]?.name || "",
+                                assignees: normalizeAssignees(data)
+                            } as Task));
                         }
                     });
+
+                    // Subscribe to event updates for team changes
+                    const unsubscribeEvent = onSnapshot(doc(db, "events", foundEventId), (docSnap) => {
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            setEventTeam((data.team as EventTeamMember[]) || []);
+                        }
+                    });
+
+                    const unsubFiles = onSnapshot(
+                        collection(db, "events", foundEventId, "tasks", taskId, "files"),
+                        (snap) => {
+                            const files = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                            setAttachments(files);
+                        }
+                    );
 
                     return () => {
                         unsubscribeChat();
                         unsubscribeTask();
+                        unsubscribeEvent();
+                        unsubFiles();
                     };
                 } else {
                     setError("המשימה לא נמצאה");
@@ -134,7 +229,13 @@ export default function TaskDetailPage() {
         };
 
         fetchTask();
-    }, [taskId]);
+    }, [taskId, hintedEventId]);
+
+    useEffect(() => {
+        if (focusSection === "assignees" && assigneeSectionRef.current) {
+            assigneeSectionRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    }, [focusSection, task]);
 
     const handleUpdateStatus = async (newStatus: string) => {
         if (!db || !task) return;
@@ -158,6 +259,77 @@ export default function TaskDetailPage() {
         }
     };
 
+    const sanitizeAssigneesForWrite = (arr: Assignee[] = []) =>
+        (arr || [])
+            .filter(a => (a.name || "").trim())
+            .map(a => ({
+                name: (a.name || "").trim(),
+                ...(a.userId ? { userId: a.userId } : {})
+            }));
+
+    const updateAssignees = async (nextAssignees: Assignee[]) => {
+        if (!db || !task) return;
+        const cleaned = sanitizeAssigneesForWrite(nextAssignees);
+        const primary = cleaned[0];
+        try {
+            await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), {
+                assignees: cleaned,
+                assignee: primary?.name || "",
+                assigneeId: primary?.userId || null,
+            });
+            setTask(prev => prev ? {
+                ...prev,
+                assignees: cleaned,
+                assignee: primary?.name || "",
+                assigneeId: primary?.userId || "",
+            } : prev);
+        } catch (err) {
+            console.error("Error updating assignees:", err);
+        }
+    };
+
+    const handleToggleAssignee = async (member: EventTeamMember) => {
+        if (!task) return;
+        const exists = task.assignees?.some(a => a.name === member.name);
+        const next = exists
+            ? (task.assignees || []).filter(a => a.name !== member.name)
+            : ([...(task.assignees || []), { name: member.name, userId: member.userId }]);
+        await updateAssignees(next);
+    };
+
+    const handleUploadFiles = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!task || !storage || !db || uploadFiles.length === 0) return;
+        setUploading(true);
+        try {
+            const uploads = uploadFiles.map(async (file) => {
+                const path = `events/${task.eventId}/tasks/${task.id}/${Date.now()}-${file.name}`;
+                const storageRef = ref(storage, path);
+                await uploadBytes(storageRef, file);
+                const url = await getDownloadURL(storageRef);
+                const fileData = {
+                    name: file.name,
+                    url,
+                    storagePath: path,
+                    taskId: task.id,
+                    taskTitle: task.title,
+                    createdAt: serverTimestamp(),
+                };
+                await Promise.all([
+                    addDoc(collection(db, "events", task.eventId, "tasks", task.id, "files"), fileData),
+                    addDoc(collection(db, "events", task.eventId, "files"), fileData),
+                ]);
+            });
+            await Promise.all(uploads);
+            setUploadFiles([]);
+        } catch (err) {
+            console.error("Error uploading files:", err);
+            alert("שגיאה בהעלאת הקבצים");
+        } finally {
+            setUploading(false);
+        }
+    };
+
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newMessage.trim() || !db || !user || !task) return;
@@ -166,8 +338,10 @@ export default function TaskDetailPage() {
             await addDoc(collection(db, "events", task.eventId, "tasks", task.id, "messages"), {
                 text: newMessage,
                 senderId: user.uid,
+                senderUid: user.uid,
                 senderName: user.displayName || user.email?.split('@')[0] || "Unknown",
-                createdAt: serverTimestamp()
+                createdAt: serverTimestamp(),
+                timestamp: serverTimestamp(), // legacy field
             });
 
             // Update task last message info
@@ -195,7 +369,7 @@ export default function TaskDetailPage() {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50 flex-col gap-4">
                 <p className="text-red-500">{error || "המשימה לא נמצאה"}</p>
-                <Link href="/" className="text-indigo-600 hover:underline">חזרה לדשבורד</Link>
+                <Link href="/" className="text-indigo-600 hover:underline">חזרה לאירוע</Link>
             </div>
         );
     }
@@ -204,9 +378,12 @@ export default function TaskDetailPage() {
         <div className="min-h-screen p-6 bg-gray-50">
             <div className="max-w-4xl mx-auto">
                 <div className="mb-6">
-                    <Link href="/" className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition w-fit">
+                    <Link
+                        href={task ? `/events/${task.eventId}` : "/"}
+                        className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition w-fit"
+                    >
                         <ArrowRight size={20} />
-                        חזרה ללוח הבקרה
+                        חזרה לדף האירוע
                     </Link>
                 </div>
 
@@ -289,7 +466,9 @@ export default function TaskDetailPage() {
                                                 <p className="text-sm">{msg.text}</p>
                                             </div>
                                             <span className="text-xs text-gray-400 mt-1 px-1">
-                                                {msg.senderName} • {msg.createdAt?.seconds ? new Date(msg.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                                                {msg.senderName} • {(msg.createdAt?.seconds || msg.timestamp?.seconds)
+                                                    ? new Date((msg.createdAt?.seconds || msg.timestamp?.seconds) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                                    : '...'}
                                             </span>
                                         </div>
                                     ))
@@ -310,6 +489,43 @@ export default function TaskDetailPage() {
                                     className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
                                 >
                                     <Send size={20} />
+                                </button>
+                            </form>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 className="font-semibold text-gray-900 mb-3">קבצים מצורפים</h3>
+                            {attachments.length === 0 ? (
+                                <p className="text-sm text-gray-500 mb-3">אין קבצים למשימה זו עדיין.</p>
+                            ) : (
+                                <ul className="space-y-2 mb-3">
+                                    {attachments.map((file) => (
+                                        <li key={file.id} className="flex items-center justify-between text-sm">
+                                            <a href={file.url} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline break-all">
+                                                {file.name}
+                                            </a>
+                                            <span className="text-xs text-gray-400">
+                                                {file.createdAt?.seconds
+                                                    ? new Date(file.createdAt.seconds * 1000).toLocaleDateString("he-IL")
+                                                    : ""}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            <form onSubmit={handleUploadFiles} className="space-y-2">
+                                <input
+                                    type="file"
+                                    multiple
+                                    onChange={(e) => setUploadFiles(e.target.files ? Array.from(e.target.files) : [])}
+                                    className="text-sm"
+                                />
+                                <button
+                                    type="submit"
+                                    disabled={uploading || uploadFiles.length === 0}
+                                    className={`w-full text-sm font-semibold rounded-lg px-3 py-2 ${uploading || uploadFiles.length === 0 ? "bg-gray-200 text-gray-500" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                >
+                                    {uploading ? "מעלה..." : "העלה קבצים"}
                                 </button>
                             </form>
                         </div>
@@ -334,17 +550,37 @@ export default function TaskDetailPage() {
                                     />
                                 </div>
 
-                                <div>
+                                <div ref={assigneeSectionRef}>
                                     <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
                                         <User size={16} />
-                                        אחראי
+                                        אחראים
                                     </label>
-                                    <input
-                                        type="text"
-                                        className="w-full p-2 border border-gray-200 rounded-lg text-sm"
-                                        value={task.assignee}
-                                        onChange={(e) => handleUpdateField('assignee', e.target.value)}
-                                    />
+                                    <div className="flex flex-wrap gap-2">
+                                {eventTeam.map((member, idx) => {
+                                            const checked = task.assignees?.some(a => a.name === member.name);
+                                            return (
+                                                <label
+                                                    key={`${member.name}-${idx}`}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                                    style={{ minWidth: '120px' }}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        className="accent-white w-4 h-4"
+                                                        checked={checked}
+                                                        onChange={() => handleToggleAssignee(member)}
+                                                    />
+                                                    {member.name}
+                                                </label>
+                                            );
+                                        })}
+                                        {!eventTeam.length && (
+                                            <p className="text-xs text-gray-500">עדיין לא הוגדר צוות לאירוע זה.</p>
+                                        )}
+                                    </div>
+                                    {(!task.assignees || task.assignees.length === 0) && (
+                                        <p className="text-xs text-gray-500 mt-1">אין אחראים משויכים למשימה זו.</p>
+                                    )}
                                 </div>
 
                                 <div>

@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "http://localhost:3000",
+      "https://patifon-events.web.app",
+      "https://patifon-events.firebaseapp.com"
+    ],
+    "method": ["GET", "POST", "PUT", "HEAD", "DELETE", "PATCH", "OPTIONS"],
+    "responseHeader": ["Authorization", "Content-Type", "x-goog-meta-*"],
+    "maxAgeSeconds": 3600
+  }
+]

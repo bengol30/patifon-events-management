@@ -24,6 +24,8 @@ interface Task {
   title: string;
   description?: string;
   assignee: string;
+  assigneeId?: string;
+  assignees?: { name: string; userId?: string }[];
   status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
   dueDate: string;
   priority: "NORMAL" | "HIGH" | "CRITICAL";
@@ -101,31 +103,47 @@ export default function Dashboard() {
 
         tasksSnapshot.forEach(doc => {
           const taskData = doc.data();
-          // Check if task is assigned to user (by name or email) and not done
-          if (taskData.status !== 'DONE' && taskData.assignee) {
-            const assignee = taskData.assignee.toLowerCase();
-            if (
-              (userName && assignee.includes(userName.toLowerCase())) ||
-              (userEmail && assignee.includes(userEmail.split('@')[0].toLowerCase())) ||
-              assignee === "אני" // Handle explicit "Me" assignment if used
-            ) {
-              // Get event ID from the document path
-              const eventId = doc.ref.parent.parent?.id || "";
-              const event = eventsData.find(e => e.id === eventId);
+          const eventId = doc.ref.parent.parent?.id || "";
+          const event = eventsData.find(e => e.id === eventId);
+          if (!event) return;
 
-              userTasks.push({
-                id: doc.id,
-                title: taskData.title,
-                dueDate: taskData.dueDate,
-                priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
-                assignee: taskData.assignee,
-                status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
-                eventId: eventId,
-                eventTitle: event?.title || "אירוע לא ידוע",
-                currentStatus: taskData.currentStatus || "",
-                nextStep: taskData.nextStep || "",
-              } as Task);
-            }
+          const assigneeStr = (taskData.assignee || "").toLowerCase();
+          const assigneeId = taskData.assigneeId as string | undefined;
+          const assigneesArr = (taskData.assignees as { name: string; userId?: string }[] | undefined) ||
+            (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId }] : []);
+          const isAssignedToUser =
+            taskData.status !== "DONE" &&
+            (
+              (assigneeId && assigneeId === user.uid) ||
+              assigneesArr.some(a => a.userId && a.userId === user.uid) ||
+              (assigneeStr && (
+                (userName && assigneeStr.includes(userName.toLowerCase())) ||
+                (userEmail && assigneeStr.includes(userEmail.split('@')[0].toLowerCase())) ||
+                assigneeStr === "אני"
+              )) ||
+              assigneesArr.some(a => {
+                const nameLower = (a.name || "").toLowerCase();
+                return (userName && nameLower.includes(userName.toLowerCase())) ||
+                  (userEmail && nameLower.includes(userEmail.split('@')[0].toLowerCase())) ||
+                  nameLower === "אני";
+              })
+            );
+
+          if (isAssignedToUser) {
+            userTasks.push({
+              id: doc.id,
+              title: taskData.title,
+              dueDate: taskData.dueDate,
+              priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
+              assignee: taskData.assignee,
+              assigneeId,
+              assignees: assigneesArr,
+              status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
+              eventId: eventId,
+              eventTitle: event?.title || "אירוע לא ידוע",
+              currentStatus: taskData.currentStatus || "",
+              nextStep: taskData.nextStep || "",
+            } as Task);
           }
         });
 
@@ -455,17 +473,18 @@ export default function Dashboard() {
                     key={task.id}
                     id={task.id}
                     title={task.title}
-                    description={task.description}
-                    assignee={task.assignee || "לא משויך"}
-                    status={task.status}
-                    dueDate={task.dueDate}
-                    priority={task.priority}
-                    currentStatus={task.currentStatus}
-                    nextStep={task.nextStep}
-                    eventId={task.eventId}
-                    eventTitle={task.eventTitle}
-                    onEdit={() => setEditingTask(task)}
-                    onDelete={() => setDeletingTaskId(task.id)}
+                  description={task.description}
+                  assignee={task.assignee || "לא משויך"}
+                  assignees={task.assignees}
+                  status={task.status}
+                  dueDate={task.dueDate}
+                  priority={task.priority}
+                  currentStatus={task.currentStatus}
+                  nextStep={task.nextStep}
+                  eventId={task.eventId}
+                  eventTitle={task.eventTitle}
+                  onEdit={() => setEditingTask(task)}
+                  onDelete={() => setDeletingTaskId(task.id)}
                     onStatusChange={async (newStatus) => {
                       if (newStatus === "DONE") {
                         handleCompleteTask(task);
@@ -493,6 +512,10 @@ export default function Dashboard() {
                       eventId: t.eventId || "",
                       eventTitle: t.eventTitle || ""
                     } as Task)}
+                    onManageAssignees={() => {
+                      // מוביל למסך פרטי המשימה עם רמז אירוע כדי לאפשר תיוג גם במובייל
+                      router.push(`/tasks/${task.id}?eventId=${task.eventId}&focus=assignees`);
+                    }}
                   />
                 );
               })}

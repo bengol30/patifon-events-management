@@ -10,8 +10,10 @@ interface Message {
     id: string;
     text: string;
     senderName: string;
-    senderUid: string;
-    timestamp: any;
+    senderUid?: string;
+    senderId?: string;
+    createdAt?: any;
+    timestamp?: any;
 }
 
 interface TaskChatProps {
@@ -32,12 +34,24 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         if (!db || !eventId || !taskId) return;
 
         const messagesRef = collection(db, "events", eventId, "tasks", taskId, "messages");
-        const q = query(messagesRef, orderBy("timestamp", "asc"));
+        // Use createdAt if exists, fallback to timestamp for legacy docs
+        const q = query(messagesRef, orderBy("createdAt", "asc"));
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const messagesData: Message[] = [];
             snapshot.forEach((doc) => {
-                messagesData.push({ id: doc.id, ...doc.data() } as Message);
+                const data = doc.data() as any;
+                if (!data.createdAt && data.timestamp) {
+                    // Backfill legacy messages to use createdAt so ordering is consistent everywhere
+                    updateDoc(doc.ref, { createdAt: data.timestamp }).catch(() => { /* ignore */ });
+                }
+                messagesData.push({
+                    id: doc.id,
+                    ...data,
+                    createdAt: data.createdAt || data.timestamp,
+                    senderId: data.senderId || data.senderUid,
+                    senderUid: data.senderUid || data.senderId,
+                } as Message);
             });
             setMessages(messagesData);
             setLoading(false);
@@ -79,7 +93,9 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                 text: newMessage.trim(),
                 senderName: user.displayName || user.email || "משתמש",
                 senderUid: user.uid,
-                timestamp: serverTimestamp(),
+                senderId: user.uid,
+                createdAt: serverTimestamp(),
+                timestamp: serverTimestamp(), // legacy field for older queries
             });
 
             // Update task's lastMessageTime
@@ -126,8 +142,8 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                             אין הודעות עדיין. היה הראשון לכתוב!
                         </div>
                     ) : (
-                        messages.map((message) => {
-                            const isMyMessage = message.senderUid === user?.uid;
+        messages.map((message) => {
+            const isMyMessage = (message.senderUid || message.senderId) === user?.uid;
                             return (
                                 <div
                                     key={message.id}
@@ -150,8 +166,8 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                                             className={`text-xs mt-1 ${isMyMessage ? "text-indigo-200" : "text-gray-400"
                                                 }`}
                                         >
-                                            {message.timestamp?.seconds
-                                                ? new Date(message.timestamp.seconds * 1000).toLocaleTimeString("he-IL", {
+                                            {(message.createdAt?.seconds || message.timestamp?.seconds)
+                                                ? new Date((message.createdAt?.seconds || message.timestamp.seconds) * 1000).toLocaleTimeString("he-IL", {
                                                     hour: "2-digit",
                                                     minute: "2-digit",
                                                 })

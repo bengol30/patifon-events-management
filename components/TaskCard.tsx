@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle, Circle, Clock, AlertTriangle, Trash2, MessageCircle } from "lucide-react";
+import { CheckCircle, Circle, Clock, AlertTriangle, Trash2, MessageCircle, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 interface TaskProps {
@@ -8,6 +8,7 @@ interface TaskProps {
     title: string;
     description?: string;
     assignee: string;
+    assignees?: { name: string; userId?: string }[];
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
@@ -17,6 +18,7 @@ interface TaskProps {
     onEdit?: () => void;
     onStatusChange?: (newStatus: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") => void;
     onChat?: () => void;
+    onManageAssignees?: () => void;
     hasUnreadMessages?: boolean;
     currentStatus?: string;
     nextStep?: string;
@@ -34,12 +36,14 @@ export default function TaskCard({
     status,
     dueDate,
     priority,
+    assignees,
     isSelected,
     onSelect,
     onDelete,
     onEdit,
     onStatusChange,
     onChat,
+    onManageAssignees,
     hasUnreadMessages,
     currentStatus,
     nextStep,
@@ -94,12 +98,26 @@ export default function TaskCard({
     };
 
     const handleCardClick = () => {
-        router.push(`/tasks/${id}`);
+        if (eventId) {
+            router.push(`/tasks/${id}?eventId=${eventId}`);
+        } else {
+            router.push(`/tasks/${id}`);
+        }
+    };
+
+    const handleKeyActivate = (e: React.KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleCardClick();
+        }
     };
 
     return (
         <div
             onClick={handleCardClick}
+            onKeyDown={handleKeyActivate}
+            role="button"
+            tabIndex={0}
             className={`bg-white p-4 rounded-lg shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative`}
         >
             <div className="flex items-center justify-between w-full mb-2">
@@ -116,11 +134,19 @@ export default function TaskCard({
                             {title}
                         </h3>
                         <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2 text-sm text-gray-500">
-                                <span>אחראי: {assignee || 'לא משויך'}</span>
-                                {description && <span className="hidden sm:inline-block text-gray-300">|</span>}
-                                {description && <span className="hidden sm:inline-block truncate max-w-[200px]">{description}</span>}
+                            <div className="flex items-center gap-2 text-sm text-gray-500 flex-wrap">
+                                <span>אחראי:</span>
+                                {(assignees && assignees.length > 0 ? assignees : [{ name: assignee }]).map((a, idx) => (
+                                    <span key={idx} className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs border border-gray-200">
+                                        {a.name || 'לא משויך'}
+                                    </span>
+                                ))}
                             </div>
+                            {description && (
+                                <span className="text-sm text-gray-600 line-clamp-2">
+                                    {description}
+                                </span>
+                            )}
                             {eventId && eventTitle && (
                                 <span
                                     onClick={(e) => {
@@ -138,7 +164,7 @@ export default function TaskCard({
 
                 <div className="flex items-center gap-3 text-sm text-gray-500">
                     <div
-                        className="flex items-center gap-1 hidden sm:flex hover:bg-gray-100 p-1 rounded transition z-10"
+                        className="flex items-center gap-1 hover:bg-gray-100 p-1 rounded transition z-10 text-xs sm:text-sm"
                         onClick={handleDateClick}
                         title="לחץ לשינוי תאריך"
                     >
@@ -147,6 +173,15 @@ export default function TaskCard({
                     </div>
 
                     <div className="flex items-center gap-1 z-10">
+                        {onManageAssignees && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onManageAssignees(); }}
+                                className="text-gray-400 hover:text-indigo-600 p-1"
+                                title="נהל אחראים"
+                            >
+                                <UserPlus size={16} />
+                            </button>
+                        )}
                         {onChat && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onChat(); }}
