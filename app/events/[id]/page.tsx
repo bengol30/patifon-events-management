@@ -76,9 +76,9 @@ export default function EventDetailsPage() {
 
     // Edit Task State
     const [editingTask, setEditingTask] = useState<Task | null>(null);
+    const [editingStatusTask, setEditingStatusTask] = useState<Task | null>(null);
+    const [editingDateTask, setEditingDateTask] = useState<Task | null>(null);
 
-    // Bulk Selection State
-    const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
 
     // New Team Member State
     const [showAddTeam, setShowAddTeam] = useState(false);
@@ -179,8 +179,8 @@ export default function EventDetailsPage() {
             const taskRef = doc(db, "events", id, "tasks", editingTask.id);
             await updateDoc(taskRef, {
                 title: editingTask.title,
-                description: editingTask.description,
-                assignee: editingTask.assignee,
+                description: editingTask.description || "",
+                assignee: editingTask.assignee || "",
                 dueDate: editingTask.dueDate,
                 priority: editingTask.priority,
                 status: editingTask.status,
@@ -202,24 +202,6 @@ export default function EventDetailsPage() {
             });
         } catch (err) {
             console.error("Error updating status:", err);
-        }
-    };
-
-    const handleTaskSelect = (taskId: string, isSelected: boolean) => {
-        const newSelected = new Set(selectedTasks);
-        if (isSelected) {
-            newSelected.add(taskId);
-        } else {
-            newSelected.delete(taskId);
-        }
-        setSelectedTasks(newSelected);
-    };
-
-    const handleSelectAll = () => {
-        if (selectedTasks.size === tasks.length) {
-            setSelectedTasks(new Set());
-        } else {
-            setSelectedTasks(new Set(tasks.map(t => t.id)));
         }
     };
 
@@ -281,15 +263,6 @@ export default function EventDetailsPage() {
         });
     };
 
-    const confirmBulkDelete = () => {
-        setConfirmModal({
-            isOpen: true,
-            type: 'bulk_delete',
-            itemId: null,
-            title: `האם אתה בטוח שברצונך למחוק ${selectedTasks.size} משימות?`
-        });
-    };
-
     const executeDelete = async () => {
         if (!db) return;
 
@@ -304,13 +277,6 @@ export default function EventDetailsPage() {
             } else if (type === 'event') {
                 await deleteDoc(doc(db, "events", id));
                 router.push("/");
-            } else if (type === 'bulk_delete') {
-                const batch = writeBatch(db);
-                selectedTasks.forEach(taskId => {
-                    batch.delete(doc(db, "events", id, "tasks", taskId));
-                });
-                await batch.commit();
-                setSelectedTasks(new Set());
             }
         } catch (err) {
             console.error(`Error deleting ${type}:`, err);
@@ -608,17 +574,17 @@ export default function EventDetailsPage() {
             )}
 
             <div className="mb-4">
-                <Link href="/" className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm w-fit">
+                <Link href="/" className="flex items-center gap-1 text-sm w-fit hover:opacity-70 transition" style={{ color: 'var(--patifon-burgundy)' }}>
                     <ArrowRight size={16} />
                     חזרה לדשבורד
                 </Link>
             </div>
 
-            <header className="mb-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <header className="mb-8 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '3px solid var(--patifon-orange)' }}>
                 <div className="flex justify-between items-start mb-6">
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900 mb-2">{event.title}</h1>
-                        <div className="flex flex-wrap items-center gap-6 text-gray-500 text-sm">
+                        <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--patifon-burgundy)' }}>{event.title}</h1>
+                        <div className="flex flex-wrap items-center gap-6 text-sm" style={{ color: 'var(--patifon-orange)' }}>
                             <div className="flex items-center gap-1">
                                 <MapPin size={16} />
                                 <span>{event.location}</span>
@@ -646,23 +612,24 @@ export default function EventDetailsPage() {
                         </div>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                        <button
-                            onClick={copyInviteLink}
-                            className={`px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm font-medium ${copied
-                                ? "bg-green-600 text-white hover:bg-green-700"
-                                : "bg-indigo-600 text-white hover:bg-indigo-700"
-                                }`}
-                        >
-                            {copied ? <Check size={18} /> : <Share2 size={18} />}
-                            {copied ? "הקישור הועתק!" : "העתק קישור להזמנה"}
-                        </button>
-                        <button
-                            onClick={confirmDeleteEvent}
-                            className="text-red-500 hover:bg-red-50 px-3 py-1 rounded-lg text-sm flex items-center gap-1 transition"
-                        >
-                            <Trash2 size={16} />
-                            מחק אירוע
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={copyInviteLink}
+                                className={`p-2 rounded-full transition vinyl-shadow text-white ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"
+                                    }`}
+                                title={copied ? "הקישור הועתק!" : "העתק קישור להזמנה"}
+                            >
+                                {copied ? <Check size={20} /> : <Share2 size={20} />}
+                            </button>
+                            <button
+                                onClick={confirmDeleteEvent}
+                                className="p-2 rounded-full transition hover:bg-red-100"
+                                style={{ color: 'var(--patifon-red)', background: '#fee', border: '1px solid var(--patifon-red)' }}
+                                title="מחק אירוע"
+                            >
+                                <Trash2 size={20} />
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -734,47 +701,29 @@ export default function EventDetailsPage() {
                 <div className="lg:col-span-2 space-y-6">
                     <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                            <h2 className="text-xl font-semibold text-gray-800">משימות לביצוע</h2>
-                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-sm font-medium">
+                            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>משימות לביצוע</h2>
+                            <span className="px-2 py-0.5 rounded-full text-sm font-medium" style={{ background: 'var(--patifon-yellow)', color: 'var(--patifon-burgundy)' }}>
                                 {tasks.filter(t => t.status !== 'DONE').length}
                             </span>
                         </div>
                         <div className="flex gap-2">
                             <button
                                 onClick={() => generateSuggestions(false)}
-                                className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-50 transition text-sm font-medium"
+                                className="bg-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-80 transition text-sm font-medium vinyl-shadow"
+                                style={{ border: '2px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
                             >
                                 <Sparkles size={18} />
                                 רעיונות למשימות
                             </button>
                             <button
                                 onClick={() => setShowNewTask(!showNewTask)}
-                                className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition text-sm font-medium"
+                                className="patifon-gradient text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90 transition text-sm font-medium vinyl-shadow"
                             >
                                 <Plus size={18} />
                                 משימה חדשה
                             </button>
                         </div>
                     </div>
-
-                    {/* Bulk Actions Bar */}
-                    {selectedTasks.size > 0 && (
-                        <div className="bg-indigo-50 p-3 rounded-lg flex items-center justify-between border border-indigo-100 animate-in fade-in slide-in-from-top-2">
-                            <div className="flex items-center gap-2 text-indigo-900 font-medium text-sm">
-                                <CheckSquare size={18} />
-                                <span>{selectedTasks.size} משימות נבחרו</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={confirmBulkDelete}
-                                    className="text-red-600 hover:bg-red-100 px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1"
-                                >
-                                    <Trash2 size={16} />
-                                    מחק נבחרים
-                                </button>
-                            </div>
-                        </div>
-                    )}
 
                     {showNewTask && (
                         <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 mb-4 animate-in fade-in slide-in-from-top-2">
@@ -835,18 +784,6 @@ export default function EventDetailsPage() {
                     )}
 
                     <div className="space-y-3">
-                        {tasks.length > 0 && (
-                            <div className="flex items-center gap-2 mb-2 px-1">
-                                <button
-                                    onClick={handleSelectAll}
-                                    className="text-gray-500 hover:text-indigo-600 text-sm flex items-center gap-1"
-                                >
-                                    {selectedTasks.size === tasks.length ? <CheckSquare size={16} /> : <Square size={16} />}
-                                    בחר הכל
-                                </button>
-                            </div>
-                        )}
-
                         {tasks.length === 0 ? (
                             <p className="text-gray-500 text-center py-8">אין משימות עדיין. צור את המשימה הראשונה!</p>
                         ) : (
@@ -858,17 +795,19 @@ export default function EventDetailsPage() {
                                         id={task.id}
                                         title={task.title}
                                         description={task.description}
+                                        currentStatus={task.currentStatus}
+                                        nextStep={task.nextStep}
                                         assignee={task.assignee || "לא משויך"}
                                         status={task.status}
                                         dueDate={task.dueDate}
                                         priority={task.priority}
-                                        isSelected={selectedTasks.has(task.id)}
-                                        onSelect={(selected) => handleTaskSelect(task.id, selected)}
-                                        onDelete={() => confirmDeleteTask(task.id)}
                                         onEdit={() => setEditingTask(task)}
-                                        onStatusChange={(status) => handleStatusChange(task.id, status)}
+                                        onDelete={() => confirmDeleteTask(task.id)}
+                                        onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
                                         onChat={() => setChatTask(task)}
                                         hasUnreadMessages={hasUnread}
+                                        onEditStatus={() => setEditingStatusTask(task)}
+                                        onEditDate={() => setEditingDateTask(task)}
                                     />
                                 );
                             })
@@ -967,6 +906,92 @@ export default function EventDetailsPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Status Edit Modal */}
+            {editingStatusTask && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold">עריכת סטטוס משימה</h3>
+                            <button onClick={() => setEditingStatusTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!db || !editingStatusTask) return;
+                            try {
+                                const taskRef = doc(db, "events", id, "tasks", editingStatusTask.id);
+                                await updateDoc(taskRef, {
+                                    currentStatus: editingStatusTask.currentStatus || "",
+                                    nextStep: editingStatusTask.nextStep || "",
+                                    dueDate: editingStatusTask.dueDate,
+                                });
+                                setEditingStatusTask(null);
+                            } catch (err) {
+                                console.error("Error updating status:", err);
+                                alert("שגיאה בעדכון הסטטוס");
+                            }
+                        }} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
+                                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.currentStatus || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, currentStatus: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
+                                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.nextStep || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, nextStep: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                                <input type="date" className="w-full p-2 border rounded-lg text-sm" value={editingStatusTask.dueDate} onChange={e => setEditingStatusTask({ ...editingStatusTask, dueDate: e.target.value })} />
+                            </div>
+                            <div className="flex justify-end gap-3 pt-4">
+                                <button type="button" onClick={() => setEditingStatusTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור שינויים</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Date Edit Modal */}
+            {editingDateTask && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold">שינוי תאריך יעד</h3>
+                            <button onClick={() => setEditingDateTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!db || !editingDateTask) return;
+                            try {
+                                const taskRef = doc(db, "events", id, "tasks", editingDateTask.id);
+                                await updateDoc(taskRef, {
+                                    dueDate: editingDateTask.dueDate,
+                                });
+                                setEditingDateTask(null);
+                            } catch (err) {
+                                console.error("Error updating date:", err);
+                                alert("שגיאה בעדכון התאריך");
+                            }
+                        }} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                                <input
+                                    type="date"
+                                    className="w-full p-2 border rounded-lg text-sm"
+                                    value={editingDateTask.dueDate}
+                                    onChange={e => setEditingDateTask({ ...editingDateTask, dueDate: e.target.value })}
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3 pt-4">
+                                <button type="button" onClick={() => setEditingDateTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

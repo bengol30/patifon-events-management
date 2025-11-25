@@ -1,6 +1,7 @@
 "use client";
 
-import { CheckCircle, Circle, Clock, AlertTriangle, Trash2, Edit2, CheckSquare, Square, MessageCircle } from "lucide-react";
+import { CheckCircle, Circle, Clock, AlertTriangle, Trash2, MessageCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface TaskProps {
     id: string;
@@ -17,6 +18,12 @@ interface TaskProps {
     onStatusChange?: (newStatus: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") => void;
     onChat?: () => void;
     hasUnreadMessages?: boolean;
+    currentStatus?: string;
+    nextStep?: string;
+    eventId?: string;
+    eventTitle?: string;
+    onEditStatus?: (task: TaskProps) => void;
+    onEditDate?: (task: TaskProps) => void;
 }
 
 export default function TaskCard({
@@ -33,8 +40,16 @@ export default function TaskCard({
     onEdit,
     onStatusChange,
     onChat,
-    hasUnreadMessages
+    hasUnreadMessages,
+    currentStatus,
+    nextStep,
+    eventId,
+    eventTitle,
+    onEditStatus,
+    onEditDate,
 }: TaskProps) {
+    const router = useRouter();
+
     const getStatusIcon = () => {
         switch (status) {
             case "DONE": return <CheckCircle className="text-green-500" />;
@@ -45,7 +60,8 @@ export default function TaskCard({
     };
 
     const handleStatusClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
+        e.stopPropagation(); // Prevent card navigation
+        e.preventDefault(); // Prevent default button behavior
         if (!onStatusChange) return;
 
         const nextStatus = status === "TODO" ? "IN_PROGRESS" :
@@ -54,86 +70,138 @@ export default function TaskCard({
         onStatusChange(nextStatus);
     };
 
+    // Helper to trigger onEditStatus with all props
+    const handleEditStatusClick = (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent card navigation
+        if (onEditStatus) {
+            onEditStatus({
+                id, title, description, assignee, status, dueDate, priority,
+                isSelected, onSelect, onDelete, onEdit, onStatusChange,
+                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate
+            });
+        }
+    };
+
+    const handleDateClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (onEditDate) {
+            onEditDate({
+                id, title, description, assignee, status, dueDate, priority,
+                isSelected, onSelect, onDelete, onEdit, onStatusChange,
+                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate
+            });
+        }
+    };
+
+    const handleCardClick = () => {
+        router.push(`/tasks/${id}`);
+    };
+
     return (
-        <div className={`bg-white p-4 rounded-lg shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex items-center justify-between hover:shadow-md transition group`}>
-            <div className="flex items-center gap-3 flex-1">
-                {onSelect && (
+        <div
+            onClick={handleCardClick}
+            className={`bg-white p-4 rounded-lg shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative`}
+        >
+            <div className="flex items-center justify-between w-full mb-2">
+                <div className="flex items-center gap-3 flex-1">
                     <button
-                        onClick={(e) => { e.stopPropagation(); onSelect(!isSelected); }}
-                        className="text-gray-400 hover:text-indigo-600 transition"
+                        onClick={handleStatusClick}
+                        className="hover:bg-gray-50 p-1 rounded-full transition z-10"
+                        title="שנה סטטוס"
                     >
-                        {isSelected ? <CheckSquare size={20} className="text-indigo-600" /> : <Square size={20} />}
+                        {getStatusIcon()}
                     </button>
-                )}
-                <button
-                    onClick={handleStatusClick}
-                    className="hover:bg-gray-50 p-1 rounded-full transition"
-                    title="שנה סטטוס"
-                >
-                    {getStatusIcon()}
-                </button>
-                <div className="flex-1 min-w-0">
-                    <h3 className={`font-medium text-gray-900 truncate ${status === 'DONE' ? 'line-through text-gray-400' : ''}`}>
-                        {title}
-                    </h3>
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                        <span>אחראי: {assignee || 'לא משויך'}</span>
-                        {description && <span className="hidden sm:inline-block text-gray-300">|</span>}
-                        {description && <span className="hidden sm:inline-block truncate max-w-[200px]">{description}</span>}
+                    <div className="flex-1 min-w-0">
+                        <h3 className={`font-medium text-gray-900 truncate hover:text-indigo-600 transition ${status === 'DONE' ? 'line-through text-gray-400' : ''}`} title="צפייה בפרטי המשימה">
+                            {title}
+                        </h3>
+                        <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                                <span>אחראי: {assignee || 'לא משויך'}</span>
+                                {description && <span className="hidden sm:inline-block text-gray-300">|</span>}
+                                {description && <span className="hidden sm:inline-block truncate max-w-[200px]">{description}</span>}
+                            </div>
+                            {eventId && eventTitle && (
+                                <span
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        router.push(`/events/${eventId}`);
+                                    }}
+                                    className="text-xs text-indigo-600 font-medium hover:underline w-fit cursor-pointer z-10"
+                                >
+                                    📅 {eventTitle}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-sm text-gray-500">
+                    <div
+                        className="flex items-center gap-1 hidden sm:flex hover:bg-gray-100 p-1 rounded transition z-10"
+                        onClick={handleDateClick}
+                        title="לחץ לשינוי תאריך"
+                    >
+                        <Clock size={14} />
+                        <span>{dueDate ? new Date(dueDate).toLocaleDateString('he-IL') : '-'}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1 z-10">
+                        {onChat && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onChat(); }}
+                                className="text-gray-400 hover:text-purple-500 p-1 relative"
+                                title="צ'אט הודעות"
+                            >
+                                <MessageCircle size={16} />
+                                {hasUnreadMessages && (
+                                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                                )}
+                            </button>
+                        )}
+                        {/* Edit button removed as requested */}
+                        {onDelete && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                                className="text-gray-400 hover:text-red-500 p-1"
+                                title="מחק משימה"
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 text-sm text-gray-500">
-                <div className="flex items-center gap-1 hidden sm:flex">
-                    <Clock size={14} />
-                    <span>{dueDate ? new Date(dueDate).toLocaleDateString('he-IL') : '-'}</span>
-                </div>
-
-                {priority === "CRITICAL" && (
-                    <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap">
-                        דחוף
-                    </span>
-                )}
-                {priority === "HIGH" && (
-                    <span className="bg-orange-100 text-orange-800 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap">
-                        גבוה
-                    </span>
-                )}
-
-                <div className="flex items-center gap-1">
-                    {onChat && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onChat(); }}
-                            className="text-gray-400 hover:text-purple-500 p-1 relative"
-                            title="צ'אט הודעות"
+            {/* Current Status and Next Step Display */}
+            {(currentStatus || nextStep) && (
+                <div className="mt-2 flex flex-wrap gap-2 w-full pr-12 relative z-10">
+                    {currentStatus && (
+                        <div
+                            onClick={handleEditStatusClick}
+                            className="p-1.5 rounded-lg flex-1 min-w-[200px] hover:opacity-90 transition cursor-pointer"
+                            style={{ background: 'var(--patifon-yellow)', border: '1px solid var(--patifon-yellow-orange)' }}
                         >
-                            <MessageCircle size={16} />
-                            {hasUnreadMessages && (
-                                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-                            )}
-                        </button>
+                            <div className="flex items-start gap-2">
+                                <span className="font-bold text-xs shrink-0" style={{ color: 'var(--patifon-burgundy)' }}>📍 איפה זה עומד:</span>
+                                <span className="text-xs font-medium" style={{ color: 'var(--patifon-burgundy)' }}>{currentStatus}</span>
+                            </div>
+                        </div>
                     )}
-                    {onEdit && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                            className="text-gray-400 hover:text-indigo-500 p-1"
-                            title="ערוך משימה"
+                    {nextStep && (
+                        <div
+                            onClick={handleEditStatusClick}
+                            className="p-1.5 rounded-lg flex-1 min-w-[200px] hover:opacity-90 transition cursor-pointer"
+                            style={{ background: 'var(--patifon-orange)', border: '1px solid var(--patifon-orange-dark)' }}
                         >
-                            <Edit2 size={16} />
-                        </button>
-                    )}
-                    {onDelete && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                            className="text-gray-400 hover:text-red-500 p-1"
-                            title="מחק משימה"
-                        >
-                            <Trash2 size={16} />
-                        </button>
+                            <div className="flex items-start gap-2">
+                                <span className="font-bold text-xs shrink-0 text-white">➡️ הצעד הבא:</span>
+                                <span className="text-xs font-medium text-white">{nextStep}</span>
+                            </div>
+                        </div>
                     )}
                 </div>
-            </div>
+            )}
         </div>
     );
 }

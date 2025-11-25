@@ -9,6 +9,8 @@ import { db } from "@/lib/firebase";
 import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc } from "firebase/firestore";
 import TaskChat from "@/components/TaskChat";
 
+import TaskCard from "@/components/TaskCard";
+
 interface Event {
   id: string;
   title: string;
@@ -20,17 +22,18 @@ interface Event {
 interface Task {
   id: string;
   title: string;
-  dueDate: string;
-  priority: string;
+  description?: string;
   assignee: string;
-  status: string;
+  status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
+  dueDate: string;
+  priority: "NORMAL" | "HIGH" | "CRITICAL";
   eventId: string;
   eventTitle: string;
-  currentStatus?: string;
-  nextStep?: string;
   lastMessageTime?: any;
   lastMessageBy?: string;
-  readBy?: { [key: string]: any };
+  readBy?: Record<string, boolean>;
+  currentStatus?: string;
+  nextStep?: string;
 }
 
 export default function Dashboard() {
@@ -45,11 +48,13 @@ export default function Dashboard() {
 
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
-  const [filterPriority, setFilterPriority] = useState<string>("all");
-  const [filterDeadline, setFilterDeadline] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("none");
 
   // Edit/Delete State
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  // State for editing status/next step
+  const [editingStatusTask, setEditingStatusTask] = useState<Task | null>(null);
+  const [editingDateTask, setEditingDateTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
   // Chat State
@@ -112,12 +117,14 @@ export default function Dashboard() {
                 id: doc.id,
                 title: taskData.title,
                 dueDate: taskData.dueDate,
-                priority: taskData.priority,
+                priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
                 assignee: taskData.assignee,
-                status: taskData.status,
+                status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
                 eventId: eventId,
-                eventTitle: event?.title || "אירוע לא ידוע"
-              });
+                eventTitle: event?.title || "אירוע לא ידוע",
+                currentStatus: taskData.currentStatus || "",
+                nextStep: taskData.nextStep || "",
+              } as Task);
             }
           }
         });
@@ -137,26 +144,54 @@ export default function Dashboard() {
     }
   }, [user]);
 
-  // Filter tasks based on selected filters
+  // Filter and sort tasks
   let filteredTasks = myTasks.filter(task => {
     if (filterEvent !== "all" && task.eventId !== filterEvent) return false;
-    if (filterPriority !== "all" && task.priority !== filterPriority) return false;
     return true;
   });
 
-  // Sort by deadline if filter is active
-  if (filterDeadline === "deadline") {
+  // Apply sorting
+  if (sortBy !== "none") {
     filteredTasks = [...filteredTasks].sort((a, b) => {
-      if (!a.dueDate) return 1;
-      if (!b.dueDate) return -1;
-      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      switch (sortBy) {
+        case "deadline":
+          // Sort by deadline (closest first)
+          if (!a.dueDate) return 1;
+          if (!b.dueDate) return -1;
+          return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+
+        case "priority":
+          // Sort by priority (CRITICAL > HIGH > NORMAL)
+          const priorityOrder = { CRITICAL: 0, HIGH: 1, NORMAL: 2 };
+          return priorityOrder[a.priority] - priorityOrder[b.priority];
+
+        case "status":
+          // Sort by status (STUCK > IN_PROGRESS > TODO > DONE)
+          const statusOrder = { STUCK: 0, IN_PROGRESS: 1, TODO: 2, DONE: 3 };
+          return statusOrder[a.status] - statusOrder[b.status];
+
+        case "eventDate":
+          // Sort by event start time (we need to get this from events array)
+          const eventA = events.find(e => e.id === a.eventId);
+          const eventB = events.find(e => e.id === b.eventId);
+          if (!eventA?.startTime) return 1;
+          if (!eventB?.startTime) return -1;
+          return eventA.startTime.seconds - eventB.startTime.seconds;
+
+        case "created":
+          // Sort by creation date (newest first) - we don't have this field, so skip
+          return 0;
+
+        default:
+          return 0;
+      }
     });
   }
 
   const handleUpdateTask = async (e: React.FormEvent) => {
+    // existing update logic for full task edit
     e.preventDefault();
     if (!db || !editingTask) return;
-
     try {
       const taskRef = doc(db, "events", editingTask.eventId, "tasks", editingTask.id);
       await updateDoc(taskRef, {
@@ -166,17 +201,14 @@ export default function Dashboard() {
         currentStatus: editingTask.currentStatus || "",
         nextStep: editingTask.nextStep || "",
       });
-
-      // Update local state
-      setMyTasks(prev => prev.map(t =>
-        t.id === editingTask.id ? editingTask : t
-      ));
+      setMyTasks(prev => prev.map(t => t.id === editingTask.id ? editingTask : t));
       setEditingTask(null);
     } catch (err) {
       console.error("Error updating task:", err);
       alert("שגיאה בעדכון המשימה");
     }
   };
+
 
   const handleDeleteTask = async () => {
     if (!db || !deletingTaskId) return;
@@ -264,71 +296,80 @@ export default function Dashboard() {
               </button>
             </div>
             <form onSubmit={handleUpdateTask} className="space-y-4">
+              {/* title, dueDate, priority fields as before */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">כותרת</label>
-                <input
-                  type="text"
-                  required
-                  className="w-full p-2 border rounded-lg text-sm"
-                  value={editingTask.title}
-                  onChange={e => setEditingTask({ ...editingTask, title: e.target.value })}
-                />
+                <input type="text" required className="w-full p-2 border rounded-lg text-sm" value={editingTask.title} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
-                <input
-                  type="date"
-                  className="w-full p-2 border rounded-lg text-sm"
-                  value={editingTask.dueDate}
-                  onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })}
-                />
+                <input type="date" className="w-full p-2 border rounded-lg text-sm" value={editingTask.dueDate} onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">עדיפות</label>
-                <select
-                  className="w-full p-2 border rounded-lg text-sm"
-                  value={editingTask.priority}
-                  onChange={e => setEditingTask({ ...editingTask, priority: e.target.value })}
-                >
+                <select className="w-full p-2 border rounded-lg text-sm" value={editingTask.priority} onChange={e => setEditingTask({ ...editingTask, priority: e.target.value as "NORMAL" | "HIGH" | "CRITICAL" })}>
                   <option value="NORMAL">רגיל</option>
                   <option value="HIGH">גבוה</option>
-                  <option value="CRITICAL">דחוף מאוד</option>
+                  <option value="CRITICAL">דחוף</option>
                 </select>
               </div>
+              {/* New fields for status and next step */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
-                <textarea
-                  className="w-full p-2 border rounded-lg text-sm"
-                  rows={2}
-                  placeholder="תאר את המצב הנוכחי של המשימה..."
-                  value={editingTask.currentStatus || ""}
-                  onChange={e => setEditingTask({ ...editingTask, currentStatus: e.target.value })}
-                />
+                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} placeholder="תאר את המצב הנוכחי..." value={editingTask.currentStatus || ""} onChange={e => setEditingTask({ ...editingTask, currentStatus: e.target.value })} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
-                <textarea
-                  className="w-full p-2 border rounded-lg text-sm"
-                  rows={2}
-                  placeholder="מה הצעד הבא שצריך לעשות..."
-                  value={editingTask.nextStep || ""}
-                  onChange={e => setEditingTask({ ...editingTask, nextStep: e.target.value })}
-                />
+                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} placeholder="מה הצעד הבא..." value={editingTask.nextStep || ""} onChange={e => setEditingTask({ ...editingTask, nextStep: e.target.value })} />
               </div>
               <div className="flex justify-end gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setEditingTask(null)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
-                >
-                  שמור שינויים
-                </button>
+                <button type="button" onClick={() => setEditingTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור שינויים</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Status Edit Modal */}
+      {editingStatusTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">עריכת סטטוס משימה</h3>
+              <button onClick={() => setEditingStatusTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!db || !editingStatusTask) return;
+              try {
+                const taskRef = doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id);
+                await updateDoc(taskRef, {
+                  currentStatus: editingStatusTask.currentStatus || "",
+                  nextStep: editingStatusTask.nextStep || "",
+                  dueDate: editingStatusTask.dueDate,
+                });
+                setMyTasks(prev => prev.map(t => t.id === editingStatusTask.id ? editingStatusTask : t));
+                setEditingStatusTask(null);
+              } catch (err) {
+                console.error("Error updating status:", err);
+                alert("שגיאה בעדכון הסטטוס");
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
+                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.currentStatus || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, currentStatus: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
+                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.nextStep || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, nextStep: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                <input type="date" className="w-full p-2 border rounded-lg text-sm" value={editingStatusTask.dueDate} onChange={e => setEditingStatusTask({ ...editingStatusTask, dueDate: e.target.value })} />
+              </div>
+              <div className="flex justify-end gap-3 pt-4">
+                <button type="button" onClick={() => setEditingStatusTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור שינויים</button>
               </div>
             </form>
           </div>
@@ -387,23 +428,15 @@ export default function Dashboard() {
             </div>
 
             <select
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value)}
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
               className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="all">כל העדיפויות</option>
-              <option value="CRITICAL">דחוף</option>
-              <option value="HIGH">גבוה</option>
-              <option value="NORMAL">רגיל</option>
-            </select>
-
-            <select
-              value={filterDeadline}
-              onChange={(e) => setFilterDeadline(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="all">ללא מיון</option>
-              <option value="deadline">מיון לפי דד ליין</option>
+              <option value="none">ללא מיון</option>
+              <option value="deadline">📅 לפי דד ליין (קרוב לרחוק)</option>
+              <option value="priority">⚠️ לפי עדיפות (דחוף → רגיל)</option>
+              <option value="status">🔄 לפי סטטוס (תקוע → בתהליך)</option>
+              <option value="eventDate">🎉 לפי תאריך האירוע</option>
             </select>
           </div>
 
@@ -415,88 +448,54 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="group p-3 border border-gray-100 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 transition bg-white"
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between">
-                        <h4 className="font-medium text-gray-900">{task.title}</h4>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setChatTask(task)}
-                            className="p-1 text-purple-600 hover:bg-purple-100 rounded relative"
-                            title="צ'אט הודעות"
-                          >
-                            <MessageCircle size={16} />
-                            {task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid && (
-                              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-                            )}
-                          </button>
-                          <button
-                            onClick={() => handleCompleteTask(task)}
-                            className="p-1 text-green-600 hover:bg-green-100 rounded"
-                            title="סמן כבוצע"
-                          >
-                            <Check size={16} />
-                          </button>
-                          <button
-                            onClick={() => setEditingTask(task)}
-                            className="p-1 text-blue-600 hover:bg-blue-100 rounded"
-                            title="ערוך"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeletingTaskId(task.id)}
-                            className="p-1 text-red-600 hover:bg-red-100 rounded"
-                            title="מחק"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 mt-1">
-                        <Link href={`/events/${task.eventId}`} className="text-xs text-indigo-600 font-medium hover:underline">
-                          📅 {task.eventTitle}
-                        </Link>
-                        {task.dueDate && (
-                          <span className="text-xs text-gray-500">
-                            • עד {new Date(task.dueDate).toLocaleDateString('he-IL')}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Current Status and Next Step */}
-                      {(task.currentStatus || task.nextStep) && (
-                        <div className="mt-2 space-y-1">
-                          {task.currentStatus && (
-                            <div className="text-xs">
-                              <span className="font-medium text-gray-700">איפה זה עומד: </span>
-                              <span className="text-gray-600">{task.currentStatus}</span>
-                            </div>
-                          )}
-                          {task.nextStep && (
-                            <div className="text-xs">
-                              <span className="font-medium text-gray-700">הצעד הבא: </span>
-                              <span className="text-gray-600">{task.nextStep}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <span className={`text-xs px-2 py-1 rounded-full shrink-0 mr-2 ${task.priority === 'CRITICAL' ? 'bg-red-100 text-red-700' :
-                      task.priority === 'HIGH' ? 'bg-orange-100 text-orange-700' :
-                        'bg-blue-100 text-blue-700'
-                      }`}>
-                      {task.priority === 'CRITICAL' ? 'דחוף' : task.priority === 'HIGH' ? 'גבוה' : 'רגיל'}
-                    </span>
-                  </div>
-                </div>
-              ))}
+              {filteredTasks.map((task) => {
+                const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                return (
+                  <TaskCard
+                    key={task.id}
+                    id={task.id}
+                    title={task.title}
+                    description={task.description}
+                    assignee={task.assignee || "לא משויך"}
+                    status={task.status}
+                    dueDate={task.dueDate}
+                    priority={task.priority}
+                    currentStatus={task.currentStatus}
+                    nextStep={task.nextStep}
+                    eventId={task.eventId}
+                    eventTitle={task.eventTitle}
+                    onEdit={() => setEditingTask(task)}
+                    onDelete={() => setDeletingTaskId(task.id)}
+                    onStatusChange={async (newStatus) => {
+                      if (newStatus === "DONE") {
+                        handleCompleteTask(task);
+                      } else {
+                        // Update status for other transitions
+                        if (!db) return;
+                        try {
+                          const taskRef = doc(db, "events", task.eventId, "tasks", task.id);
+                          await updateDoc(taskRef, { status: newStatus });
+                          setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+                        } catch (err) {
+                          console.error("Error updating status:", err);
+                        }
+                      }
+                    }}
+                    onChat={() => setChatTask(task)}
+                    hasUnreadMessages={hasUnread}
+                    onEditStatus={(t) => setEditingStatusTask({
+                      ...t,
+                      eventId: t.eventId || "",
+                      eventTitle: t.eventTitle || ""
+                    } as Task)}
+                    onEditDate={(t) => setEditingDateTask({
+                      ...t,
+                      eventId: t.eventId || "",
+                      eventTitle: t.eventTitle || ""
+                    } as Task)}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
@@ -532,6 +531,48 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Date Edit Modal */}
+      {editingDateTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">שינוי תאריך יעד</h3>
+              <button onClick={() => setEditingDateTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!db || !editingDateTask) return;
+              try {
+                const taskRef = doc(db, "events", editingDateTask.eventId, "tasks", editingDateTask.id);
+                await updateDoc(taskRef, {
+                  dueDate: editingDateTask.dueDate,
+                });
+                setMyTasks(prev => prev.map(t => t.id === editingDateTask.id ? editingDateTask : t));
+                setEditingDateTask(null);
+              } catch (err) {
+                console.error("Error updating date:", err);
+                alert("שגיאה בעדכון התאריך");
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                <input
+                  type="date"
+                  className="w-full p-2 border rounded-lg text-sm"
+                  value={editingDateTask.dueDate}
+                  onChange={e => setEditingDateTask({ ...editingDateTask, dueDate: e.target.value })}
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-4">
+                <button type="button" onClick={() => setEditingDateTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

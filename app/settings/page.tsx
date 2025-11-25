@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText } from "lucide-react";
 import Link from "next/link";
+import ImportantDocuments from "@/components/ImportantDocuments";
 
 interface DefaultTask {
     id: string;
@@ -15,6 +16,23 @@ interface DefaultTask {
     priority: "NORMAL" | "HIGH" | "CRITICAL";
     daysOffset?: number; // Days relative to event start (negative = before)
     assigneeRole?: string; // e.g., "Producer", "Designer"
+}
+
+interface DocumentCategory {
+    id: string;
+    name: string;
+    description?: string;
+    createdAt: any;
+}
+
+interface Document {
+    id: string;
+    categoryId: string;
+    title: string;
+    description?: string;
+    fileUrl?: string;
+    fileName?: string;
+    createdAt: any;
 }
 
 const PREDEFINED_TASKS = [
@@ -599,7 +617,16 @@ export default function SettingsPage() {
                                 <List size={18} />
                                 משימות קבועות
                             </button>
-                            {/* Future tabs can be added here */}
+                            <button
+                                onClick={() => setActiveTab("documents")}
+                                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "documents"
+                                    ? "bg-indigo-50 text-indigo-700"
+                                    : "text-gray-600 hover:bg-gray-50"
+                                    }`}
+                            >
+                                <FileText size={18} />
+                                מסמכים חשובים
+                            </button>
                         </nav>
                     </div>
 
@@ -698,8 +725,8 @@ export default function SettingsPage() {
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-3 mb-1">
                                                             <span className={`w-2.5 h-2.5 rounded-full ${task.priority === 'CRITICAL' ? 'bg-red-500' :
-                                                                    task.priority === 'HIGH' ? 'bg-orange-500' :
-                                                                        'bg-gray-300'
+                                                                task.priority === 'HIGH' ? 'bg-orange-500' :
+                                                                    'bg-gray-300'
                                                                 }`} title={`עדיפות: ${task.priority === 'CRITICAL' ? 'דחוף' : task.priority === 'HIGH' ? 'גבוה' : 'רגיל'}`} />
                                                             <span className="font-semibold text-gray-800">{task.title}</span>
                                                             {task.assigneeRole && (
@@ -747,6 +774,10 @@ export default function SettingsPage() {
                                     )}
                                 </div>
                             </div>
+                        )}
+
+                        {activeTab === "documents" && (
+                            <ImportantDocuments />
                         )}
                     </div>
                 </div>
