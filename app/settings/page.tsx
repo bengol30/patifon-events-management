@@ -413,7 +413,7 @@ export default function SettingsPage() {
         try {
             const batch = writeBatch(db);
             selectedTasks.forEach(taskId => {
-                batch.delete(doc(db, "default_tasks", taskId));
+                batch.delete(doc(db!, "default_tasks", taskId));
             });
             await batch.commit();
             setSelectedTasks(new Set());
@@ -435,7 +435,7 @@ export default function SettingsPage() {
         try {
             const batch = writeBatch(db);
             defaultTasks.forEach(task => {
-                batch.delete(doc(db, "default_tasks", task.id));
+                batch.delete(doc(db!, "default_tasks", task.id));
             });
             await batch.commit();
             setSelectedTasks(new Set());
