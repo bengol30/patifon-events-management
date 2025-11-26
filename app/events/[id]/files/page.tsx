@@ -49,6 +49,7 @@ export default function EventFilesPage() {
     const handleDelete = async (file: EventFile) => {
         const ok = confirm(`למחוק את "${file.name}"?`);
         if (!ok) return;
+        if (!db || !storage) return;
         try {
             await deleteDoc(doc(db, "events", id, "files", file.id));
             if (file.storagePath) {
@@ -61,6 +62,7 @@ export default function EventFilesPage() {
     };
 
     const handleSaveNote = async (fileId: string) => {
+        if (!db) return;
         try {
             await updateDoc(doc(db, "events", id, "files", fileId), { note: draftNote });
             setEditingId(null);
