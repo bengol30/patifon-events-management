@@ -500,10 +500,11 @@ export default function EventDetailsPage() {
 
     const uploadTaskFiles = async (taskId: string, taskTitle: string, files: File[]) => {
         if (!storage || !db || files.length === 0) return;
+
         let previewImage: string | null = null;
         const uploadPromises = files.map(async (file) => {
             const path = `events/${id}/tasks/${taskId}/${Date.now()}-${file.name}`;
-            const storageRef = ref(storage, path);
+            const storageRef = ref(storage!, path);
             await uploadBytes(storageRef, file);
             const url = await getDownloadURL(storageRef);
             if (!previewImage && file.type?.startsWith("image/")) {
@@ -520,14 +521,14 @@ export default function EventDetailsPage() {
                 createdByName: user?.displayName || user?.email || "משתמש",
             };
             await Promise.all([
-                addDoc(collection(db, "events", id, "tasks", taskId, "files"), fileData),
-                addDoc(collection(db, "events", id, "files"), fileData),
+                addDoc(collection(db!, "events", id, "tasks", taskId, "files"), fileData),
+                addDoc(collection(db!, "events", id, "files"), fileData),
             ]);
         });
         await Promise.all(uploadPromises);
         if (previewImage) {
             try {
-                await updateDoc(doc(db, "events", id, "tasks", taskId), { previewImage });
+                await updateDoc(doc(db!, "events", id, "tasks", taskId), { previewImage });
             } catch (err) {
                 console.error("Failed to set preview image on task", err);
             }
@@ -875,7 +876,7 @@ export default function EventDetailsPage() {
                 // מחיקת קבצים מ-Storage
                 if (storage && storagePaths.size > 0) {
                     const storageDeletes = Array.from(storagePaths).map(path =>
-                        deleteObject(ref(storage, path)).catch(err => console.error("Failed deleting storage file", err))
+                        deleteObject(ref(storage!, path)).catch(err => console.error("Failed deleting storage file", err))
                     );
                     await Promise.all(storageDeletes);
                 }
@@ -1562,12 +1563,12 @@ export default function EventDetailsPage() {
                                         <span>{event.participantsCount} משתתפים</span>
                                     </div>
                                 )}
-                            {partnersLabel && (
-                                <div className="flex items-center gap-1">
-                                    <Handshake size={16} />
-                                    <span>שותפים: {partnersLabel}</span>
-                                </div>
-                            )}
+                                {partnersLabel && (
+                                    <div className="flex items-center gap-1">
+                                        <Handshake size={16} />
+                                        <span>שותפים: {partnersLabel}</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="flex flex-col items-end gap-2 shrink-0">

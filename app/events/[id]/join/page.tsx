@@ -26,6 +26,7 @@ export default function JoinEventPage() {
 
         const joinEvent = async () => {
             if (!id || typeof id !== "string") return;
+            if (!db) return;
 
             try {
                 setStatus("joining");

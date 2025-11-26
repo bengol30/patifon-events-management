@@ -115,6 +115,7 @@ export default function TaskDetailPage() {
             // Note: This is inefficient for production but works for this MVP phase.
             try {
                 const fetchByEventId = async (eventId: string) => {
+                    if (!db) return null;
                     const taskRef = doc(db, "events", eventId, "tasks", taskId);
                     const taskSnap = await getDoc(taskRef);
                     if (!taskSnap.exists()) return null;
@@ -153,6 +154,7 @@ export default function TaskDetailPage() {
 
                 // Fallback: iterate events (legacy behavior)
                 if (!foundTask) {
+                    if (!db) return;
                     const { collection, getDocs } = await import("firebase/firestore");
                     const eventsRef = collection(db, "events");
                     const eventsSnap = await getDocs(eventsRef);
@@ -174,6 +176,7 @@ export default function TaskDetailPage() {
                     setEventTeam(foundEventTeam);
 
                     // Subscribe to chat
+                    if (!db) return;
                     const qChat = query(
                         collection(db, "events", foundEventId, "tasks", taskId, "messages"),
                         orderBy("createdAt", "asc")
@@ -197,6 +200,7 @@ export default function TaskDetailPage() {
                     });
 
                     // Subscribe to task updates
+                    if (!db) return;
                     const unsubscribeTask = onSnapshot(doc(db, "events", foundEventId, "tasks", taskId), (docSnap) => {
                         if (docSnap.exists()) {
                             const data = docSnap.data();
@@ -210,6 +214,7 @@ export default function TaskDetailPage() {
                     });
 
                     // Subscribe to event updates for team changes
+                    if (!db) return;
                     const unsubscribeEvent = onSnapshot(doc(db, "events", foundEventId), (docSnap) => {
                         if (docSnap.exists()) {
                             const data = docSnap.data();
@@ -217,6 +222,7 @@ export default function TaskDetailPage() {
                         }
                     });
 
+                    if (!db) return;
                     const unsubFiles = onSnapshot(
                         collection(db, "events", foundEventId, "tasks", taskId, "files"),
                         (snap) => {
@@ -328,7 +334,7 @@ export default function TaskDetailPage() {
         try {
             const uploads = uploadFiles.map(async (file) => {
                 const path = `events/${task.eventId}/tasks/${task.id}/${Date.now()}-${file.name}`;
-                const storageRef = ref(storage, path);
+                const storageRef = ref(storage!, path);
                 await uploadBytes(storageRef, file);
                 const url = await getDownloadURL(storageRef);
                 const fileData = {
@@ -340,8 +346,8 @@ export default function TaskDetailPage() {
                     createdAt: serverTimestamp(),
                 };
                 await Promise.all([
-                    addDoc(collection(db, "events", task.eventId, "tasks", task.id, "files"), fileData),
-                    addDoc(collection(db, "events", task.eventId, "files"), fileData),
+                    addDoc(collection(db!, "events", task.eventId, "tasks", task.id, "files"), fileData),
+                    addDoc(collection(db!, "events", task.eventId, "files"), fileData),
                 ]);
             });
             await Promise.all(uploads);
@@ -484,8 +490,8 @@ export default function TaskDetailPage() {
                                     messages.map((msg) => (
                                         <div key={msg.id} className={`flex flex-col ${msg.senderId === user?.uid ? 'items-end' : 'items-start'}`}>
                                             <div className={`max-w-[80%] p-3 rounded-lg ${msg.senderId === user?.uid
-                                                    ? 'bg-indigo-600 text-white rounded-tl-none'
-                                                    : 'bg-gray-100 text-gray-800 rounded-tr-none'
+                                                ? 'bg-indigo-600 text-white rounded-tl-none'
+                                                : 'bg-gray-100 text-gray-800 rounded-tr-none'
                                                 }`}>
                                                 <p className="text-sm">{msg.text}</p>
                                             </div>
@@ -580,7 +586,7 @@ export default function TaskDetailPage() {
                                         אחראים
                                     </label>
                                     <div className="flex flex-wrap gap-2">
-                                {eventTeam.map((member, idx) => {
+                                        {eventTeam.map((member, idx) => {
                                             const memberKey = getAssigneeKey(member);
                                             const checked = task.assignees?.some(a => getAssigneeKey(a) === memberKey);
                                             return (
