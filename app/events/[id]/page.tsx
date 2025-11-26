@@ -3,13 +3,14 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw, MessageCircle, User, Clock, Link as LinkIcon, List, Paperclip } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { db, storage } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import TaskChat from "@/components/TaskChat";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import PartnersInput from "@/components/PartnersInput";
 
 interface Assignee {
     name: string;
@@ -61,7 +62,7 @@ interface EventData {
     status: string;
     team: { name: string; role: string; email?: string; userId?: string }[];
     participantsCount?: string;
-    partners?: string;
+    partners?: string | string[];
     goal?: string;
     budget?: string;
     durationHours?: number;
@@ -122,6 +123,15 @@ export default function EventDetailsPage() {
                 ...(a.userId ? { userId: a.userId } : {})
             }));
 
+    const toPartnerArray = (raw: any): string[] => {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw.map(p => (p || "").toString().trim()).filter(Boolean);
+        if (typeof raw === "string") {
+            return raw.split(/[,\n]/).map(p => p.trim()).filter(Boolean);
+        }
+        return [];
+    };
+
 
     // New Team Member State
     const [showAddTeam, setShowAddTeam] = useState(false);
@@ -166,7 +176,7 @@ export default function EventDetailsPage() {
         location: "",
         description: "",
         participantsCount: "",
-        partners: "",
+        partners: [] as string[],
         goal: "",
         budget: "",
         startTime: "",
@@ -181,6 +191,10 @@ export default function EventDetailsPage() {
 
     const [editingInfoBlockId, setEditingInfoBlockId] = useState<string | null>(null);
     const [infoBlockDraft, setInfoBlockDraft] = useState<InfoBlock | null>(null);
+    const [showAdvancedActions, setShowAdvancedActions] = useState(false);
+    const [showPostModal, setShowPostModal] = useState(false);
+    const [postContent, setPostContent] = useState("");
+    const [flyerLink, setFlyerLink] = useState("");
     useEffect(() => {
         if (taggingTask) {
             setTagSelection(taggingTask.assignees || []);
@@ -373,7 +387,7 @@ export default function EventDetailsPage() {
             location: event.location || "",
             description: event.description || "",
             participantsCount: event.participantsCount || "",
-            partners: event.partners || "",
+            partners: toPartnerArray(event.partners),
             goal: event.goal || "",
             budget: event.budget || "",
             startTime: toInputValue(event.startTime),
@@ -401,6 +415,8 @@ export default function EventDetailsPage() {
                 taskId,
                 taskTitle,
                 createdAt: serverTimestamp(),
+                createdBy: user?.uid || null,
+                createdByName: user?.displayName || user?.email || "משתמש",
             };
             await Promise.all([
                 addDoc(collection(db, "events", id, "tasks", taskId, "files"), fileData),
@@ -584,6 +600,83 @@ export default function EventDetailsPage() {
         }
     };
 
+    const buildRegisterLink = () => {
+        if (typeof window === "undefined") return "";
+        return `${window.location.origin}/events/${id}/register`;
+    };
+
+    const buildPostContent = () => {
+        const startDate = event?.startTime?.seconds ? new Date(event.startTime.seconds * 1000) : null;
+        const dateText = startDate ? startDate.toLocaleDateString("he-IL", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+        const timeText = startDate ? startDate.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }) : "";
+        const flyerText = flyerLink ? `פלייר: ${flyerLink}` : "";
+        const register = buildRegisterLink();
+
+        const title = event?.title || "האירוע שלנו";
+        const promise = event?.goal || eventForm.goal || event?.description || eventForm.description || "חוויה מרגשת, תוכן מעולה ואנשים טובים.";
+        const placeLine = event?.location ? `📍 מקום: ${event.location}` : "";
+        const dateLine = dateText ? `📅 תאריך: ${dateText}` : "";
+        const timeLine = timeText ? `⏰ שעה: ${timeText}` : "";
+        const cta = register ? `להרשמה: ${register}` : "";
+
+        const variants = [
+            () => [
+                `אנחנו מזמינים אתכם ל"${title}"`,
+                "אירוע מיוחד ויוצא דופן לקהל הרחב",
+                "אז מה מחכה לכם?",
+                promise,
+                dateLine,
+                timeLine,
+                placeLine,
+                "מחכים לכם שם באנרגיות טובות!",
+                cta,
+                flyerText
+            ],
+            () => [
+                `בואו ל"${title}" - ערב שלא תרצו לפספס`,
+                promise,
+                "תפסו מקום ותרשמו עכשיו:",
+                cta,
+                dateLine,
+                timeLine,
+                placeLine,
+                flyerText
+            ],
+            () => [
+                `״${title}״ בדרך ואתם רשומים ברשימת המוזמנים שלנו`,
+                promise,
+                "בואו עם חברים, חיוך וסקרנות.",
+                dateLine,
+                timeLine,
+                placeLine,
+                cta,
+                flyerText
+            ]
+        ];
+
+        const pick = variants[Math.floor(Math.random() * variants.length)];
+        return pick().filter(Boolean).join("\n");
+    };
+
+    const handleOpenPostModal = () => {
+        setPostContent(buildPostContent());
+        setShowPostModal(true);
+    };
+
+    const handleCopyPost = async () => {
+        try {
+            await navigator.clipboard.writeText(postContent);
+            alert("המלל הועתק");
+        } catch (err) {
+            console.error("copy failed", err);
+            alert("לא הצלחנו להעתיק, נסה ידנית");
+        }
+    };
+
+    const handleRefreshPost = () => {
+        setPostContent(buildPostContent());
+    };
+
     const executeDelete = async () => {
         if (!db) return;
 
@@ -667,6 +760,25 @@ export default function EventDetailsPage() {
             console.error("Failed to copy register link:", err);
             alert("לא הצלחנו להעתיק את הקישור לטופס ההרשמה.");
         }
+    };
+
+    const normalizePhoneForWhatsApp = (phone: string) => {
+        const digits = (phone || "").replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("00")) return digits.slice(2);
+        if (digits.startsWith("+")) return digits.slice(1);
+        if (digits.startsWith("972")) return digits;
+        if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+        return digits;
+    };
+
+    const handleOpenWhatsApp = (phone?: string) => {
+        const normalized = normalizePhoneForWhatsApp(phone || "");
+        if (!normalized) {
+            alert("לא נמצא מספר טלפון תקין לאיש הקשר");
+            return;
+        }
+        window.open(`https://wa.me/${normalized}`, "_blank");
     };
 
     const generateSuggestions = (append = false) => {
@@ -758,6 +870,7 @@ export default function EventDetailsPage() {
     };
 
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
+    const partnersLabel = Array.isArray(event.partners) ? event.partners.join(", ") : (event.partners || "");
 
     return (
         <div className="min-h-screen bg-gray-50 p-6 relative">
@@ -870,12 +983,11 @@ export default function EventDetailsPage() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">שותפים</label>
-                                    <input
-                                        type="text"
+                                    <PartnersInput
+                                        label="שותפים"
                                         value={eventForm.partners}
-                                        onChange={(e) => setEventForm({ ...eventForm, partners: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
+                                        onChange={(partners) => setEventForm({ ...eventForm, partners })}
+                                        placeholder="הוסף שותף ולחץ אנטר"
                                     />
                                 </div>
                             </div>
@@ -1195,59 +1307,57 @@ export default function EventDetailsPage() {
             </div>
 
             <header className="mb-8 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '3px solid var(--patifon-orange)' }}>
-                <div className="flex justify-between items-start mb-6">
-                    <div>
-                        <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--patifon-burgundy)' }}>{event.title}</h1>
-                        <div className="flex flex-wrap items-center gap-6 text-sm" style={{ color: 'var(--patifon-orange)' }}>
-                            <div className="flex items-center gap-1">
-                                <MapPin size={16} />
-                                <span>{event.location}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                                <Calendar size={16} />
-                                <span>
-                                    {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleDateString("he-IL") : ""}
-                                    {" | "}
-                                    {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' }) : ""}
-                                </span>
-                            </div>
-                            {event.durationHours && (
+                <div className="flex flex-col gap-4 mb-4">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-3 w-full">
+                            <h1 className="text-3xl font-bold leading-tight" style={{ color: 'var(--patifon-burgundy)' }}>{event.title}</h1>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" style={{ color: 'var(--patifon-orange)' }}>
                                 <div className="flex items-center gap-1">
-                                    <Clock size={16} />
-                                    <span>משך משוער: {event.durationHours} שעות</span>
+                                    <MapPin size={16} />
+                                    <span>{event.location}</span>
                                 </div>
-                            )}
-                            {event.participantsCount && (
                                 <div className="flex items-center gap-1">
-                                    <Users size={16} />
-                                    <span>{event.participantsCount} משתתפים</span>
+                                    <Calendar size={16} />
+                                    <span>
+                                        {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleDateString("he-IL") : ""}
+                                        {" | "}
+                                        {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' }) : ""}
+                                    </span>
                                 </div>
-                            )}
-                            {event.partners && (
+                                {event.durationHours && (
+                                    <div className="flex items-center gap-1">
+                                        <Clock size={16} />
+                                        <span>משך משוער: {event.durationHours} שעות</span>
+                                    </div>
+                                )}
+                                {event.participantsCount && (
+                                    <div className="flex items-center gap-1">
+                                        <Users size={16} />
+                                        <span>{event.participantsCount} משתתפים</span>
+                                    </div>
+                                )}
+                            {partnersLabel && (
                                 <div className="flex items-center gap-1">
                                     <Handshake size={16} />
-                                    <span>שותפים: {event.partners}</span>
+                                    <span>שותפים: {partnersLabel}</span>
                                 </div>
                             )}
+                            </div>
                         </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                        <div className="flex gap-2 flex-wrap justify-end">
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                            <button
+                                onClick={copyInviteLink}
+                                className={`p-2 rounded-full transition vinyl-shadow text-white ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"}`}
+                                title={copied ? "הקישור הועתק!" : "שיתוף דף ניהול האירוע"}
+                            >
+                                {copied ? <Check size={20} /> : <Share2 size={20} />}
+                            </button>
                             <button
                                 onClick={() => setIsEditEventOpen(true)}
-                                className="p-2 rounded-full transition hover:bg-indigo-50"
-                                style={{ color: 'var(--patifon-burgundy)', border: '1px solid var(--patifon-orange)' }}
+                                className="p-2 rounded-full border border-indigo-100 text-indigo-700 hover:bg-indigo-50 transition"
                                 title="ערוך פרטי אירוע"
                             >
                                 <Edit2 size={18} />
-                            </button>
-                            <button
-                                onClick={copyInviteLink}
-                                className={`p-2 rounded-full transition vinyl-shadow text-white ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"
-                                    }`}
-                                title={copied ? "הקישור הועתק!" : "העתק קישור להזמנה"}
-                            >
-                                {copied ? <Check size={20} /> : <Share2 size={20} />}
                             </button>
                             <button
                                 onClick={confirmDeleteEvent}
@@ -1255,82 +1365,84 @@ export default function EventDetailsPage() {
                                 style={{ color: 'var(--patifon-red)', background: '#fee', border: '1px solid var(--patifon-red)' }}
                                 title="מחק אירוע"
                             >
-                                <Trash2 size={20} />
-                            </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2 justify-end">
-                            <button
-                                onClick={() => router.push(`/events/${id}/registrants`)}
-                                className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
-                                style={{ background: 'var(--patifon-burgundy)' }}
-                            >
-                                נרשמים לאירוע
-                            </button>
-                            <button
-                                onClick={() => router.push(`/events/${id}/register`)}
-                                className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"
-                                style={{ border: '2px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                            >
-                                <LinkIcon size={16} />
-                                טופס רישום לקהל
-                            </button>
-                            <button
-                                onClick={copyRegisterLink}
-                                className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${copiedRegister ? "bg-green-600 text-white" : "bg-gray-100 text-gray-700"}`}
-                                title="העתק קישור לטופס רישום"
-                            >
-                                {copiedRegister ? <Check size={16} /> : <List size={16} />}
-                                {copiedRegister ? "קישור הועתק" : "העתק קישור"}
+                                <Trash2 size={18} />
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
-                    <div className="space-y-4">
-                        <div>
-                            <p className="text-xs font-semibold text-gray-500 mb-1">סטטוס</p>
-                            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
-                                <Square size={14} />
-                                {event.status || "לא הוגדר"}
-                            </span>
-                        </div>
-                        <div>
-                            <p className="text-xs font-semibold text-gray-500 mb-1">תאריך ושעה</p>
-                            <p className="text-sm text-gray-700">
-                                {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "לא הוגדר"}
-                            </p>
-                            {event.durationHours && (
-                                <p className="text-xs text-gray-500 mt-1">משך משוער: {event.durationHours} שעות</p>
-                            )}
-                            {event.recurrence && event.recurrence !== "NONE" && (
-                                <p className="text-xs text-indigo-600 mt-1">
-                                    תדירות: {event.recurrence === "WEEKLY" ? "כל שבוע" :
-                                        event.recurrence === "BIWEEKLY" ? "כל שבועיים" :
-                                            "כל חודש"}
-                                </p>
-                            )}
-                        </div>
-                        {event.description && (
-                            <div>
-                                <p className="text-xs font-semibold text-gray-500 mb-1">תיאור קצר</p>
-                                <p className="text-sm text-gray-700 leading-relaxed">{event.description}</p>
+                <div className="flex flex-col gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100 md:w-auto md:self-start md:items-start">
+                    <div className="space-y-3 w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
+                        {event.contactPerson?.name ? (
+                            <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
+                                        <User size={20} />
+                                    </div>
+                                    <div className="text-sm">
+                                        <p className="font-semibold text-gray-900">איש קשר: {event.contactPerson.name}</p>
+                                        <div className="text-gray-600 flex flex-col">
+                                            {event.contactPerson.phone && <span>טלפון: {event.contactPerson.phone}</span>}
+                                            {event.contactPerson.email && <span>אימייל: {event.contactPerson.email}</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                                {event.contactPerson.phone && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
+                                        className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
+                                        title="שליחת הודעת וואטסאפ"
+                                    >
+                                        <MessageCircle size={18} />
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="p-3 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 bg-white">
+                                לא הוגדר איש קשר לאירוע.
                             </div>
                         )}
                     </div>
-                    <div className="space-y-4">
-                        {event.contactPerson?.name && (
-                            <div className="flex items-center gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
-                                    <User size={20} />
-                                </div>
-                                <div className="text-sm">
-                                    <p className="font-semibold text-gray-900">איש קשר: {event.contactPerson.name}</p>
-                                    <div className="text-gray-600 flex flex-col">
-                                        {event.contactPerson.phone && <span>טלפון: {event.contactPerson.phone}</span>}
-                                        {event.contactPerson.email && <span>אימייל: {event.contactPerson.email}</span>}
-                                    </div>
-                                </div>
+                    <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
+                        <button
+                            type="button"
+                            onClick={() => setShowAdvancedActions(!showAdvancedActions)}
+                            className="w-full md:w-auto flex items-center justify-between text-sm font-semibold text-gray-800"
+                        >
+                            <span>פעולות מתקדמות</span>
+                            <ChevronDown
+                                size={18}
+                                className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`}
+                            />
+                        </button>
+                        {showAdvancedActions && (
+                            <div className="flex flex-wrap items-center gap-2 mt-3">
+                                <button
+                                    onClick={() => router.push(`/events/${id}/registrants`)}
+                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold text-white text-center flex items-center gap-1"
+                                    style={{ background: 'var(--patifon-burgundy)' }}
+                                >
+                                    <Users size={16} />
+                                    נרשמים
+                                </button>
+                                <button
+                                    onClick={copyRegisterLink}
+                                    className={`px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center justify-center gap-1 border-2 ${copiedRegister ? "bg-green-600 text-white border-green-600" : ""}`}
+                                    style={!copiedRegister ? { borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' } : undefined}
+                                    title="העתק קישור לטופס רישום"
+                                >
+                                    {copiedRegister ? <Check size={14} /> : <List size={14} />}
+                                    {copiedRegister ? "קישור הועתק" : "העתק קישור הרשמה"}
+                                </button>
+                                <button
+                                    onClick={handleOpenPostModal}
+                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                    style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                >
+                                    <Sparkles size={14} />
+                                    מלל לפוסט
+                                </button>
                             </div>
                         )}
                     </div>
@@ -1511,10 +1623,10 @@ export default function EventDetailsPage() {
                         <div className="flex gap-2">
                             <button
                                 onClick={() => generateSuggestions(false)}
-                                className="bg-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-80 transition text-sm font-medium vinyl-shadow"
+                                className="bg-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:opacity-80 transition text-xs md:text-sm font-medium vinyl-shadow"
                                 style={{ border: '2px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
                             >
-                                <Sparkles size={18} />
+                                <Sparkles size={16} />
                                 רעיונות למשימות
                             </button>
                             <button
@@ -1753,16 +1865,81 @@ export default function EventDetailsPage() {
                     </div>
 
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <h2 className="text-lg font-semibold mb-4 text-gray-800">קבצים (Drive)</h2>
-                        <div className="text-sm text-gray-500 mb-4">
-                            תיקיית הדרייב תופיע כאן לאחר החיבור.
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                                <Paperclip size={18} />
+                                מסמכים חשובים לאירוע
+                            </h2>
+                            <button
+                                onClick={() => router.push(`/events/${id}/files`)}
+                                className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold"
+                            >
+                                מעבר למאגר
+                            </button>
                         </div>
-                        <button className="w-full border border-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-50 transition text-sm">
-                            פתח ב-Google Drive
+                        <p className="text-sm text-gray-600 mb-3">
+                            כל הקבצים שצורפו למשימות האירוע במקום אחד. לחצו כדי לראות את הקבצים, מי העלה ומתי.
+                        </p>
+                        <button
+                            onClick={() => router.push(`/events/${id}/files`)}
+                            className="w-full border border-indigo-200 text-indigo-700 py-2 rounded-lg hover:bg-indigo-50 transition text-sm font-semibold flex items-center justify-center gap-2"
+                        >
+                            <Paperclip size={16} />
+                            פתח את המסמכים
                         </button>
                     </div>
                 </div>
             </div>
+
+            {/* Status Edit Modal */}
+            {showPostModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold">מלל לפוסט אירוע</h3>
+                            <button onClick={() => setShowPostModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-gray-700">קישור פלייר (אם יש)</label>
+                            <input
+                                type="text"
+                                value={flyerLink}
+                                onChange={(e) => setFlyerLink(e.target.value)}
+                                onBlur={() => setPostContent(buildPostContent())}
+                                className="w-full border rounded-lg p-2 text-sm"
+                                placeholder="לינק לפלייר מעוצב"
+                            />
+                            <label className="text-sm font-medium text-gray-700">מלל לפוסט</label>
+                            <textarea
+                                rows={8}
+                                className="w-full border rounded-lg p-3 text-sm"
+                                value={postContent}
+                                onChange={(e) => setPostContent(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex justify-end gap-2 pt-4">
+                            <button
+                                type="button"
+                                onClick={handleCopyPost}
+                                className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"
+                                style={{ border: '1px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                            >
+                                <Copy size={16} />
+                                העתק
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleRefreshPost}
+                                className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 text-gray-700 border border-gray-200"
+                            >
+                                רענן מלל
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Status Edit Modal */}
             {editingStatusTask && (

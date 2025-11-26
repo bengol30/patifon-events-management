@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp, getDocs, query } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
+import PartnersInput from "@/components/PartnersInput";
 
 export default function NewEventPage() {
     const router = useRouter();
@@ -19,7 +20,7 @@ export default function NewEventPage() {
         location: "",
         description: "",
         participantsCount: "",
-        partners: "",
+        partners: [] as string[],
         goal: "",
         budget: "",
         recurrence: "NONE" as "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
@@ -208,16 +209,12 @@ export default function NewEventPage() {
                             </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">שותפים (רכזת נוספת, ארגון וכו')</label>
-                            <input
-                                type="text"
-                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                value={formData.partners}
-                                onChange={(e) => setFormData({ ...formData, partners: e.target.value })}
-                                placeholder="שמות שותפים..."
-                            />
-                        </div>
+                        <PartnersInput
+                            label="שותפים (רכזת נוספת, ארגון וכו')"
+                            value={formData.partners}
+                            onChange={(partners) => setFormData({ ...formData, partners })}
+                            placeholder="הוסף שותף ולחץ אנטר"
+                        />
 
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">מטרת האירוע</label>

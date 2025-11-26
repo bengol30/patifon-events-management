@@ -17,6 +17,8 @@ interface EventFile {
     taskTitle?: string;
     createdAt?: any;
     note?: string;
+    createdBy?: string | null;
+    createdByName?: string;
 }
 
 export default function EventFilesPage() {
@@ -94,6 +96,7 @@ export default function EventFilesPage() {
                                 <tr className="text-right text-gray-600">
                                     <th className="px-4 py-3 font-semibold flex items-center gap-1 justify-end"><Paperclip size={14} /> שם הקובץ</th>
                                     <th className="px-4 py-3 font-semibold">קשור למשימה</th>
+                                    <th className="px-4 py-3 font-semibold">הועלה ע״י</th>
                                     <th className="px-4 py-3 font-semibold">הערה</th>
                                     <th className="px-4 py-3 font-semibold">נוצר ב־</th>
                                     <th className="px-4 py-3 font-semibold">פעולות</th>
@@ -116,6 +119,9 @@ export default function EventFilesPage() {
                                                         {file.taskTitle}
                                                     </Link>
                                                 ) : "—"}
+                                            </td>
+                                            <td className="px-4 py-3 text-gray-700">
+                                                {file.createdByName || "לא ידוע"}
                                             </td>
                                             <td className="px-4 py-3 text-gray-700">
                                                 {editingId === file.id ? (
@@ -141,14 +147,25 @@ export default function EventFilesPage() {
                                                     : "-"}
                                             </td>
                                             <td className="px-4 py-3 text-right">
-                                                <button
-                                                    onClick={() => handleDelete(file)}
-                                                    className="text-red-600 hover:text-red-800 flex items-center gap-1"
-                                                    title="מחק"
-                                                >
-                                                    <Trash2 size={16} />
-                                                    מחיקה
-                                                </button>
+                                                <div className="flex items-center gap-2 justify-end">
+                                                    {file.taskId && (
+                                                        <Link
+                                                            href={`/tasks/${file.taskId}?eventId=${id}`}
+                                                            className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                                                        >
+                                                            <Edit2 size={14} />
+                                                            עריכת המשימה
+                                                        </Link>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleDelete(file)}
+                                                        className="text-red-600 hover:text-red-800 flex items-center gap-1"
+                                                        title="מחק"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                        מחיקה
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))

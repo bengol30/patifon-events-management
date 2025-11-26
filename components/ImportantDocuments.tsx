@@ -232,6 +232,11 @@ export default function ImportantDocuments() {
         }
     };
 
+    const handleOpenDocument = (fileUrl?: string) => {
+        if (!fileUrl) return;
+        window.open(fileUrl, "_blank", "noopener,noreferrer");
+    };
+
     const toggleCategory = (categoryId: string) => {
         const newExpanded = new Set(expandedCategories);
         if (newExpanded.has(categoryId)) {
@@ -370,7 +375,19 @@ export default function ImportantDocuments() {
                                             <p className="text-gray-400 text-sm text-center py-4">אין מסמכים בקטגוריה זו</p>
                                         ) : (
                                             categoryDocs.map(document => (
-                                                <div key={document.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition group">
+                                                <div
+                                                    key={document.id}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={() => handleOpenDocument(document.fileUrl)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === "Enter" || e.key === " ") {
+                                                            e.preventDefault();
+                                                            handleOpenDocument(document.fileUrl);
+                                                        }
+                                                    }}
+                                                    className={`flex items-center justify-between p-3 border border-gray-100 rounded-lg transition group ${document.fileUrl ? "hover:bg-gray-50 cursor-pointer" : "cursor-default"}`}
+                                                >
                                                     <div className="flex items-center gap-3 flex-1">
                                                         <FileText className="text-gray-400" size={18} />
                                                         <div className="flex-1">
@@ -391,19 +408,20 @@ export default function ImportantDocuments() {
                                                                 rel="noopener noreferrer"
                                                                 className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
                                                                 title="פתח קישור"
+                                                                onClick={(e) => e.stopPropagation()}
                                                             >
                                                                 <Download size={16} />
                                                             </a>
                                                         )}
                                                         <button
-                                                            onClick={() => handleEditDocument(document)}
+                                                            onClick={(e) => { e.stopPropagation(); handleEditDocument(document); }}
                                                             className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
                                                             title="ערוך"
                                                         >
                                                             <Edit2 size={16} />
                                                         </button>
                                                         <button
-                                                            onClick={() => handleDeleteDocument(document.id)}
+                                                            onClick={(e) => { e.stopPropagation(); handleDeleteDocument(document.id); }}
                                                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
                                                             title="מחק"
                                                         >
