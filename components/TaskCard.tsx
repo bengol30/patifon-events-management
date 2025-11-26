@@ -8,7 +8,7 @@ interface TaskProps {
     title: string;
     description?: string;
     assignee: string;
-    assignees?: { name: string; userId?: string }[];
+    assignees?: { name: string; userId?: string; email?: string }[];
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
@@ -26,6 +26,7 @@ interface TaskProps {
     eventTitle?: string;
     onEditStatus?: (task: TaskProps) => void;
     onEditDate?: (task: TaskProps) => void;
+    previewImage?: string;
 }
 
 export default function TaskCard({
@@ -51,6 +52,7 @@ export default function TaskCard({
     eventTitle,
     onEditStatus,
     onEditDate,
+    previewImage,
 }: TaskProps) {
     const router = useRouter();
 
@@ -120,7 +122,7 @@ export default function TaskCard({
             tabIndex={0}
             className={`bg-white p-4 rounded-lg shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative`}
         >
-            <div className="flex items-center justify-between w-full mb-2">
+                <div className="flex items-center justify-between w-full mb-2">
                 <div className="flex items-center gap-3 flex-1">
                     <button
                         onClick={handleStatusClick}
@@ -142,6 +144,11 @@ export default function TaskCard({
                                     </span>
                                 ))}
                             </div>
+                            {previewImage && (
+                                <div className="relative w-20 h-14 rounded-lg overflow-hidden border border-gray-200">
+                                    <img src={previewImage} alt={title} className="w-full h-full object-cover" />
+                                </div>
+                            )}
                             {description && (
                                 <span className="text-sm text-gray-600 line-clamp-2">
                                     {description}

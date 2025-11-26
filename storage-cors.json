@@ -3,10 +3,33 @@
     "origin": [
       "http://localhost:3000",
       "https://patifon-events.web.app",
-      "https://patifon-events.firebaseapp.com"
+      "https://patifon-events.firebaseapp.com",
+      "https://patifon-web.vercel.app",
+      "https://patifon-web-ben-gos-projects.vercel.app",
+      "https://patifon-web-bengol30-ben-gos-projects.vercel.app"
     ],
-    "method": ["GET", "POST", "PUT", "HEAD", "DELETE", "PATCH", "OPTIONS"],
-    "responseHeader": ["Authorization", "Content-Type", "x-goog-meta-*"],
+    "method": [
+      "GET",
+      "POST",
+      "PUT",
+      "HEAD",
+      "DELETE",
+      "PATCH",
+      "OPTIONS"
+    ],
+    "responseHeader": [
+      "Authorization",
+      "Content-Type",
+      "Accept",
+      "Origin",
+      "X-Requested-With",
+      "x-goog-meta-*",
+      "x-goog-resumable",
+      "x-goog-upload-command",
+      "x-goog-upload-header-*",
+      "x-goog-upload-protocol",
+      "x-goog-upload-status"
+    ],
     "maxAgeSeconds": 3600
   }
 ]

@@ -13,6 +13,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 interface Assignee {
     name: string;
     userId?: string;
+    email?: string;
 }
 
 interface Task {
@@ -70,7 +71,20 @@ export default function TaskDetailPage() {
 
     const normalizeAssignees = (data: any): Assignee[] => {
         if (!data) return [];
-        return data.assignees || (data.assignee ? [{ name: data.assignee, userId: data.assigneeId }] : []);
+        const raw = data.assignees || (data.assignee ? [{ name: data.assignee, userId: data.assigneeId, email: data.assigneeEmail }] : []);
+        return (raw || []).map((a: any) => ({
+            name: (a?.name || "").toString(),
+            ...(a?.userId ? { userId: a.userId } : {}),
+            ...(a?.email ? { email: a.email } : {}),
+        }));
+    };
+
+    const getAssigneeKey = (assignee?: { email?: string; userId?: string; name?: string } | null) => {
+        if (!assignee) return "";
+        if (assignee.email && assignee.email.trim()) return assignee.email.trim().toLowerCase();
+        if (assignee.userId) return String(assignee.userId);
+        if (assignee.name) return assignee.name.trim().toLowerCase();
+        return "";
     };
 
     // We need to find the eventId for this task since tasks are subcollections of events.
@@ -259,13 +273,22 @@ export default function TaskDetailPage() {
         }
     };
 
-    const sanitizeAssigneesForWrite = (arr: Assignee[] = []) =>
-        (arr || [])
-            .filter(a => (a.name || "").trim())
+    const sanitizeAssigneesForWrite = (arr: Assignee[] = []) => {
+        const seen = new Set<string>();
+        return (arr || [])
             .map(a => ({
                 name: (a.name || "").trim(),
-                ...(a.userId ? { userId: a.userId } : {})
-            }));
+                ...(a.userId ? { userId: a.userId } : {}),
+                ...(a.email ? { email: a.email.trim().toLowerCase() } : {}),
+            }))
+            .filter(a => {
+                const key = getAssigneeKey(a);
+                if (!key || !a.name) return false;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+    };
 
     const updateAssignees = async (nextAssignees: Assignee[]) => {
         if (!db || !task) return;
@@ -290,10 +313,11 @@ export default function TaskDetailPage() {
 
     const handleToggleAssignee = async (member: EventTeamMember) => {
         if (!task) return;
-        const exists = task.assignees?.some(a => a.name === member.name);
+        const memberKey = getAssigneeKey(member);
+        const exists = task.assignees?.some(a => getAssigneeKey(a) === memberKey);
         const next = exists
-            ? (task.assignees || []).filter(a => a.name !== member.name)
-            : ([...(task.assignees || []), { name: member.name, userId: member.userId }]);
+            ? (task.assignees || []).filter(a => getAssigneeKey(a) !== memberKey)
+            : ([...(task.assignees || []), { name: member.name, userId: member.userId, email: member.email }]);
         await updateAssignees(next);
     };
 
@@ -557,7 +581,8 @@ export default function TaskDetailPage() {
                                     </label>
                                     <div className="flex flex-wrap gap-2">
                                 {eventTeam.map((member, idx) => {
-                                            const checked = task.assignees?.some(a => a.name === member.name);
+                                            const memberKey = getAssigneeKey(member);
+                                            const checked = task.assignees?.some(a => getAssigneeKey(a) === memberKey);
                                             return (
                                                 <label
                                                     key={`${member.name}-${idx}`}

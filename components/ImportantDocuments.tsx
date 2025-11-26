@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { db } from "@/lib/firebase";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, updateDoc } from "firebase/firestore";
-import { Plus, Trash2, X, Edit2, FileText, FolderOpen, ChevronDown, ChevronRight, Download, RefreshCw } from "lucide-react";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "@/lib/firebase";
+import { Plus, Trash2, X, Edit2, FileText, FolderOpen, ChevronDown, ChevronRight, Download, RefreshCw, Upload, Loader2 } from "lucide-react";
 
 interface DocumentCategory {
     id: string;
@@ -97,6 +98,7 @@ export default function ImportantDocuments() {
     const [editingCategory, setEditingCategory] = useState<Partial<DocumentCategory>>({});
     const [editingDocument, setEditingDocument] = useState<Partial<Document>>({});
     const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
+    const [uploading, setUploading] = useState(false);
 
     useEffect(() => {
         if (!db) return;
@@ -183,11 +185,13 @@ export default function ImportantDocuments() {
     const handleAddDocument = (categoryId: string) => {
         setSelectedCategoryId(categoryId);
         setEditingDocument({ categoryId, title: "", description: "", fileUrl: "", fileName: "" });
+        setUploading(false);
         setShowDocumentModal(true);
     };
 
     const handleEditDocument = (document: Document) => {
         setEditingDocument({ ...document });
+        setUploading(false);
         setShowDocumentModal(true);
     };
 
@@ -217,6 +221,29 @@ export default function ImportantDocuments() {
         } catch (err) {
             console.error("Error saving document:", err);
             alert("שגיאה בשמירת המסמך");
+        }
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !storage) return;
+
+        setUploading(true);
+        try {
+            const storageRef = ref(storage, `important_documents/${Date.now()}_${file.name}`);
+            await uploadBytes(storageRef, file);
+            const url = await getDownloadURL(storageRef);
+
+            setEditingDocument(prev => ({
+                ...prev,
+                fileUrl: url,
+                fileName: file.name
+            }));
+        } catch (err) {
+            console.error("Error uploading file:", err);
+            alert("שגיאה בהעלאת הקובץ");
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -557,14 +584,47 @@ export default function ImportantDocuments() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">קישור למסמך (Google Drive / Dropbox וכו')</label>
-                                <input
-                                    type="url"
-                                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    value={editingDocument.fileUrl || ""}
-                                    onChange={e => setEditingDocument({ ...editingDocument, fileUrl: e.target.value })}
-                                    placeholder="https://..."
-                                />
+                                <label className="block text-sm font-medium text-gray-700 mb-1">קובץ או קישור</label>
+                                <div className="space-y-3">
+                                    {/* File Upload */}
+                                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-gray-50 transition relative">
+                                        {uploading ? (
+                                            <div className="flex flex-col items-center gap-2 text-indigo-600">
+                                                <Loader2 className="animate-spin" size={24} />
+                                                <span className="text-sm font-medium">מעלה קובץ...</span>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <input
+                                                    type="file"
+                                                    onChange={handleFileUpload}
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                />
+                                                <div className="flex flex-col items-center gap-2 text-gray-500">
+                                                    <Upload size={24} />
+                                                    <span className="text-sm font-medium">לחץ להעלאת קובץ</span>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+
+                                    <div className="relative">
+                                        <div className="absolute inset-0 flex items-center">
+                                            <div className="w-full border-t border-gray-200"></div>
+                                        </div>
+                                        <div className="relative flex justify-center text-sm">
+                                            <span className="px-2 bg-white text-gray-500">או הדבק קישור</span>
+                                        </div>
+                                    </div>
+
+                                    <input
+                                        type="url"
+                                        className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        value={editingDocument.fileUrl || ""}
+                                        onChange={e => setEditingDocument({ ...editingDocument, fileUrl: e.target.value })}
+                                        placeholder="https://..."
+                                    />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">שם הקובץ (אופציונלי)</label>
@@ -578,7 +638,13 @@ export default function ImportantDocuments() {
                             </div>
                             <div className="flex justify-end gap-3 pt-4">
                                 <button type="button" onClick={() => setShowDocumentModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">ביטול</button>
-                                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">שמור</button>
+                                <button
+                                    type="submit"
+                                    disabled={uploading}
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    שמור
+                                </button>
                             </div>
                         </form>
                     </div>

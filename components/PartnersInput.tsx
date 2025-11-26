@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { db } from "@/lib/firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { Plus, X } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 
 interface PartnersInputProps {
     label?: string;
@@ -29,33 +30,55 @@ const toPartnerArray = (raw: any): string[] => {
 export default function PartnersInput({ label, value, onChange, placeholder }: PartnersInputProps) {
     const [inputValue, setInputValue] = useState("");
     const [suggestions, setSuggestions] = useState<string[]>([]);
+    const { user } = useAuth();
 
     useEffect(() => {
         const fetchPartners = async () => {
             if (!db) return;
             try {
-                const snap = await getDocs(collection(db, "events"));
                 const names = new Set<string>();
-                snap.forEach((doc) => {
-                    const partners = toPartnerArray((doc.data() as any).partners);
-                    partners.forEach((p) => names.add(p));
-                });
+                if (user?.uid) {
+                    const q = query(collection(db, "events"), where("members", "array-contains", user.uid));
+                    const snapByUser = await getDocs(q);
+                    snapByUser.forEach((d) => {
+                        const partners = toPartnerArray((d.data() as any).partners);
+                        partners.forEach((p) => names.add(p));
+                    });
+                    // Fallback to all events if none found
+                    if (names.size === 0) {
+                        const snapAll = await getDocs(collection(db, "events"));
+                        snapAll.forEach((d) => {
+                            const partners = toPartnerArray((d.data() as any).partners);
+                            partners.forEach((p) => names.add(p));
+                        });
+                    }
+                } else {
+                    const snapAll = await getDocs(collection(db, "events"));
+                    snapAll.forEach((d) => {
+                        const partners = toPartnerArray((d.data() as any).partners);
+                        partners.forEach((p) => names.add(p));
+                    });
+                }
                 setSuggestions(Array.from(names).sort((a, b) => a.localeCompare(b, "he")));
             } catch (err) {
                 console.error("Error fetching partners suggestions", err);
             }
         };
         fetchPartners();
-    }, []);
+    }, [user]);
 
     const valueSet = useMemo(() => new Set(value.map((v) => v.toLowerCase())), [value]);
 
     const filteredSuggestions = useMemo(() => {
         const term = inputValue.trim().toLowerCase();
         if (!term) return [];
-        return suggestions.filter(
-            (s) => s.toLowerCase().includes(term) && !valueSet.has(s.toLowerCase())
-        ).slice(0, 5);
+        const startsWith = suggestions.filter(
+            (s) => s.toLowerCase().startsWith(term) && !valueSet.has(s.toLowerCase())
+        );
+        const contains = suggestions.filter(
+            (s) => s.toLowerCase().includes(term) && !valueSet.has(s.toLowerCase()) && !s.toLowerCase().startsWith(term)
+        );
+        return [...startsWith, ...contains].slice(0, 8);
     }, [inputValue, suggestions, valueSet]);
 
     const addPartner = (name: string) => {

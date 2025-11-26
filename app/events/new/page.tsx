@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, CalendarPlus } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
@@ -24,6 +24,8 @@ export default function NewEventPage() {
         goal: "",
         budget: "",
         recurrence: "NONE" as "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+        contactName: "",
+        contactPhone: "",
     });
 
     // Redirect if not authenticated
@@ -81,6 +83,11 @@ export default function NewEventPage() {
                         userId: user.uid,
                     }
                 ],
+                contactPerson: {
+                    name: formData.contactName,
+                    phone: formData.contactPhone,
+                    email: user.email || "",
+                },
                 createdAt: serverTimestamp(),
                 responsibilities: [],
             };
@@ -88,39 +95,47 @@ export default function NewEventPage() {
             const docRef = await addDoc(collection(db, "events"), eventData);
             console.log("Event created with ID:", docRef.id);
 
-            // Define default tasks (hardcoded for now)
-            const defaultTasks = [
-                { title: "בניית תקציב ראשוני", priority: "HIGH" },
-                { title: "גיוס צוות לאירוע", priority: "HIGH" },
-                { title: "סגירת לוקיישן", priority: "CRITICAL" },
-                { title: "בניית לו\"ז אירוע", priority: "NORMAL" },
-                { title: "פרסום ושיווק", priority: "NORMAL" },
-                { title: "הזמנת ציוד נדרש", priority: "NORMAL" },
-                { title: "תיאום ספקים", priority: "NORMAL" }
-            ];
-
-            // Add default tasks to the new event
-            const tasksCollection = collection(db, "events", docRef.id, "tasks");
-            const taskPromises = defaultTasks.map(task =>
-                addDoc(tasksCollection, {
-                    title: task.title,
-                    priority: task.priority,
-                    status: "TODO",
-                    assignee: "",
-                    dueDate: "",
-                    createdAt: serverTimestamp(),
-                    createdBy: user.uid
-                })
-            );
-
-            await Promise.all(taskPromises);
-
             router.push("/");
         } catch (err: any) {
             console.error("Error creating event:", err);
             setError("שגיאה ביצירת האירוע: " + err.message);
             setSubmitting(false);
         }
+    };
+
+    const formatGoogleDate = (date: Date) =>
+        date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+
+    const handleSaveToCalendar = () => {
+        if (!formData.title || !formData.date) {
+            alert("מלא שם אירוע ותאריך/שעה לפני שמירה ביומן.");
+            return;
+        }
+        const start = new Date(formData.date);
+        if (isNaN(start.getTime())) {
+            alert("תאריך/שעה לא תקינים");
+            return;
+        }
+        const end = new Date(start.getTime() + 2 * 60 * 60 * 1000); // ברירת מחדל: שעתיים
+
+        const text = encodeURIComponent(formData.title);
+        const detailsStr = [
+            formData.goal ? `מטרה: ${formData.goal}` : null,
+            formData.description ? `תיאור: ${formData.description}` : null,
+            formData.location ? `מיקום: ${formData.location}` : null,
+            formData.participantsCount ? `משתתפים משוערים: ${formData.participantsCount}` : null,
+            formData.budget ? `תקציב משוער: ${formData.budget}` : null,
+            formData.partners?.length ? `שותפים: ${formData.partners.join(", ")}` : null,
+            formData.recurrence && formData.recurrence !== "NONE" ? `תדירות: ${formData.recurrence}` : null,
+            formData.contactName ? `איש קשר: ${formData.contactName}` : null,
+            formData.contactPhone ? `טלפון: ${formData.contactPhone}` : null,
+        ].filter(Boolean).join(" | ");
+        const details = encodeURIComponent(detailsStr);
+        const location = encodeURIComponent(formData.location || "");
+        const dates = `${formatGoogleDate(start)}/${formatGoogleDate(end)}`;
+
+        const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${dates}&details=${details}&location=${location}`;
+        window.open(url, "_blank", "noopener,noreferrer");
     };
 
     return (
@@ -137,16 +152,40 @@ export default function NewEventPage() {
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                     {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
-                            <input
-                                type="text"
-                                required
-                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                value={formData.title}
-                                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                                placeholder="לדוגמה: פסטיבל אביב 2025"
-                            />
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                    value={formData.title}
+                                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                                    placeholder="לדוגמה: פסטיבל אביב 2025"
+                                />
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">איש קשר</label>
+                                    <input
+                                        type="text"
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        value={formData.contactName || ""}
+                                        onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
+                                        placeholder="שם איש קשר"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">טלפון איש קשר</label>
+                                    <input
+                                        type="tel"
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        value={formData.contactPhone || ""}
+                                        onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
+                                        placeholder="05x-xxxxxxx"
+                                    />
+                                </div>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -238,7 +277,15 @@ export default function NewEventPage() {
                             />
                         </div>
 
-                        <div className="pt-4 border-t border-gray-100">
+                        <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
+                            <button
+                                type="button"
+                                onClick={handleSaveToCalendar}
+                                className="w-full border-2 border-indigo-200 text-indigo-700 py-2 px-4 rounded-lg hover:bg-indigo-50 transition font-semibold flex items-center justify-center gap-2"
+                            >
+                                <CalendarPlus size={18} />
+                                שמור ביומן
+                            </button>
                             <button
                                 type="submit"
                                 disabled={submitting}

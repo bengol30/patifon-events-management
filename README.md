@@ -60,6 +60,13 @@ npm run dev
 אחרי ההעלאה, אל תשכח:
 1. Firebase Console > Authentication > Settings > Authorized domains
 2. הוסף את הדומיין של Vercel
+3. עדכן את הגדרות ה-CORS של Firebase Storage (כדי לאפשר העלאות מהדומיינים של ה-Production):
+```bash
+gsutil cors set storage-cors.json gs://patifon-events.appspot.com
+# או:
+gcloud storage buckets update gs://patifon-events.appspot.com --cors-file=storage-cors.json
+```
+וודא שהדומיין שלך מופיע במערך ה-`origin` בקובץ `storage-cors.json` לפני הרצת הפקודה.
 
 ## 🛠️ טכנולוגיות
 

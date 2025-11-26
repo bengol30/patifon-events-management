@@ -195,18 +195,6 @@ export default function EventRegistrationPage() {
                             <p className="text-xs text-gray-500">פרטי ההרשמה נשמרים רק לצורך היערכות לאירוע.</p>
                         </form>
 
-                        <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 space-y-3 text-sm text-gray-700">
-                            <h3 className="font-semibold text-gray-900 mb-2">מה מצפה לכם?</h3>
-                            <ul className="space-y-2 list-disc pr-5">
-                                <li>קבלת עדכונים קרובים על שינויים ומידע חשוב.</li>
-                                <li>עזרה לנו להיערך מבחינת ציוד, מקום וארגון.</li>
-                                <li>הבטחת מקום והפחתת תורים/עומסים ביום האירוע.</li>
-                            </ul>
-                            <div className="p-3 rounded-lg bg-white border border-dashed border-orange-200">
-                                <p className="text-xs text-gray-500 mb-1">שיתוף עם חברים</p>
-                                <p className="text-sm">שלחו את הדף הזה לכל מי שעשוי להגיע. ככל שנדע על יותר משתתפים מראש – נוכל לבנות חוויה טובה יותר.</p>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>

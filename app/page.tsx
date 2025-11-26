@@ -4,12 +4,13 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc } from "firebase/firestore";
+import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, BookOpen, LogOut, MapPin, Users, Clock } from "lucide-react";
+import { db, auth } from "@/lib/firebase";
+import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc } from "firebase/firestore";
 import TaskChat from "@/components/TaskChat";
 
 import TaskCard from "@/components/TaskCard";
+import { signOut } from "firebase/auth";
 
 interface Event {
   id: string;
@@ -17,6 +18,7 @@ interface Event {
   location: string;
   startTime: any;
   status: string;
+  participantsCount?: string;
 }
 
 interface Task {
@@ -25,7 +27,7 @@ interface Task {
   description?: string;
   assignee: string;
   assigneeId?: string;
-  assignees?: { name: string; userId?: string }[];
+  assignees?: { name: string; userId?: string; email?: string }[];
   status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
   dueDate: string;
   priority: "NORMAL" | "HIGH" | "CRITICAL";
@@ -68,6 +70,22 @@ export default function Dashboard() {
     }
   }, [user, loading, router]);
 
+  // Onboarding gate: new users must complete profile
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      if (!db || !user) return;
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (!userDoc.exists() || !userDoc.data()?.onboarded) {
+          router.push("/onboarding");
+        }
+      } catch (err) {
+        console.error("Error checking onboarding:", err);
+      }
+    };
+    checkOnboarding();
+  }, [user]);
+
   useEffect(() => {
     const fetchData = async () => {
       if (!db || !user) {
@@ -89,7 +107,12 @@ export default function Dashboard() {
           id: doc.id,
           ...doc.data(),
         })) as Event[];
-        setEvents(eventsData);
+        const sortedByDate = [...eventsData].sort((a, b) => {
+          const aDate = a.startTime?.seconds ? a.startTime.seconds : 0;
+          const bDate = b.startTime?.seconds ? b.startTime.seconds : 0;
+          return aDate - bDate;
+        });
+        setEvents(sortedByDate);
 
         // Fetch My Tasks (using Collection Group Query)
         // Note: This requires a composite index in Firestore if we filter by multiple fields
@@ -109,13 +132,14 @@ export default function Dashboard() {
 
           const assigneeStr = (taskData.assignee || "").toLowerCase();
           const assigneeId = taskData.assigneeId as string | undefined;
-          const assigneesArr = (taskData.assignees as { name: string; userId?: string }[] | undefined) ||
-            (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId }] : []);
+          const assigneesArr = (taskData.assignees as { name: string; userId?: string; email?: string }[] | undefined) ||
+            (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId, email: (taskData as any).assigneeEmail }] : []);
           const isAssignedToUser =
             taskData.status !== "DONE" &&
             (
               (assigneeId && assigneeId === user.uid) ||
               assigneesArr.some(a => a.userId && a.userId === user.uid) ||
+              assigneesArr.some(a => a.email && userEmail && a.email.toLowerCase() === userEmail.toLowerCase()) ||
               (assigneeStr && (
                 (userName && assigneeStr.includes(userName.toLowerCase())) ||
                 (userEmail && assigneeStr.includes(userEmail.split('@')[0].toLowerCase())) ||
@@ -264,24 +288,115 @@ export default function Dashboard() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      if (auth) {
+        await signOut(auth);
+        router.push("/login");
+      }
+    } catch (err) {
+      console.error("Error signing out:", err);
+      alert("שגיאה בהתנתקות");
+    }
+  };
+
+  const formatEventDate = (startTime: any) => {
+    if (!startTime) return "";
+    const date = startTime.seconds ? new Date(startTime.seconds * 1000) : new Date(startTime);
+    if (isNaN(date.getTime())) return "";
+    return date.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
+  };
+
+  const handleUpdateEventField = async (eventId: string, field: "startTime" | "location" | "participantsCount" | "status") => {
+    if (!db) return;
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const current = field === "startTime"
+      ? (event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toISOString().slice(0, 16) : "")
+      : (event as any)[field] || "";
+
+    const labelMap: Record<typeof field, string> = {
+      startTime: "תאריך ושעה (פורמט: 2025-12-31T20:00)",
+      location: "מיקום",
+      participantsCount: "מספר משתתפים משוער",
+      status: "סטטוס"
+    };
+
+    const input = window.prompt(`עדכן ${labelMap[field]}`, current);
+    if (input === null) return; // cancel
+    const trimmed = input.trim();
+
+    let patch: any = {};
+    if (field === "startTime") {
+      const dt = new Date(trimmed);
+      if (isNaN(dt.getTime())) {
+        alert("תאריך/שעה לא תקינים");
+        return;
+      }
+      patch.startTime = dt;
+      patch.endTime = dt;
+    } else {
+      patch[field] = trimmed;
+    }
+
+    try {
+      await updateDoc(doc(db, "events", eventId), patch);
+      setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...patch } : e));
+    } catch (err) {
+      console.error("Error updating event field:", err);
+      alert("שגיאה בעדכון האירוע");
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    if (!db) return;
+    const confirmDelete = confirm("למחוק את האירוע הזה?");
+    if (!confirmDelete) return;
+    try {
+      await deleteDoc(doc(db, "events", eventId));
+      setEvents(prev => prev.filter(e => e.id !== eventId));
+    } catch (err) {
+      console.error("Error deleting event:", err);
+      alert("שגיאה במחיקת האירוע");
+    }
+  };
+
   if (loading) return <div className="p-8 text-center">טוען...</div>;
   if (!user) return null;
 
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--patifon-cream)' }}>
-      <header className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--patifon-burgundy)' }}>שלום, {user.displayName || user.email}</h1>
-          <p style={{ color: 'var(--patifon-red)' }}>ברוך הבא למערכת ניהול האירועים של פטיפון</p>
+      <header className="flex justify-between items-start mb-8">
+        <div className="flex flex-col items-start gap-2">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/settings"
+              className="p-2 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 transition"
+              title="הגדרות"
+            >
+              <Settings size={20} />
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="p-2 rounded-full border border-red-200 text-red-600 hover:bg-red-50 transition"
+              title="התנתקות"
+            >
+              <LogOut size={20} />
+            </button>
+          </div>
+          <h1 className="text-3xl font-bold leading-tight" style={{ color: 'var(--patifon-burgundy)' }}>
+            {user.displayName || user.email}
+          </h1>
         </div>
         <div className="flex items-center gap-3">
           <Link
-            href="/settings"
+            href="/guide"
             className="px-4 py-2 rounded-lg flex items-center gap-2 transition vinyl-shadow"
-            style={{ background: 'white', color: 'var(--patifon-burgundy)', border: '2px solid var(--patifon-orange)' }}
+            style={{ background: 'white', color: 'var(--patifon-burgundy)', border: '2px solid var(--patifon-yellow)' }}
           >
-            <Settings size={20} />
-            הגדרות
+            <BookOpen size={20} />
+            לימדו את המערכת
           </Link>
           <Link
             href="/events/new"
@@ -538,17 +653,59 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-3">
               {events.map((event) => (
-                <Link
+                <div
                   key={event.id}
-                  href={`/events/${event.id}`}
-                  className="block p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+                  className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
                 >
-                  <h3 className="font-semibold text-gray-900">{event.title}</h3>
-                  <p className="text-sm text-gray-500">{event.location}</p>
-                  <span className="inline-block mt-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                    {event.status}
-                  </span>
-                </Link>
+                  <Link href={`/events/${event.id}`} className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-gray-900 truncate">{event.title}</h3>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-gray-600">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateEventField(event.id, "startTime")}
+                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
+                        title="עדכון תאריך ושעה"
+                      >
+                        <Calendar size={14} className="shrink-0" />
+                        <span className="truncate underline-offset-2">{formatEventDate(event.startTime) || "אין תאריך"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateEventField(event.id, "location")}
+                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
+                        title="עדכון מיקום"
+                      >
+                        <MapPin size={14} className="shrink-0" />
+                        <span className="truncate underline-offset-2">{event.location || "לא צוין מיקום"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateEventField(event.id, "participantsCount")}
+                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
+                        title="עדכון כמות משתתפים"
+                      >
+                        <Users size={14} className="shrink-0" />
+                        <span className="truncate underline-offset-2">{event.participantsCount || "משתתפים: לא צוין"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateEventField(event.id, "status")}
+                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
+                        title="עדכון סטטוס"
+                      >
+                        <CheckSquare size={14} className="shrink-0" />
+                        <span className="truncate underline-offset-2">{event.status || "ללא סטטוס"}</span>
+                      </button>
+                    </div>
+                  </Link>
+                  <button
+                    onClick={() => handleDeleteEvent(event.id)}
+                    className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
+                    title="מחק אירוע"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               ))}
             </div>
           )}

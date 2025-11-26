@@ -3,11 +3,13 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
+import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy } from "lucide-react";
 import Link from "next/link";
 import ImportantDocuments from "@/components/ImportantDocuments";
+const ADMIN_EMAIL = "bengo0469@gmail.com";
 
 interface DefaultTask {
     id: string;
@@ -107,6 +109,13 @@ export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState("defaultTasks");
     const [defaultTasks, setDefaultTasks] = useState<DefaultTask[]>([]);
     const [loading, setLoading] = useState(true);
+    const [profileName, setProfileName] = useState("");
+    const [profileEmail, setProfileEmail] = useState("");
+    const [currentPassword, setCurrentPassword] = useState("");
+    const [newPassword, setNewPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [savingProfile, setSavingProfile] = useState(false);
+    const [savingPassword, setSavingPassword] = useState(false);
 
     // UI State
     const [showSeedModal, setShowSeedModal] = useState(false);
@@ -149,6 +158,13 @@ export default function SettingsPage() {
 
         return () => unsubscribe();
     }, [user, authLoading, router]);
+
+    useEffect(() => {
+        if (user) {
+            setProfileName(user.displayName || "");
+            setProfileEmail(user.email || "");
+        }
+    }, [user]);
 
     // Auto-hide message after 3 seconds
     useEffect(() => {
@@ -210,6 +226,113 @@ export default function SettingsPage() {
 
     const handleSeedTasks = () => {
         setShowSeedModal(true);
+    };
+
+    const handleSaveProfile = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!auth || !user) return;
+        setSavingProfile(true);
+        try {
+            const updates: Promise<void>[] = [];
+            const trimmedName = profileName.trim();
+            const trimmedEmail = profileEmail.trim();
+
+            if (trimmedName && trimmedName !== (user.displayName || "")) {
+                updates.push(updateProfile(user, { displayName: trimmedName }));
+            }
+            if (trimmedEmail && trimmedEmail !== (user.email || "")) {
+                updates.push(updateEmail(user, trimmedEmail));
+            }
+
+            if (updates.length === 0) {
+                setMessage({ text: "אין שינויים לשמור", type: "success" });
+            } else {
+                await Promise.all(updates);
+                setMessage({ text: "הפרופיל עודכן", type: "success" });
+            }
+        } catch (err: any) {
+            console.error("Error updating profile:", err);
+            const msg = err?.code === "auth/requires-recent-login"
+                ? "צריך להתחבר מחדש כדי לעדכן אימייל/שם משתמש."
+                : "שגיאה בעדכון הפרופיל";
+            setMessage({ text: msg, type: "error" });
+        } finally {
+            setSavingProfile(false);
+        }
+    };
+
+    const handleChangePassword = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!auth || !user) return;
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            setMessage({ text: "מלא את כל השדות לסיסמה", type: "error" });
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            setMessage({ text: "הסיסמאות לא תואמות", type: "error" });
+            return;
+        }
+        const hasPasswordProvider = user.providerData.some(p => p.providerId === "password");
+        if (!hasPasswordProvider) {
+            setMessage({ text: "שינוי סיסמה זמין רק לחשבון אימייל/סיסמה", type: "error" });
+            return;
+        }
+
+        setSavingPassword(true);
+        try {
+            const credential = EmailAuthProvider.credential(user.email || "", currentPassword);
+            await reauthenticateWithCredential(user, credential);
+            await updatePassword(user, newPassword);
+            setMessage({ text: "הסיסמה עודכנה בהצלחה", type: "success" });
+            setCurrentPassword("");
+            setNewPassword("");
+            setConfirmPassword("");
+        } catch (err: any) {
+            console.error("Error updating password:", err);
+            const msg = err?.code === "auth/wrong-password"
+                ? "סיסמה נוכחית שגויה"
+                : err?.code === "auth/weak-password"
+                    ? "סיסמה חלשה מדי (לפחות 6 תווים)"
+                    : err?.code === "auth/requires-recent-login"
+                        ? "צריך להתחבר מחדש כדי להחליף סיסמה"
+                        : "שגיאה בעדכון הסיסמה";
+            setMessage({ text: msg, type: "error" });
+        } finally {
+            setSavingPassword(false);
+        }
+    };
+
+    const handleSendVerification = async () => {
+        if (!user) return;
+        try {
+            await sendEmailVerification(user);
+            setMessage({ text: "מייל אימות נשלח", type: "success" });
+        } catch (err) {
+            console.error("Error sending verification:", err);
+            setMessage({ text: "שגיאה בשליחת מייל אימות", type: "error" });
+        }
+    };
+
+    const handleCopyUid = async () => {
+        if (!user?.uid) return;
+        try {
+            await navigator.clipboard.writeText(user.uid);
+            setMessage({ text: "UID הועתק", type: "success" });
+        } catch (err) {
+            console.error("Error copying UID:", err);
+            setMessage({ text: "לא הצלחנו להעתיק", type: "error" });
+        }
+    };
+
+    const handleLogout = async () => {
+        if (!auth) return;
+        try {
+            await signOut(auth);
+            router.push("/login");
+        } catch (err) {
+            console.error("Error signing out:", err);
+            setMessage({ text: "שגיאה בהתנתקות, נסה שוב", type: "error" });
+        }
     };
 
     const executeSeedTasks = async () => {
@@ -601,6 +724,24 @@ export default function SettingsPage() {
                             הגדרות מערכת
                         </h1>
                     </div>
+                    <div className="flex items-center gap-2">
+                        {user?.email === ADMIN_EMAIL && (
+                            <Link
+                                href="/admin"
+                                className="flex items-center gap-2 text-sm font-semibold text-indigo-700 border border-indigo-200 hover:border-indigo-300 hover:bg-indigo-50 px-3 py-2 rounded-lg transition"
+                            >
+                                <ShieldCheck size={16} />
+                                אזור בקרה
+                            </Link>
+                        )}
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center gap-2 text-sm font-semibold text-red-600 hover:text-red-700 border border-red-200 hover:border-red-300 px-3 py-2 rounded-lg transition"
+                        >
+                            <LogOut size={16} />
+                            התנתק
+                        </button>
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -626,6 +767,16 @@ export default function SettingsPage() {
                             >
                                 <FileText size={18} />
                                 מסמכים חשובים
+                            </button>
+                            <button
+                                onClick={() => setActiveTab("account")}
+                                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "account"
+                                    ? "bg-indigo-50 text-indigo-700"
+                                    : "text-gray-600 hover:bg-gray-50"
+                                    }`}
+                            >
+                                <ShieldCheck size={18} />
+                                חשבון ואבטחה
                             </button>
                         </nav>
                     </div>
@@ -778,6 +929,133 @@ export default function SettingsPage() {
 
                         {activeTab === "documents" && (
                             <ImportantDocuments />
+                        )}
+
+                        {activeTab === "account" && (
+                            <div className="space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <h2 className="text-xl font-bold text-gray-900 mb-2">פרטי חשבון</h2>
+                                    <p className="text-gray-500 text-sm mb-4">עדכן שם משתמש/אימייל וראה מידע טכני על החשבון.</p>
+
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div className="space-y-1">
+                                            <label className="text-sm text-gray-600">שם משתמש</label>
+                                            <input
+                                                type="text"
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                value={profileName}
+                                                onChange={e => setProfileName(e.target.value)}
+                                                placeholder="איך נציג את שמך במערכת"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-sm text-gray-600">אימייל</label>
+                                            <input
+                                                type="email"
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                value={profileEmail}
+                                                onChange={e => setProfileEmail(e.target.value)}
+                                                placeholder="example@email.com"
+                                            />
+                                            <div className="flex items-center gap-2 text-xs mt-1">
+                                                <span className={`px-2 py-0.5 rounded-full ${user?.emailVerified ? "bg-green-50 text-green-700" : "bg-yellow-50 text-yellow-700"}`}>
+                                                    {user?.emailVerified ? "מאומת" : "לא מאומת"}
+                                                </span>
+                                                {!user?.emailVerified && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSendVerification}
+                                                        className="text-indigo-600 hover:text-indigo-800 underline"
+                                                    >
+                                                        שלח מייל אימות
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-4 flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                                        <span className="flex items-center gap-1">
+                                            <ShieldCheck size={14} />
+                                            UID: {user?.uid || "-"}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyUid}
+                                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            <Copy size={14} />
+                                            העתק UID
+                                        </button>
+                                        <span className="flex items-center gap-1">
+                                            <User size={14} />
+                                            ספקי התחברות: {user?.providerData.map(p => p.providerId).join(", ") || "-"}
+                                        </span>
+                                    </div>
+
+                                    <div className="flex justify-end mt-6">
+                                        <button
+                                            onClick={handleSaveProfile}
+                                            disabled={savingProfile}
+                                            className={`px-4 py-2 rounded-lg text-sm font-semibold shadow-sm ${savingProfile ? "bg-gray-200 text-gray-500" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                        >
+                                            {savingProfile ? "שומר..." : "שמור פרופיל"}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <h2 className="text-xl font-bold text-gray-900 mb-2">שינוי סיסמה</h2>
+                                    <p className="text-gray-500 text-sm mb-4">החלף סיסמה לחשבון אימייל/סיסמה.</p>
+                                    <form onSubmit={handleChangePassword} className="space-y-4">
+                                        <div className="grid gap-4 sm:grid-cols-3">
+                                            <div className="space-y-1">
+                                                <label className="text-sm text-gray-600">סיסמה נוכחית</label>
+                                                <input
+                                                    type="password"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={currentPassword}
+                                                    onChange={e => setCurrentPassword(e.target.value)}
+                                                    autoComplete="current-password"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-sm text-gray-600">סיסמה חדשה</label>
+                                                <input
+                                                    type="password"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={newPassword}
+                                                    onChange={e => setNewPassword(e.target.value)}
+                                                    autoComplete="new-password"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-sm text-gray-600">אימות סיסמה</label>
+                                                <input
+                                                    type="password"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={confirmPassword}
+                                                    onChange={e => setConfirmPassword(e.target.value)}
+                                                    autoComplete="new-password"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center justify-between text-xs text-gray-500">
+                                            <span>מומלץ לבחור סיסמה באורך 12+ תווים עם אותיות, מספרים וסימנים.</span>
+                                            <span>זמין רק לחשבונות אימייל/סיסמה.</span>
+                                        </div>
+                                        <div className="flex justify-end">
+                                            <button
+                                                type="submit"
+                                                disabled={savingPassword}
+                                                className={`px-4 py-2 rounded-lg text-sm font-semibold shadow-sm ${savingPassword ? "bg-gray-200 text-gray-500" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                            >
+                                                {savingPassword ? "מעדכן..." : "עדכן סיסמה"}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </div>
