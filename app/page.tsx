@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, BookOpen, LogOut, MapPin, Users, Clock } from "lucide-react";
+import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock } from "lucide-react";
 import { db, auth } from "@/lib/firebase";
 import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc } from "firebase/firestore";
 import TaskChat from "@/components/TaskChat";
@@ -391,14 +391,6 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-3">
           <Link
-            href="/guide"
-            className="px-4 py-2 rounded-lg flex items-center gap-2 transition vinyl-shadow"
-            style={{ background: 'white', color: 'var(--patifon-burgundy)', border: '2px solid var(--patifon-yellow)' }}
-          >
-            <BookOpen size={20} />
-            לימדו את המערכת
-          </Link>
-          <Link
             href="/events/new"
             className="patifon-gradient text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90 transition vinyl-shadow"
           >
@@ -588,18 +580,18 @@ export default function Dashboard() {
                     key={task.id}
                     id={task.id}
                     title={task.title}
-                  description={task.description}
-                  assignee={task.assignee || "לא משויך"}
-                  assignees={task.assignees}
-                  status={task.status}
-                  dueDate={task.dueDate}
-                  priority={task.priority}
-                  currentStatus={task.currentStatus}
-                  nextStep={task.nextStep}
-                  eventId={task.eventId}
-                  eventTitle={task.eventTitle}
-                  onEdit={() => setEditingTask(task)}
-                  onDelete={() => setDeletingTaskId(task.id)}
+                    description={task.description}
+                    assignee={task.assignee || "לא משויך"}
+                    assignees={task.assignees}
+                    status={task.status}
+                    dueDate={task.dueDate}
+                    priority={task.priority}
+                    currentStatus={task.currentStatus}
+                    nextStep={task.nextStep}
+                    eventId={task.eventId}
+                    eventTitle={task.eventTitle}
+                    onEdit={() => setEditingTask(task)}
+                    onDelete={() => setDeletingTaskId(task.id)}
                     onStatusChange={async (newStatus) => {
                       if (newStatus === "DONE") {
                         handleCompleteTask(task);
