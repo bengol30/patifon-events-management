@@ -373,7 +373,7 @@ export default function Dashboard() {
         const attendeesByEvent = await Promise.all(
           myCreatedEvents.map(async (ev) => {
             try {
-              const attendeesSnap = await getDocs(collection(db, "events", ev.id, "attendees"));
+              const attendeesSnap = await getDocs(collection(db!, "events", ev.id, "attendees"));
               return attendeesSnap.size;
             } catch (err) {
               console.error("Error loading attendees for event", ev.id, err);
@@ -431,14 +431,14 @@ export default function Dashboard() {
         setJoinRequests(reqMap);
 
         // Join requests directed to me as בעל אירוע
-        const incomingByOwnerId = await getDocs(query(collection(db, "join_requests"), where("ownerId", "==", user.uid)));
-        let incomingByEmail: any[] = [];
+        const incomingByOwnerId = await getDocs(query(collection(db!, "join_requests"), where("ownerId", "==", user.uid)));
+        let incomingByEmail: any = null;
         if (user.email) {
-          incomingByEmail = await getDocs(query(collection(db, "join_requests"), where("ownerEmail", "==", user.email)));
+          incomingByEmail = await getDocs(query(collection(db!, "join_requests"), where("ownerEmail", "==", user.email)));
         }
         const incomingCombined: Record<string, JoinRequest> = {};
         incomingByOwnerId.forEach(d => { incomingCombined[d.id] = { id: d.id, ...d.data() } as JoinRequest; });
-        (Array.isArray(incomingByEmail?.docs) ? incomingByEmail.docs : []).forEach((d: any) => { incomingCombined[d.id] = { id: d.id, ...d.data() } as JoinRequest; });
+        (incomingByEmail?.docs || []).forEach((d: any) => { incomingCombined[d.id] = { id: d.id, ...d.data() } as JoinRequest; });
         setIncomingJoinRequests(Object.values(incomingCombined).filter(r => r.status === "PENDING"));
 
       } catch (error) {
@@ -505,14 +505,14 @@ export default function Dashboard() {
   const currentUid = user?.uid || "";
   const taskNotifications = currentUid
     ? notificationTasks.filter(t => {
-        const hasNewMessage = t.lastMessageTime && t.lastMessageBy && t.lastMessageBy !== currentUid;
-        const unread = !t.readBy || !t.readBy[currentUid];
-        const mentioned = (t as any).lastMessageMentions?.some((m: any) =>
-          (m?.userId && m.userId === currentUid) ||
-          (m?.email && user?.email && m.email.toLowerCase() === user.email.toLowerCase())
-        );
-        return (hasNewMessage && unread) || mentioned;
-      })
+      const hasNewMessage = t.lastMessageTime && t.lastMessageBy && t.lastMessageBy !== currentUid;
+      const unread = !t.readBy || !t.readBy[currentUid];
+      const mentioned = (t as any).lastMessageMentions?.some((m: any) =>
+        (m?.userId && m.userId === currentUid) ||
+        (m?.email && user?.email && m.email.toLowerCase() === user.email.toLowerCase())
+      );
+      return (hasNewMessage && unread) || mentioned;
+    })
     : [];
 
   const handleUpdateTask = async (e: React.FormEvent) => {
@@ -1099,19 +1099,19 @@ export default function Dashboard() {
                     (event.createdBy && event.createdBy === user.uid) ||
                     (event.createdByEmail && user.email && normalizeKey(event.createdByEmail) === normalizeKey(user.email))
                   ) && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setDeleteEventRemoveTasks(false);
-                        setConfirmingEventId(event.id);
-                      }}
-                      className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
-                      title="מחק אירוע"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setDeleteEventRemoveTasks(false);
+                          setConfirmingEventId(event.id);
+                        }}
+                        className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
+                        title="מחק אירוע"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                 </div>
               ))}
             </div>
@@ -1255,17 +1255,16 @@ export default function Dashboard() {
                                 <button
                                   onClick={() => handleJoinEventRequest(ev)}
                                   disabled={joinRequests[ev.id] === "PENDING" || joinRequests[ev.id] === "APPROVED"}
-                                  className={`text-xs px-3 py-1 rounded-full border transition ${
-                                    joinRequests[ev.id] === "PENDING" || joinRequests[ev.id] === "APPROVED"
-                                      ? "border-gray-200 text-gray-500 bg-gray-100 cursor-not-allowed"
-                                      : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                                  }`}
+                                  className={`text-xs px-3 py-1 rounded-full border transition ${joinRequests[ev.id] === "PENDING" || joinRequests[ev.id] === "APPROVED"
+                                    ? "border-gray-200 text-gray-500 bg-gray-100 cursor-not-allowed"
+                                    : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                    }`}
                                 >
                                   {joinRequests[ev.id] === "PENDING"
                                     ? "ממתין לאישור"
                                     : joinRequests[ev.id] === "APPROVED"
-                                    ? "מאושר"
-                                    : "הצטרף לצוות"}
+                                      ? "מאושר"
+                                      : "הצטרף לצוות"}
                                 </button>
                               </div>
                             </div>
@@ -1284,11 +1283,11 @@ export default function Dashboard() {
         </div>
       )}
 
-          {activePanel === "notifications" && (
-            <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-              <div className="flex items-center gap-2 mb-4">
-                <Bell style={{ color: 'var(--patifon-orange)' }} />
-                <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>הודעות והתראות</h2>
+      {activePanel === "notifications" && (
+        <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Bell style={{ color: 'var(--patifon-orange)' }} />
+            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>הודעות והתראות</h2>
           </div>
           {loadingNotifications ? (
             <div className="text-gray-500 text-center py-6">טוען התראות...</div>

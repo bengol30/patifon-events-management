@@ -226,7 +226,7 @@ export default function EventDetailsPage() {
         const updated = await Promise.all(teamArr.map(async (m) => {
             if (!m.userId) return m;
             try {
-                const userSnap = await getDoc(doc(db, "users", m.userId));
+                const userSnap = await getDoc(doc(db!, "users", m.userId));
                 if (userSnap.exists()) {
                     const profile = userSnap.data() as any;
                     return { ...m, name: profile.fullName || profile.displayName || m.name };
@@ -2398,8 +2398,8 @@ export default function EventDetailsPage() {
                                         (m.userId && m.userId === c.id) ||
                                         (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
                                     )).length === 0 && (
-                                        <p className="text-xs text-gray-500 px-2 py-1">לא נמצאו משתמשים להצגה.</p>
-                                    )}
+                                            <p className="text-xs text-gray-500 px-2 py-1">לא נמצאו משתמשים להצגה.</p>
+                                        )}
                                 </div>
                             </div>
                         )}

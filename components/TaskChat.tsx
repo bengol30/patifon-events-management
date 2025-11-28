@@ -41,7 +41,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
 
         const loadTeam = async () => {
             try {
-                const evSnap = await getDoc(doc(db, "events", eventId));
+                const evSnap = await getDoc(doc(db!, "events", eventId));
                 if (evSnap.exists()) {
                     const data = evSnap.data() as any;
                     setTeam((data.team as any[]) || []);
@@ -52,7 +52,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         };
         loadTeam();
 
-        const messagesRef = collection(db, "events", eventId, "tasks", taskId, "messages");
+        const messagesRef = collection(db!, "events", eventId, "tasks", taskId, "messages");
         // Use createdAt if exists, fallback to timestamp for legacy docs
         const q = query(messagesRef, orderBy("createdAt", "asc"));
 
@@ -93,7 +93,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         if (!db || !user) return;
 
         try {
-            const taskRef = doc(db, "events", eventId, "tasks", taskId);
+            const taskRef = doc(db!, "events", eventId, "tasks", taskId);
             await updateDoc(taskRef, {
                 [`readBy.${user.uid}`]: serverTimestamp()
             });
@@ -107,7 +107,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         if (!newMessage.trim() || !db || !user) return;
 
         try {
-            const messagesRef = collection(db, "events", eventId, "tasks", taskId, "messages");
+            const messagesRef = collection(db!, "events", eventId, "tasks", taskId, "messages");
             await addDoc(messagesRef, {
                 text: newMessage.trim(),
                 senderName: user.displayName || user.email || "משתמש",
@@ -119,7 +119,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
             });
 
             // Update task's lastMessageTime
-            const taskRef = doc(db, "events", eventId, "tasks", taskId);
+            const taskRef = doc(db!, "events", eventId, "tasks", taskId);
             await updateDoc(taskRef, {
                 lastMessageTime: serverTimestamp(),
                 lastMessageBy: user.uid,
@@ -215,8 +215,8 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                             אין הודעות עדיין. היה הראשון לכתוב!
                         </div>
                     ) : (
-        messages.map((message) => {
-            const isMyMessage = (message.senderUid || message.senderId) === user?.uid;
+                        messages.map((message) => {
+                            const isMyMessage = (message.senderUid || message.senderId) === user?.uid;
                             return (
                                 <div
                                     key={message.id}
