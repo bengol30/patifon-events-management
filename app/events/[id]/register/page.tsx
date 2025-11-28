@@ -98,13 +98,6 @@ export default function EventRegistrationPage() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#fff7ed] via-white to-[#f5f3ff] p-6">
             <div className="max-w-3xl mx-auto">
-                <div className="flex items-center gap-2 mb-6">
-                    <Link href={`/events/${id}`} className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900 transition">
-                        <ArrowRight size={16} />
-                        חזרה לדף האירוע
-                    </Link>
-                </div>
-
                 <div className="bg-white rounded-2xl shadow-xl border border-orange-100 p-6 md:p-8">
                     <div className="flex flex-col md:flex-row gap-4 md:items-center md:justify-between mb-6">
                         <div>

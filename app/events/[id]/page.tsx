@@ -6,7 +6,7 @@ import TaskCard from "@/components/TaskCard";
 import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 import { db, storage } from "@/lib/firebase";
-import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc } from "firebase/firestore";
+import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc, where } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import TaskChat from "@/components/TaskChat";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -69,6 +69,15 @@ interface EventFileThumb {
     taskTitle?: string;
 }
 
+interface JoinRequest {
+    id: string;
+    eventId: string;
+    requesterId: string;
+    requesterName?: string;
+    requesterEmail?: string;
+    status: "PENDING" | "APPROVED" | "REJECTED";
+}
+
 interface EventData {
     title: string;
     location: string;
@@ -77,6 +86,7 @@ interface EventData {
     description: string;
     status: string;
     team: { name: string; role: string; email?: string; userId?: string }[];
+    members?: string[];
     createdBy?: string;
     participantsCount?: string;
     partners?: string | string[];
@@ -101,6 +111,12 @@ export default function EventDetailsPage() {
 
     const [event, setEvent] = useState<EventData | null>(null);
     const isOwner = !!(event?.createdBy && user?.uid === event.createdBy);
+    const canManageTeam = isOwner
+        || !event?.createdBy
+        || !!event?.team?.some(m =>
+            (m.userId && m.userId === user?.uid) ||
+            (m.email && user?.email && m.email.toLowerCase() === user.email.toLowerCase())
+        );
     const [tasks, setTasks] = useState<Task[]>([]);
     const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -198,6 +214,30 @@ export default function EventDetailsPage() {
         role: "",
         email: "",
     });
+    const [confirmRemoveIdx, setConfirmRemoveIdx] = useState<number | null>(null);
+    const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+    const [collaborators, setCollaborators] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
+    const [allUsers, setAllUsers] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
+    const [collaboratorsView, setCollaboratorsView] = useState<"past" | "all">("past");
+    const [showCollaboratorsPicker, setShowCollaboratorsPicker] = useState(false);
+
+    const hydrateTeamNames = async (teamArr: { name: string; role: string; email?: string; userId?: string }[]) => {
+        if (!db) return teamArr;
+        const updated = await Promise.all(teamArr.map(async (m) => {
+            if (!m.userId) return m;
+            try {
+                const userSnap = await getDoc(doc(db, "users", m.userId));
+                if (userSnap.exists()) {
+                    const profile = userSnap.data() as any;
+                    return { ...m, name: profile.fullName || profile.displayName || m.name };
+                }
+            } catch (err) {
+                console.error("Failed to hydrate team member name", err);
+            }
+            return m;
+        }));
+        return updated;
+    };
 
     // New Budget Item State
     const [showAddBudget, setShowAddBudget] = useState(false);
@@ -404,9 +444,11 @@ export default function EventDetailsPage() {
     useEffect(() => {
         if (!id || !db) return;
 
-        const unsubscribeEvent = onSnapshot(doc(db, "events", id), (docSnap) => {
+        const unsubscribeEvent = onSnapshot(doc(db, "events", id), async (docSnap) => {
             if (docSnap.exists()) {
-                setEvent(docSnap.data() as EventData);
+                const data = docSnap.data() as EventData;
+                const enrichedTeam = await hydrateTeamNames(data.team || []);
+                setEvent({ ...data, team: enrichedTeam });
             } else {
                 setError("האירוע לא נמצא");
             }
@@ -451,6 +493,15 @@ export default function EventDetailsPage() {
             setImportantDocs(docsData);
         });
 
+        const qJoinReq = query(collection(db, "join_requests"), where("eventId", "==", id));
+        const unsubscribeJoinReq = onSnapshot(qJoinReq, (querySnapshot) => {
+            const reqs: JoinRequest[] = [];
+            querySnapshot.forEach((doc) => {
+                reqs.push({ id: doc.id, ...doc.data() } as JoinRequest);
+            });
+            setJoinRequests(reqs);
+        });
+
         const qEventFiles = query(collection(db, "events", id, "files"), orderBy("createdAt", "desc"));
         const unsubscribeEventFiles = onSnapshot(qEventFiles, (querySnapshot) => {
             const filesData: EventFileThumb[] = [];
@@ -465,9 +516,66 @@ export default function EventDetailsPage() {
             unsubscribeTasks();
             unsubscribeBudget();
             unsubscribeImportant();
+            unsubscribeJoinReq();
             unsubscribeEventFiles();
         };
-    }, [id]);
+    }, [id, db]);
+
+    // Load collaborators + all users
+    useEffect(() => {
+        const fetchCollaborators = async () => {
+            if (!db || !user) return;
+            try {
+                const userIds = new Set<string>();
+                const emails = new Set<string>();
+                try {
+                    const myEvents = await getDocs(
+                        query(
+                            collection(db, "events"),
+                            where("members", "array-contains", user.uid)
+                        )
+                    );
+                    myEvents.forEach(evDoc => {
+                        const data = evDoc.data() as any;
+                        if (data.createdBy) userIds.add(String(data.createdBy));
+                        if (data.createdByEmail) emails.add((data.createdByEmail as string).toLowerCase());
+                        const teamArr = data.team as { userId?: string; email?: string }[] | undefined;
+                        (teamArr || []).forEach(m => {
+                            if (m.userId) userIds.add(String(m.userId));
+                            if (m.email) emails.add(m.email.toLowerCase());
+                        });
+                    });
+                } catch (err) {
+                    console.error("Failed loading related events", err);
+                }
+
+                const userDocs = await getDocs(collection(db, "users"));
+                const pastUsers: { id: string; fullName?: string; email?: string; role?: string }[] = [];
+                const allUsersArr: { id: string; fullName?: string; email?: string; role?: string }[] = [];
+                userDocs.forEach(u => {
+                    const data = u.data() as any;
+                    const entry = {
+                        id: u.id,
+                        fullName: data.fullName || data.displayName || data.email,
+                        email: data.email,
+                        role: data.role
+                    };
+                    allUsersArr.push(entry);
+                    if (userIds.has(u.id) || (data.email && emails.has((data.email as string).toLowerCase()))) {
+                        pastUsers.push(entry);
+                    }
+                });
+                setCollaborators(pastUsers);
+                setAllUsers(allUsersArr);
+            } catch (err) {
+                console.error("Failed loading collaborators", err);
+                // fallback: הצג ריק אם קרה כשל
+                setAllUsers([]);
+                setCollaborators([]);
+            }
+        };
+        fetchCollaborators();
+    }, [db, user]);
 
     useEffect(() => {
         if (!event) return;
@@ -892,8 +1000,8 @@ export default function EventDetailsPage() {
 
     const handleAddTeamMember = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!isOwner) {
-            alert("רק יוצר האירוע יכול להוסיף שותפים לצוות.");
+        if (!canManageTeam) {
+            alert("אין לך הרשאה להוסיף שותפים לצוות.");
             return;
         }
         if (!db) return;
@@ -913,6 +1021,90 @@ export default function EventDetailsPage() {
             setNewMember({ name: "", role: "", email: "" });
         } catch (err) {
             console.error("Error adding team member:", err);
+            alert("שגיאה בהוספת איש צוות");
+        }
+    };
+
+    const handleRemoveTeamMember = async (index: number) => {
+        if (!canManageTeam) {
+            alert("אין לך הרשאה להסיר שותפים.");
+            return;
+        }
+        if (!db || !event?.team || !event.team[index]) return;
+        const member = event.team[index];
+
+        const updatedTeam = event.team.filter((_, i) => i !== index);
+        const updates: any = { team: updatedTeam };
+        if (member.userId) {
+            updates.members = (event.members || []).filter(m => m !== member.userId);
+        }
+
+        try {
+            await updateDoc(doc(db, "events", id), updates);
+            setEvent(prev => prev ? { ...prev, ...updates } : prev);
+            setConfirmRemoveIdx(null);
+        } catch (err) {
+            console.error("Error removing team member:", err);
+            alert("שגיאה בהסרת איש צוות");
+        }
+    };
+
+    const handleApproveJoinRequest = async (req: JoinRequest) => {
+        if (!canManageTeam || !db || !event) return;
+        try {
+            await Promise.all([
+                updateDoc(doc(db, "events", id), {
+                    members: arrayUnion(req.requesterId),
+                    team: arrayUnion({
+                        name: req.requesterName || req.requesterEmail?.split("@")[0] || "חבר צוות",
+                        role: "חבר צוות",
+                        email: req.requesterEmail || "",
+                        userId: req.requesterId
+                    })
+                }),
+                updateDoc(doc(db, "join_requests", req.id), {
+                    status: "APPROVED",
+                    respondedAt: serverTimestamp()
+                })
+            ]);
+        } catch (err) {
+            console.error("Error approving join request:", err);
+            alert("שגיאה באישור הבקשה");
+        }
+    };
+
+    const handleRejectJoinRequest = async (req: JoinRequest) => {
+        if (!canManageTeam || !db) return;
+        try {
+            await updateDoc(doc(db, "join_requests", req.id), {
+                status: "REJECTED",
+                respondedAt: serverTimestamp()
+            });
+        } catch (err) {
+            console.error("Error rejecting join request:", err);
+            alert("שגיאה בדחיית הבקשה");
+        }
+    };
+
+    const handleAddCollaboratorToTeam = async (collab: { id: string; fullName?: string; email?: string; role?: string }) => {
+        if (!canManageTeam || !db) return;
+        if (event?.team?.some(m => m.userId === collab.id || (m.email && collab.email && m.email.toLowerCase() === collab.email.toLowerCase()))) {
+            alert("המשתמש כבר בצוות");
+            return;
+        }
+        try {
+            await updateDoc(doc(db, "events", id), {
+                members: collab.id ? arrayUnion(collab.id) : arrayUnion(),
+                team: arrayUnion({
+                    name: collab.fullName || collab.email || "איש צוות",
+                    role: collab.role || "חבר צוות",
+                    email: collab.email || "",
+                    userId: collab.id || undefined,
+                })
+            });
+            setShowCollaboratorsPicker(false);
+        } catch (err) {
+            console.error("Error adding collaborator to team", err);
             alert("שגיאה בהוספת איש צוות");
         }
     };
@@ -2097,11 +2289,14 @@ export default function EventDetailsPage() {
                                 >
                                     <Share2 size={18} />
                                 </button>
-                                {isOwner && (
+                                {canManageTeam && (
                                     <button
-                                        onClick={() => setShowAddTeam(!showAddTeam)}
+                                        onClick={() => {
+                                            setShowCollaboratorsPicker(prev => !prev);
+                                            setShowAddTeam(false);
+                                        }}
                                         className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
-                                        title="הוסף איש צוות ידנית"
+                                        title="הוסף איש צוות"
                                     >
                                         <UserPlus size={18} />
                                     </button>
@@ -2109,7 +2304,7 @@ export default function EventDetailsPage() {
                             </div>
                         </div>
 
-                        {showAddTeam && isOwner && (
+                        {showAddTeam && canManageTeam && (
                             <div className="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
                                 <form onSubmit={handleAddTeamMember} className="space-y-2">
                                     <input
@@ -2145,23 +2340,147 @@ export default function EventDetailsPage() {
                             </div>
                         )}
 
+                        {showCollaboratorsPicker && canManageTeam && (
+                            <div className="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+                                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                                        <button
+                                            className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "past" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                            onClick={() => setCollaboratorsView("past")}
+                                        >
+                                            עבדתי איתם
+                                        </button>
+                                        <button
+                                            className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "all" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                            onClick={() => setCollaboratorsView("all")}
+                                        >
+                                            כל המשתמשים
+                                        </button>
+                                    </div>
+                                    <button
+                                        className="text-xs text-indigo-600 hover:underline"
+                                        onClick={() => {
+                                            setShowAddTeam(true);
+                                            setShowCollaboratorsPicker(false);
+                                        }}
+                                    >
+                                        הוסף ידנית
+                                    </button>
+                                </div>
+                                <div className="max-h-64 overflow-y-auto p-2 space-y-2">
+                                    {(collaboratorsView === "past" ? collaborators : allUsers)
+                                        .filter(c => !(event?.team || []).some(m =>
+                                            (m.userId && m.userId === c.id) ||
+                                            (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
+                                        ))
+                                        .map(collab => (
+                                            <button
+                                                key={collab.id}
+                                                onClick={() => handleAddCollaboratorToTeam(collab)}
+                                                className="w-full text-left flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition"
+                                                title="הוסף איש צוות"
+                                            >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                        {(collab.fullName || collab.email || "?").slice(0, 2)}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-medium text-gray-900 truncate">{collab.fullName || collab.email || "משתמש"}</p>
+                                                        <p className="text-xs text-gray-500 truncate">{collab.role || "חבר צוות"}</p>
+                                                    </div>
+                                                </div>
+                                                <span className="px-3 py-1 text-xs rounded-full border border-indigo-200 text-indigo-700 bg-white">
+                                                    הוסף
+                                                </span>
+                                            </button>
+                                        ))}
+                                    {(collaboratorsView === "past" ? collaborators : allUsers).filter(c => !(event?.team || []).some(m =>
+                                        (m.userId && m.userId === c.id) ||
+                                        (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
+                                    )).length === 0 && (
+                                        <p className="text-xs text-gray-500 px-2 py-1">לא נמצאו משתמשים להצגה.</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {canManageTeam && joinRequests.filter(r => r.status === "PENDING").length > 0 && (
+                            <div className="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-3">
+                                <p className="text-sm font-semibold text-amber-800 mb-2">בקשות הצטרפות ממתינות</p>
+                                <div className="space-y-2">
+                                    {joinRequests.filter(r => r.status === "PENDING").map((req) => (
+                                        <div key={req.id} className="flex items-center justify-between gap-3 p-2 bg-white border border-amber-100 rounded-lg">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 truncate">{req.requesterName || req.requesterEmail || "משתמש"}</p>
+                                                <p className="text-xs text-gray-500 truncate">{req.requesterEmail}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => handleApproveJoinRequest(req)}
+                                                    className="px-3 py-1 text-xs rounded-full bg-green-600 text-white hover:bg-green-700"
+                                                >
+                                                    אשר
+                                                </button>
+                                                <button
+                                                    onClick={() => handleRejectJoinRequest(req)}
+                                                    className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    דחה
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="space-y-4">
                             {event.team && event.team.length > 0 ? (
                                 event.team.map((member, idx) => (
-                                    <div key={idx} className="flex items-center gap-3">
-                                        <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-                                            {member.name.substring(0, 2)}
+                                    <div key={idx} className="flex items-center gap-3 justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                {member.name.substring(0, 2)}
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-medium text-gray-900">{member.name}</p>
+                                                <p className="text-xs text-gray-500">{member.role}</p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-sm font-medium text-gray-900">{member.name}</p>
-                                            <p className="text-xs text-gray-500">{member.role}</p>
-                                        </div>
+                                        {canManageTeam && (
+                                            <div className="flex items-center gap-2">
+                                                {confirmRemoveIdx === idx ? (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleRemoveTeamMember(idx)}
+                                                            className="px-2 py-1 text-xs rounded-full bg-red-600 text-white hover:bg-red-700"
+                                                        >
+                                                            הסר
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmRemoveIdx(null)}
+                                                            className="px-2 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                        >
+                                                            ביטול
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => setConfirmRemoveIdx(idx)}
+                                                        className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
+                                                        title="הסר איש צוות"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 ))
                             ) : (
                                 <p className="text-sm text-gray-500">עדיין אין חברי צוות</p>
                             )}
-                            {!isOwner && (
+                            {!canManageTeam && (
                                 <p className="text-xs text-gray-500">רק יוצר האירוע יכול להוסיף שותפים.</p>
                             )}
                         </div>

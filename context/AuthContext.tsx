@@ -3,6 +3,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 interface AuthContextType {
     user: User | null;
@@ -20,6 +22,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
 
+    // Ensure user document exists so שאין משתמשים "שקופים" ברשימות
+    const ensureUserDoc = async (firebaseUser: User | null) => {
+        if (!db || !firebaseUser) return;
+        try {
+            const ref = doc(db, "users", firebaseUser.uid);
+            const snap = await getDoc(ref);
+            if (!snap.exists()) {
+                await setDoc(ref, {
+                    fullName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "משתמש חדש",
+                    email: firebaseUser.email || "",
+                    onboarded: false,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                }, { merge: true });
+            }
+        } catch (err) {
+            console.error("ensureUserDoc failed", err);
+        }
+    };
+
     useEffect(() => {
         if (!auth) {
             setLoading(false);
@@ -28,6 +50,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             setUser(user);
+            ensureUserDoc(user);
             setLoading(false);
         });
 

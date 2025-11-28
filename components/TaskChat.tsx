@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { X, Send, MessageCircle } from "lucide-react";
+import { X, Send, MessageCircle, AtSign } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, updateDoc, doc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, updateDoc, doc, getDoc } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
 interface Message {
@@ -29,9 +29,28 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
     const [newMessage, setNewMessage] = useState("");
     const [loading, setLoading] = useState(true);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const [team, setTeam] = useState<{ name: string; userId?: string; email?: string }[]>([]);
+    const [mentionActive, setMentionActive] = useState(false);
+    const [mentionQuery, setMentionQuery] = useState("");
+    const [mentionStart, setMentionStart] = useState<number | null>(null);
+    const [pendingMentions, setPendingMentions] = useState<{ name: string; userId?: string; email?: string }[]>([]);
 
     useEffect(() => {
         if (!db || !eventId || !taskId) return;
+
+        const loadTeam = async () => {
+            try {
+                const evSnap = await getDoc(doc(db, "events", eventId));
+                if (evSnap.exists()) {
+                    const data = evSnap.data() as any;
+                    setTeam((data.team as any[]) || []);
+                }
+            } catch (err) {
+                console.error("Failed loading team for mentions", err);
+            }
+        };
+        loadTeam();
 
         const messagesRef = collection(db, "events", eventId, "tasks", taskId, "messages");
         // Use createdAt if exists, fallback to timestamp for legacy docs
@@ -96,6 +115,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                 senderId: user.uid,
                 createdAt: serverTimestamp(),
                 timestamp: serverTimestamp(), // legacy field for older queries
+                mentions: pendingMentions
             });
 
             // Update task's lastMessageTime
@@ -103,14 +123,67 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
             await updateDoc(taskRef, {
                 lastMessageTime: serverTimestamp(),
                 lastMessageBy: user.uid,
+                lastMessageText: newMessage.trim(),
+                lastMessageMentions: pendingMentions,
             });
 
             setNewMessage("");
+            setPendingMentions([]);
+            setMentionActive(false);
+            setMentionQuery("");
+            setMentionStart(null);
         } catch (err) {
             console.error("Error sending message:", err);
             alert("שגיאה בשליחת ההודעה");
         }
     };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        const cursor = e.target.selectionStart || value.length;
+        const lastAt = value.lastIndexOf("@", cursor - 1);
+        if (lastAt >= 0) {
+            const after = value.slice(lastAt + 1, cursor);
+            if (!after.includes(" ")) {
+                setMentionActive(true);
+                setMentionQuery(after);
+                setMentionStart(lastAt);
+            } else {
+                setMentionActive(false);
+            }
+        } else {
+            setMentionActive(false);
+        }
+        setNewMessage(value);
+    };
+
+    const handlePickMention = (member: { name: string; userId?: string; email?: string }) => {
+        if (!inputRef.current) return;
+        const value = newMessage;
+        const start = mentionStart ?? value.length;
+        const cursor = inputRef.current.selectionStart || value.length;
+        const before = value.slice(0, start);
+        const after = value.slice(cursor);
+        const mentionText = `@${member.name} `;
+        const next = before + mentionText + after;
+        setNewMessage(next);
+        setMentionActive(false);
+        setMentionQuery("");
+        setMentionStart(null);
+        setPendingMentions(prev => {
+            const exists = prev.some(m =>
+                (m.userId && member.userId && m.userId === member.userId) ||
+                (m.email && member.email && m.email.toLowerCase() === member.email.toLowerCase()) ||
+                m.name === member.name
+            );
+            return exists ? prev : [...prev, member];
+        });
+        setTimeout(() => inputRef.current?.focus(), 0);
+    };
+
+    const filteredMentions = mentionActive
+        ? team.filter(m => (m.name || "").toLowerCase().includes(mentionQuery.toLowerCase()))
+        : [];
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -182,16 +255,31 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                 </div>
 
                 {/* Input Area */}
-                <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 bg-white">
+                <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 bg-white relative">
                     <div className="flex gap-2">
                         <input
                             type="text"
+                            ref={inputRef}
                             value={newMessage}
-                            onChange={(e) => setNewMessage(e.target.value)}
-                            placeholder="כתוב הודעה..."
+                            onChange={handleInputChange}
+                            placeholder="כתוב הודעה... לחץ @ או על האייקון כדי לתייג איש צוות"
                             className="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                             dir="auto"
                         />
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setMentionActive(!mentionActive);
+                                if (!mentionActive) {
+                                    setMentionQuery("");
+                                    setMentionStart(newMessage.length);
+                                }
+                            }}
+                            className="p-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50"
+                            title="תייג איש צוות"
+                        >
+                            <AtSign size={16} />
+                        </button>
                         <button
                             type="submit"
                             disabled={!newMessage.trim()}
@@ -201,6 +289,21 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                             שלח
                         </button>
                     </div>
+                    {mentionActive && filteredMentions.length > 0 && (
+                        <div className="absolute bottom-16 right-4 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 w-64 overflow-y-auto z-20">
+                            {filteredMentions.map((m, idx) => (
+                                <button
+                                    key={`${m.userId || m.email || m.name}-${idx}`}
+                                    type="button"
+                                    onClick={() => handlePickMention(m)}
+                                    className="w-full text-right px-3 py-2 hover:bg-gray-50 text-sm border-b last:border-b-0 border-gray-100"
+                                >
+                                    <div className="font-semibold text-gray-900 truncate">{m.name || m.email || "משתמש"}</div>
+                                    <div className="text-xs text-gray-500 truncate">{m.email || m.userId || ""}</div>
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </form>
             </div>
         </div>

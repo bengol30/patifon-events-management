@@ -74,6 +74,7 @@ export default function NewEventPage() {
                 status: "PLANNING",
                 recurrence: formData.recurrence,
                 createdBy: user.uid,
+                createdByEmail: user.email || "",
                 members: [user.uid], // Add creator as a member
                 team: [
                     {

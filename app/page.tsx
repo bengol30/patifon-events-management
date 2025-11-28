@@ -4,9 +4,9 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock } from "lucide-react";
+import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell } from "lucide-react";
 import { db, auth } from "@/lib/firebase";
-import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp } from "firebase/firestore";
 import TaskChat from "@/components/TaskChat";
 
 import TaskCard from "@/components/TaskCard";
@@ -19,6 +19,23 @@ interface Event {
   startTime: any;
   status: string;
   participantsCount?: string;
+  createdBy?: string;
+  createdByEmail?: string;
+  partners?: string | string[];
+  members?: string[];
+  team?: { name: string; role: string; email?: string; userId?: string }[];
+}
+
+interface JoinRequest {
+  id: string;
+  eventId: string;
+  eventTitle?: string;
+  requesterId?: string;
+  requesterName?: string;
+  requesterEmail?: string;
+  ownerId?: string;
+  ownerEmail?: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
 }
 
 interface Task {
@@ -38,6 +55,8 @@ interface Task {
   readBy?: Record<string, boolean>;
   currentStatus?: string;
   nextStep?: string;
+  lastMessageText?: string;
+  lastMessageMentions?: { name?: string; userId?: string; email?: string }[];
 }
 
 export default function Dashboard() {
@@ -50,6 +69,21 @@ export default function Dashboard() {
   const [myTasks, setMyTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
 
+  // Stats State
+  const [stats, setStats] = useState({ myEvents: 0, attendees: 0, partners: 0, tasks: 0 });
+  const [loadingStats, setLoadingStats] = useState(true);
+  const [activePanel, setActivePanel] = useState<"stats" | "users" | "notifications" | null>("stats");
+  const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [userEventsMap, setUserEventsMap] = useState<Record<string, Event[]>>({});
+  const [openUserEventsId, setOpenUserEventsId] = useState<string | null>(null);
+  const [joinRequests, setJoinRequests] = useState<Record<string, "PENDING" | "APPROVED" | "REJECTED">>({});
+  const [incomingJoinRequests, setIncomingJoinRequests] = useState<JoinRequest[]>([]);
+  const [loadingNotifications, setLoadingNotifications] = useState(true);
+  const [notificationTasks, setNotificationTasks] = useState<Task[]>([]);
+  const [deleteEventRemoveTasks, setDeleteEventRemoveTasks] = useState(false);
+
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("none");
@@ -60,6 +94,7 @@ export default function Dashboard() {
   const [editingStatusTask, setEditingStatusTask] = useState<Task | null>(null);
   const [editingDateTask, setEditingDateTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [confirmingEventId, setConfirmingEventId] = useState<string | null>(null);
 
   // Chat State
   const [chatTask, setChatTask] = useState<Task | null>(null);
@@ -69,6 +104,21 @@ export default function Dashboard() {
       router.push("/login");
     }
   }, [user, loading, router]);
+
+  const toPartnerArray = (raw: any): string[] => {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.map(p => (p || "").toString().trim()).filter(Boolean);
+    if (typeof raw === "string") return raw.split(/[,\n]/).map(p => p.trim()).filter(Boolean);
+    return [];
+  };
+
+  const isEventActive = (event: Event) => {
+    const statusLower = (event.status || "").toString().toLowerCase();
+    if (["done", "cancelled", "canceled", "בוטל"].includes(statusLower)) return false;
+    return true;
+  };
+
+  const normalizeKey = (val?: string | null) => (val || "").toString().trim().toLowerCase();
 
   // Onboarding gate: new users must complete profile
   useEffect(() => {
@@ -86,33 +136,143 @@ export default function Dashboard() {
     checkOnboarding();
   }, [user]);
 
+  // Refresh notifications (messages/join requests) when panel opens
+  useEffect(() => {
+    const fetchNotificationTasks = async () => {
+      if (!db || !user || activePanel !== "notifications") return;
+      try {
+        setLoadingNotifications(true);
+        const tasksSnapshot = await getDocs(collectionGroup(db, "tasks"));
+        const notif: Task[] = [];
+        const userName = user.displayName || "";
+        const userEmail = user.email || "";
+        const currentUid = user.uid;
+        const eventLookup = new Map(events.map(e => [e.id, e]));
+
+        tasksSnapshot.forEach(docSnap => {
+          const taskData = docSnap.data();
+          const eventId = docSnap.ref.parent.parent?.id || "";
+          const event = eventLookup.get(eventId);
+
+          const assigneeStr = (taskData.assignee || "").toLowerCase();
+          const assigneeId = taskData.assigneeId as string | undefined;
+          const assigneesArr = (taskData.assignees as { name: string; userId?: string; email?: string }[] | undefined) ||
+            (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId, email: (taskData as any).assigneeEmail }] : []);
+          const mentionsArr = (taskData.lastMessageMentions as { name?: string; userId?: string; email?: string }[] | undefined) || [];
+          const isAssigned =
+            (assigneeId && assigneeId === currentUid) ||
+            assigneesArr.some(a => a.userId && a.userId === currentUid) ||
+            assigneesArr.some(a => a.email && userEmail && a.email.toLowerCase() === userEmail.toLowerCase()) ||
+            (assigneeStr && (
+              (userName && assigneeStr.includes(userName.toLowerCase())) ||
+              (userEmail && assigneeStr.includes(userEmail.split('@')[0].toLowerCase())) ||
+              assigneeStr === "אני"
+            )) ||
+            assigneesArr.some(a => {
+              const nameLower = (a.name || "").toLowerCase();
+              return (userName && nameLower.includes(userName.toLowerCase())) ||
+                (userEmail && nameLower.includes(userEmail.split('@')[0].toLowerCase())) ||
+                nameLower === "אני";
+            });
+
+          const isMentioned = mentionsArr.some(m =>
+            (m.userId && m.userId === currentUid) ||
+            (m.email && userEmail && m.email.toLowerCase() === userEmail.toLowerCase())
+          );
+
+          if (isAssigned || isMentioned) {
+            notif.push({
+              id: docSnap.id,
+              title: taskData.title,
+              dueDate: taskData.dueDate,
+              priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
+              assignee: taskData.assignee,
+              assigneeId,
+              assignees: assigneesArr,
+              status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
+              eventId: eventId,
+              eventTitle: event?.title || taskData.eventTitle || "אירוע לא ידוע",
+              currentStatus: taskData.currentStatus || "",
+              nextStep: taskData.nextStep || "",
+              lastMessageTime: taskData.lastMessageTime || null,
+              lastMessageBy: taskData.lastMessageBy || "",
+              readBy: taskData.readBy || {},
+              lastMessageMentions: mentionsArr
+            } as Task);
+          }
+        });
+        setNotificationTasks(notif);
+      } catch (err) {
+        console.error("Error loading notification tasks:", err);
+      } finally {
+        setLoadingNotifications(false);
+      }
+    };
+    fetchNotificationTasks();
+  }, [activePanel, user, events, db]);
+
   useEffect(() => {
     const fetchData = async () => {
       if (!db || !user) {
         setLoadingEvents(false);
         setLoadingTasks(false);
+        setLoadingStats(false);
+        setLoadingUsers(false);
+        setLoadingNotifications(false);
         return;
       }
 
       try {
-        // Fetch Events
-        const eventsRef = collection(db, "events");
-        const qEvents = query(
-          eventsRef,
-          where("members", "array-contains", user.uid),
-          orderBy("createdAt", "desc")
-        );
-        const eventsSnapshot = await getDocs(qEvents);
-        const eventsData = eventsSnapshot.docs.map((doc) => ({
+        setLoadingStats(true);
+        setLoadingUsers(true);
+        setLoadingNotifications(true);
+        setUsersError(null);
+        // Fetch all events (for per-user stats)
+        const allEventsSnapshot = await getDocs(query(collection(db, "events"), orderBy("createdAt", "desc")));
+        const allEventsData = allEventsSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         })) as Event[];
-        const sortedByDate = [...eventsData].sort((a, b) => {
+        const eventsByCreator: Record<string, Event[]> = {};
+        const addToMap = (key: string | undefined | null, ev: Event) => {
+          const normKey = normalizeKey(key);
+          if (!normKey) return;
+          if (!eventsByCreator[normKey]) eventsByCreator[normKey] = [];
+          const exists = eventsByCreator[normKey].some(e => e.id === ev.id);
+          if (!exists) eventsByCreator[normKey].push(ev);
+        };
+        allEventsData.forEach(ev => {
+          addToMap(ev.createdBy, ev);
+          addToMap(ev.createdByEmail, ev);
+          const teamArr = (ev as any).team as { userId?: string; email?: string }[] | undefined;
+          (teamArr || []).forEach(member => {
+            addToMap(member.userId, ev);
+            if (member.email) addToMap(member.email, ev);
+          });
+        });
+        setUserEventsMap(eventsByCreator);
+
+        // Fetch events relevant to current user
+        const eventsForUser = allEventsData.filter(e =>
+          (Array.isArray((e as any).members) && (e as any).members.includes(user.uid)) ||
+          (e.createdByEmail && user.email && normalizeKey(e.createdByEmail) === normalizeKey(user.email)) ||
+          (e.createdBy && e.createdBy === user.uid)
+        );
+        const sortedByDate = [...eventsForUser].sort((a, b) => {
           const aDate = a.startTime?.seconds ? a.startTime.seconds : 0;
           const bDate = b.startTime?.seconds ? b.startTime.seconds : 0;
           return aDate - bDate;
         });
         setEvents(sortedByDate);
+        const myCreatedEvents = allEventsData.filter(e =>
+          e.createdBy === user.uid ||
+          (e.createdByEmail && user.email && normalizeKey(e.createdByEmail) === normalizeKey(user.email))
+        );
+        const myEventIds = new Set(myCreatedEvents.map(e => e.id));
+        const uniquePartners = new Set<string>();
+        myCreatedEvents.forEach(e => {
+          toPartnerArray((e as any).partners).forEach(p => uniquePartners.add(p));
+        });
 
         // Fetch My Tasks (using Collection Group Query)
         // Note: This requires a composite index in Firestore if we filter by multiple fields
@@ -121,37 +281,70 @@ export default function Dashboard() {
         const tasksSnapshot = await getDocs(tasksQuery);
 
         const userTasks: Task[] = [];
+        const notifTasks: Task[] = [];
         const userName = user.displayName || "";
         const userEmail = user.email || "";
+        let tasksInMyEvents = 0;
+
+        const eventLookup = new Map(allEventsData.map(e => [e.id, e]));
 
         tasksSnapshot.forEach(doc => {
           const taskData = doc.data();
           const eventId = doc.ref.parent.parent?.id || "";
-          const event = eventsData.find(e => e.id === eventId);
+          const event = eventLookup.get(eventId);
           if (!event) return;
+          if (myEventIds.has(eventId)) {
+            tasksInMyEvents += 1;
+          }
 
           const assigneeStr = (taskData.assignee || "").toLowerCase();
           const assigneeId = taskData.assigneeId as string | undefined;
           const assigneesArr = (taskData.assignees as { name: string; userId?: string; email?: string }[] | undefined) ||
             (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId, email: (taskData as any).assigneeEmail }] : []);
-          const isAssignedToUser =
-            taskData.status !== "DONE" &&
-            (
-              (assigneeId && assigneeId === user.uid) ||
-              assigneesArr.some(a => a.userId && a.userId === user.uid) ||
-              assigneesArr.some(a => a.email && userEmail && a.email.toLowerCase() === userEmail.toLowerCase()) ||
-              (assigneeStr && (
-                (userName && assigneeStr.includes(userName.toLowerCase())) ||
-                (userEmail && assigneeStr.includes(userEmail.split('@')[0].toLowerCase())) ||
-                assigneeStr === "אני"
-              )) ||
-              assigneesArr.some(a => {
-                const nameLower = (a.name || "").toLowerCase();
-                return (userName && nameLower.includes(userName.toLowerCase())) ||
-                  (userEmail && nameLower.includes(userEmail.split('@')[0].toLowerCase())) ||
-                  nameLower === "אני";
-              })
-            );
+          const mentionsArr = (taskData.lastMessageMentions as { name?: string; userId?: string; email?: string }[] | undefined) || [];
+          const isAssigned =
+            (assigneeId && assigneeId === user.uid) ||
+            assigneesArr.some(a => a.userId && a.userId === user.uid) ||
+            assigneesArr.some(a => a.email && userEmail && a.email.toLowerCase() === userEmail.toLowerCase()) ||
+            (assigneeStr && (
+              (userName && assigneeStr.includes(userName.toLowerCase())) ||
+              (userEmail && assigneeStr.includes(userEmail.split('@')[0].toLowerCase())) ||
+              assigneeStr === "אני"
+            )) ||
+            assigneesArr.some(a => {
+              const nameLower = (a.name || "").toLowerCase();
+              return (userName && nameLower.includes(userName.toLowerCase())) ||
+                (userEmail && nameLower.includes(userEmail.split('@')[0].toLowerCase())) ||
+                nameLower === "אני";
+            });
+          const isMentioned = mentionsArr.some(m =>
+            (m.userId && m.userId === user.uid) ||
+            (m.email && userEmail && m.email.toLowerCase() === userEmail.toLowerCase())
+          );
+
+          if (isAssigned || isMentioned) {
+            notifTasks.push({
+              id: doc.id,
+              title: taskData.title,
+              dueDate: taskData.dueDate,
+              priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
+              assignee: taskData.assignee,
+              assigneeId,
+              assignees: assigneesArr,
+              status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
+              eventId: eventId,
+              eventTitle: event?.title || "אירוע לא ידוע",
+              currentStatus: taskData.currentStatus || "",
+              nextStep: taskData.nextStep || "",
+              lastMessageTime: taskData.lastMessageTime || null,
+              lastMessageBy: taskData.lastMessageBy || "",
+              readBy: taskData.readBy || {},
+              lastMessageMentions: mentionsArr,
+              lastMessageText: taskData.lastMessageText || ""
+            } as Task);
+          }
+
+          const isAssignedToUser = taskData.status !== "DONE" && isAssigned;
 
           if (isAssignedToUser) {
             userTasks.push({
@@ -167,17 +360,96 @@ export default function Dashboard() {
               eventTitle: event?.title || "אירוע לא ידוע",
               currentStatus: taskData.currentStatus || "",
               nextStep: taskData.nextStep || "",
+              lastMessageTime: taskData.lastMessageTime || null,
+              lastMessageBy: taskData.lastMessageBy || "",
+              readBy: taskData.readBy || {},
+              lastMessageText: taskData.lastMessageText || ""
             } as Task);
           }
         });
 
         setMyTasks(userTasks);
+        setNotificationTasks(notifTasks);
+        const attendeesByEvent = await Promise.all(
+          myCreatedEvents.map(async (ev) => {
+            try {
+              const attendeesSnap = await getDocs(collection(db, "events", ev.id, "attendees"));
+              return attendeesSnap.size;
+            } catch (err) {
+              console.error("Error loading attendees for event", ev.id, err);
+              return 0;
+            }
+          })
+        );
+        const totalAttendees = attendeesByEvent.reduce((sum, num) => sum + num, 0);
+        setStats({
+          myEvents: myCreatedEvents.length,
+          attendees: totalAttendees,
+          partners: uniquePartners.size,
+          tasks: tasksInMyEvents,
+        });
+
+        // Fetch Users in system + add placeholders from events/team (for non-onboarded users)
+        const usersSnap = await getDocs(collection(db, "users"));
+        const usersFromDb = usersSnap.docs.map(u => ({ id: u.id, ...u.data() } as any));
+        const existingEmails = new Set(
+          usersFromDb
+            .map(u => normalizeKey((u as any).email))
+            .filter(Boolean)
+        );
+        const placeholders: { id: string; fullName?: string; email?: string; role?: string }[] = [];
+        const addPlaceholderUser = (email?: string, name?: string) => {
+          const key = normalizeKey(email);
+          if (!key || existingEmails.has(key)) return;
+          existingEmails.add(key);
+          placeholders.push({
+            id: `placeholder-${key}`,
+            email: email || "",
+            fullName: name || email || "משתמש ללא שם",
+            role: "לא השלימו הרשמה",
+          });
+        };
+        allEventsData.forEach(ev => {
+          addPlaceholderUser(ev.createdByEmail, (ev as any).creatorName);
+          const teamArr = (ev as any).team as { email?: string; name?: string }[] | undefined;
+          (teamArr || []).forEach(m => addPlaceholderUser(m.email, m.name));
+        });
+        setUsersList([...usersFromDb, ...placeholders]);
+
+        // Fetch join requests of current user to show pending/approved
+        const myJoinRequestsSnap = await getDocs(query(
+          collection(db, "join_requests"),
+          where("requesterId", "==", user.uid)
+        ));
+        const reqMap: Record<string, "PENDING" | "APPROVED" | "REJECTED"> = {};
+        myJoinRequestsSnap.forEach(r => {
+          const data = r.data() as any;
+          if (data.eventId && data.status) {
+            reqMap[data.eventId] = data.status;
+          }
+        });
+        setJoinRequests(reqMap);
+
+        // Join requests directed to me as בעל אירוע
+        const incomingByOwnerId = await getDocs(query(collection(db, "join_requests"), where("ownerId", "==", user.uid)));
+        let incomingByEmail: any[] = [];
+        if (user.email) {
+          incomingByEmail = await getDocs(query(collection(db, "join_requests"), where("ownerEmail", "==", user.email)));
+        }
+        const incomingCombined: Record<string, JoinRequest> = {};
+        incomingByOwnerId.forEach(d => { incomingCombined[d.id] = { id: d.id, ...d.data() } as JoinRequest; });
+        (Array.isArray(incomingByEmail?.docs) ? incomingByEmail.docs : []).forEach((d: any) => { incomingCombined[d.id] = { id: d.id, ...d.data() } as JoinRequest; });
+        setIncomingJoinRequests(Object.values(incomingCombined).filter(r => r.status === "PENDING"));
 
       } catch (error) {
         console.error("Error fetching data:", error);
+        setUsersError("שגיאה בטעינת משתמשים");
       } finally {
         setLoadingEvents(false);
         setLoadingTasks(false);
+        setLoadingStats(false);
+        setLoadingUsers(false);
+        setLoadingNotifications(false);
       }
     };
 
@@ -229,6 +501,19 @@ export default function Dashboard() {
       }
     });
   }
+
+  const currentUid = user?.uid || "";
+  const taskNotifications = currentUid
+    ? notificationTasks.filter(t => {
+        const hasNewMessage = t.lastMessageTime && t.lastMessageBy && t.lastMessageBy !== currentUid;
+        const unread = !t.readBy || !t.readBy[currentUid];
+        const mentioned = (t as any).lastMessageMentions?.some((m: any) =>
+          (m?.userId && m.userId === currentUid) ||
+          (m?.email && user?.email && m.email.toLowerCase() === user.email.toLowerCase())
+        );
+        return (hasNewMessage && unread) || mentioned;
+      })
+    : [];
 
   const handleUpdateTask = async (e: React.FormEvent) => {
     // existing update logic for full task edit
@@ -285,6 +570,44 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Error completing task:", err);
       alert("שגיאה בסיום המשימה");
+    }
+  };
+
+  const handleApproveJoinRequest = async (reqId: string) => {
+    if (!db || !user) return;
+    const req = incomingJoinRequests.find(r => r.id === reqId);
+    if (!req || req.status !== "PENDING") return;
+    try {
+      const requesterName = req.requesterName || req.requesterEmail?.split("@")[0] || "חבר צוות";
+      await Promise.all([
+        updateDoc(doc(db, "events", req.eventId), {
+          ...(req.requesterId ? { members: arrayUnion(req.requesterId) } : {}),
+          team: arrayUnion({
+            name: requesterName,
+            role: "חבר צוות",
+            email: req.requesterEmail || "",
+            userId: req.requesterId || undefined
+          })
+        }),
+        updateDoc(doc(db, "join_requests", req.id), { status: "APPROVED", respondedAt: serverTimestamp() })
+      ]);
+      setIncomingJoinRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: "APPROVED" } : r));
+    } catch (err) {
+      console.error("Error approving join request:", err);
+      alert("שגיאה באישור הבקשה");
+    }
+  };
+
+  const handleRejectJoinRequest = async (reqId: string) => {
+    if (!db || !user) return;
+    const req = incomingJoinRequests.find(r => r.id === reqId);
+    if (!req || req.status !== "PENDING") return;
+    try {
+      await updateDoc(doc(db, "join_requests", req.id), { status: "REJECTED", respondedAt: serverTimestamp() });
+      setIncomingJoinRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: "REJECTED" } : r));
+    } catch (err) {
+      console.error("Error rejecting join request:", err);
+      alert("שגיאה בדחיית הבקשה");
     }
   };
 
@@ -350,15 +673,63 @@ export default function Dashboard() {
   };
 
   const handleDeleteEvent = async (eventId: string) => {
-    if (!db) return;
-    const confirmDelete = confirm("למחוק את האירוע הזה?");
-    if (!confirmDelete) return;
+    if (!db || !user) return;
+    const ev = events.find(e => e.id === eventId);
+    const isOwner = ev && (
+      (ev.createdBy && ev.createdBy === user.uid) ||
+      (ev.createdByEmail && user.email && normalizeKey(ev.createdByEmail) === normalizeKey(user.email))
+    );
+    if (!isOwner) {
+      alert("רק יוצר האירוע יכול למחוק אותו.");
+      setConfirmingEventId(null);
+      return;
+    }
     try {
+      if (deleteEventRemoveTasks) {
+        const tasksSnap = await getDocs(collection(db, "events", eventId, "tasks"));
+        const deletes = tasksSnap.docs.map(d => deleteDoc(d.ref).catch(err => console.error("Error deleting task doc", err)));
+        await Promise.all(deletes);
+      }
       await deleteDoc(doc(db, "events", eventId));
       setEvents(prev => prev.filter(e => e.id !== eventId));
+      setMyTasks(prev => prev.filter(t => t.eventId !== eventId));
+      setNotificationTasks(prev => prev.filter(t => t.eventId !== eventId));
+      setConfirmingEventId(null);
+      setDeleteEventRemoveTasks(false);
     } catch (err) {
       console.error("Error deleting event:", err);
       alert("שגיאה במחיקת האירוע");
+    }
+  };
+
+  const handleJoinEventRequest = async (eventObj: Event) => {
+    if (!db || !user) return;
+    const eventId = eventObj.id;
+    if (eventObj.members?.includes(user.uid)) {
+      alert("אתה כבר חלק מהצוות באירוע הזה");
+      return;
+    }
+    if (joinRequests[eventId] === "PENDING") {
+      alert("בקשה ממתינה לאישור מנהל האירוע");
+      return;
+    }
+    try {
+      await setDoc(doc(db, "join_requests", `${eventId}_${user.uid}`), {
+        eventId,
+        eventTitle: eventObj.title || "",
+        requesterId: user.uid,
+        requesterName: user.displayName || user.email?.split("@")[0] || "משתמש",
+        requesterEmail: user.email || "",
+        ownerId: eventObj.createdBy || "",
+        ownerEmail: eventObj.createdByEmail || "",
+        status: "PENDING",
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+      setJoinRequests(prev => ({ ...prev, [eventId]: "PENDING" }));
+      alert("הבקשה נשלחה למנהל האירוע לאישור");
+    } catch (err) {
+      console.error("Error requesting to join event:", err);
+      alert("שגיאה בשליחת בקשת ההצטרפות");
     }
   };
 
@@ -408,6 +779,40 @@ export default function Dashboard() {
           taskTitle={chatTask.title}
           onClose={() => setChatTask(null)}
         />
+      )}
+
+      {/* Event Delete Confirmation Modal */}
+      {confirmingEventId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">אישור מחיקת אירוע</h3>
+            <p className="text-gray-600 mb-6">
+              למחוק את האירוע הזה? פעולה זו תמחק את כל המשימות והנתונים הקשורים אליו.
+            </p>
+            <label className="flex items-center gap-2 mb-6 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={deleteEventRemoveTasks}
+                onChange={(e) => setDeleteEventRemoveTasks(e.target.checked)}
+              />
+              מחק גם את המשימות של האירוע מהרשימות שלי
+            </label>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmingEventId(null)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={() => handleDeleteEvent(confirmingEventId)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
+              >
+                מחק אירוע
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Edit Task Modal */}
@@ -690,19 +1095,275 @@ export default function Dashboard() {
                       </button>
                     </div>
                   </Link>
-                  <button
-                    onClick={() => handleDeleteEvent(event.id)}
-                    className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
-                    title="מחק אירוע"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  {(
+                    (event.createdBy && event.createdBy === user.uid) ||
+                    (event.createdByEmail && user.email && normalizeKey(event.createdByEmail) === normalizeKey(user.email))
+                  ) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDeleteEventRemoveTasks(false);
+                        setConfirmingEventId(event.id);
+                      }}
+                      className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
+                      title="מחק אירוע"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      <div className="mt-8 flex justify-center gap-3 flex-wrap">
+        <button
+          onClick={() => setActivePanel(prev => prev === "stats" ? null : "stats")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "stats" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        >
+          <BarChart3 size={18} />
+          סטטיסטיקות
+        </button>
+        <button
+          onClick={() => setActivePanel(prev => prev === "users" ? null : "users")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "users" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        >
+          <Users size={18} />
+          משתמשי מערכת
+        </button>
+        <button
+          onClick={() => setActivePanel(prev => prev === "notifications" ? null : "notifications")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "notifications" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        >
+          <Bell size={18} />
+          הודעות
+        </button>
+      </div>
+
+      {activePanel === "stats" && (
+        <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 style={{ color: 'var(--patifon-orange)' }} />
+            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>סטטיסטיקות על האירועים שלי</h2>
+          </div>
+          {loadingStats ? (
+            <div className="text-gray-500 text-center py-6">טוען נתונים...</div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 border border-gray-200 rounded-lg flex items-center gap-3">
+                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream-dark)' }}>
+                  <Calendar size={20} className="text-gray-700" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">אירועים שפתחתי</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.myEvents}</p>
+                </div>
+              </div>
+              <div className="p-4 border border-gray-200 rounded-lg flex items-center gap-3">
+                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream-dark)' }}>
+                  <Users size={20} className="text-gray-700" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">נרשמים דרך הטפסים</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.attendees}</p>
+                </div>
+              </div>
+              <div className="p-4 border border-gray-200 rounded-lg flex items-center gap-3">
+                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream-dark)' }}>
+                  <UserPlus size={20} className="text-gray-700" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">שותפים שהצטרפו</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.partners}</p>
+                </div>
+              </div>
+              <div className="p-4 border border-gray-200 rounded-lg flex items-center gap-3">
+                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream-dark)' }}>
+                  <CheckSquare size={20} className="text-gray-700" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">משימות שבוצעו</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.tasks}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activePanel === "users" && (
+        <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Users style={{ color: 'var(--patifon-orange)' }} />
+            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>משתמשי המערכת</h2>
+          </div>
+          {usersError && (
+            <div className="text-red-600 text-sm mb-3">{usersError}</div>
+          )}
+          {loadingUsers ? (
+            <div className="text-gray-500 text-center py-6">טוען משתמשים...</div>
+          ) : usersList.length === 0 ? (
+            <div className="text-gray-500 text-center py-6">לא נמצאו משתמשים.</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {usersList.map((u) => {
+                const userActiveEvents =
+                  userEventsMap[u.id] ||
+                  (u.email ? userEventsMap[normalizeKey(u.email)] : []) ||
+                  [];
+                const isOpen = openUserEventsId === u.id;
+                return (
+                  <div key={u.id} className="p-3 border border-gray-200 rounded-lg bg-white">
+                    <div className="flex items-center gap-3 justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream-dark)' }}>
+                          <UserCircle2 size={22} className="text-gray-700" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-900 truncate">{u.fullName || u.email || "משתמש ללא שם"}</p>
+                          <p className="text-sm text-gray-500 truncate">{u.role || "ללא תפקיד"}</p>
+                        </div>
+                      </div>
+                      <button
+                        className="flex items-center gap-1 px-3 py-1 rounded-full border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                        onClick={() => setOpenUserEventsId(isOpen ? null : u.id)}
+                        title="הצג אירועים פעילים של המשתמש"
+                      >
+                        <Calendar size={14} />
+                        <span>{userActiveEvents.length}</span>
+                      </button>
+                    </div>
+                    {isOpen && userActiveEvents.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {userActiveEvents.map(ev => (
+                          <div key={ev.id} className="p-2 border border-gray-100 rounded-lg flex items-start gap-2 bg-gray-50">
+                            <div className="p-1.5 rounded-full bg-white border border-gray-200">
+                              <Calendar size={14} className="text-gray-700" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{ev.title || "אירוע ללא שם"}</p>
+                              <p className="text-xs text-gray-500 truncate">{formatEventDate(ev.startTime) || "ללא תאריך"}</p>
+                              <div className="flex items-center gap-1 mt-1 text-xs text-gray-600">
+                                <Users size={12} />
+                                <span>נרשמים:</span>
+                                <span>{(ev as any).attendeesCount ?? "—"}</span>
+                              </div>
+                              <div className="mt-2">
+                                <button
+                                  onClick={() => handleJoinEventRequest(ev)}
+                                  disabled={joinRequests[ev.id] === "PENDING" || joinRequests[ev.id] === "APPROVED"}
+                                  className={`text-xs px-3 py-1 rounded-full border transition ${
+                                    joinRequests[ev.id] === "PENDING" || joinRequests[ev.id] === "APPROVED"
+                                      ? "border-gray-200 text-gray-500 bg-gray-100 cursor-not-allowed"
+                                      : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                  }`}
+                                >
+                                  {joinRequests[ev.id] === "PENDING"
+                                    ? "ממתין לאישור"
+                                    : joinRequests[ev.id] === "APPROVED"
+                                    ? "מאושר"
+                                    : "הצטרף לצוות"}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {isOpen && userActiveEvents.length === 0 && (
+                      <div className="mt-3 text-xs text-gray-500">אין אירועים פעילים למשתמש זה.</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+          {activePanel === "notifications" && (
+            <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Bell style={{ color: 'var(--patifon-orange)' }} />
+                <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>הודעות והתראות</h2>
+          </div>
+          {loadingNotifications ? (
+            <div className="text-gray-500 text-center py-6">טוען התראות...</div>
+          ) : (
+            <div className="space-y-3">
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-800 mb-2">בקשות הצטרפות לאירועים שלי</p>
+                {incomingJoinRequests.length === 0 ? (
+                  <p className="text-xs text-gray-500">אין בקשות חדשות.</p>
+                ) : (
+                  incomingJoinRequests.map((req) => (
+                    <div key={req.id} className="flex items-start justify-between gap-3 bg-white border border-gray-200 rounded-lg p-3 mb-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{req.requesterName || req.requesterEmail || "משתמש"}</p>
+                        <p className="text-xs text-gray-500 truncate">אירוע: {req.eventTitle || req.eventId}</p>
+                        <p className="text-xs text-gray-500 truncate">סטטוס: {req.status === "PENDING" ? "ממתין" : req.status === "APPROVED" ? "אושר" : "נדחה"}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => handleApproveJoinRequest(req.id)}
+                          className="px-3 py-1 text-xs rounded-full bg-green-600 text-white hover:bg-green-700"
+                        >
+                          אשר
+                        </button>
+                        <button
+                          onClick={() => handleRejectJoinRequest(req.id)}
+                          className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                        >
+                          דחה
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-800 mb-2">הודעות ממשימות שמוקצות לי</p>
+                {taskNotifications.length === 0 ? (
+                  <p className="text-xs text-gray-500">אין הודעות חדשות.</p>
+                ) : (
+                  taskNotifications.map(t => (
+                    <div key={t.id} className="flex items-start justify-between gap-3 bg-white border border-gray-200 rounded-lg p-3 mb-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
+                          {(!t.readBy || !t.readBy[currentUid]) && (
+                            <span className="inline-block w-2 h-2 rounded-full bg-red-500" title="לא נקרא"></span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 truncate">אירוע: {t.eventTitle}</p>
+                        <p className="text-xs text-gray-700 truncate">{t.lastMessageText || "הודעה חדשה"}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setChatTask(t)}
+                          className="px-3 py-1 text-xs rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                        >
+                          פתח צ'אט
+                        </button>
+                        <button
+                          onClick={() => setNotificationTasks(prev => prev.filter(nt => nt.id !== t.id))}
+                          className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
+                          title="הסר מההתראות"
+                        >
+                          הסר
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Date Edit Modal */}
       {editingDateTask && (
