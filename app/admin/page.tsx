@@ -56,6 +56,8 @@ export default function AdminDashboard() {
     const [ownerFilter, setOwnerFilter] = useState<string>("all");
     const [partnerFilter, setPartnerFilter] = useState<string>("");
     const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+    const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+    const [deletingTaskKey, setDeletingTaskKey] = useState<string | null>(null);
 
     useEffect(() => {
         if (!loading && (!user || user.email !== ADMIN_EMAIL)) {
@@ -119,6 +121,44 @@ export default function AdminDashboard() {
         return tasksData.filter(t => allowedEventIds.has(t.eventId)).length;
     }, [filteredEvents, tasksData, ownerFilter, partnerFilter, tasksCount]);
 
+    const handleDeleteUser = async (userId: string) => {
+        if (!db) return;
+        const userToDelete = usersData.find(u => u.id === userId);
+        const userName = userToDelete?.fullName || userToDelete?.email || "משתמש זה";
+        const ok = confirm(`למחוק את ${userName} מהמערכת? פעולה זו תמחק את המשתמש ואת כל הנתונים הקשורים אליו.`);
+        if (!ok) return;
+        setDeletingUserId(userId);
+        try {
+            await firestoreDeleteDoc(firestoreDoc(db!, "users", userId));
+            setUsersData(prev => prev.filter(u => u.id !== userId));
+            alert("המשתמש נמחק בהצלחה");
+        } catch (err) {
+            console.error("Error deleting user", err);
+            alert("שגיאה במחיקת המשתמש");
+        } finally {
+            setDeletingUserId(null);
+        }
+    };
+
+    const handleDeleteRepeatTask = async (taskKey: string) => {
+        if (!db) return;
+        const taskToDelete = repeatTasks.find(t => t.key === taskKey);
+        const taskName = taskToDelete?.title || taskKey;
+        const ok = confirm(`למחוק את "${taskName}" ממאגר המשימות החוזרות?`);
+        if (!ok) return;
+        setDeletingTaskKey(taskKey);
+        try {
+            await firestoreDeleteDoc(firestoreDoc(db!, "repeat_tasks", taskKey));
+            setRepeatTasks(prev => prev.filter(t => t.key !== taskKey));
+            alert("המשימה נמחקה בהצלחה מהמאגר");
+        } catch (err) {
+            console.error("Error deleting repeat task", err);
+            alert("שגיאה במחיקת המשימה");
+        } finally {
+            setDeletingTaskKey(null);
+        }
+    };
+
     const handleDeleteEvent = async (eventId: string) => {
         if (!db) return;
         const ok = confirm("למחוק את האירוע הזה?");
@@ -177,7 +217,17 @@ export default function AdminDashboard() {
                                 <div key={u.id} className="p-3 bg-white border border-gray-100 rounded-xl shadow-sm flex flex-col gap-1">
                                     <div className="flex justify-between text-sm font-semibold text-gray-900">
                                         <span>{u.fullName || "ללא שם"}</span>
-                                        <span className="text-xs text-gray-500">{u.role || ""}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-gray-500">{u.role || ""}</span>
+                                            <button
+                                                onClick={() => handleDeleteUser(u.id)}
+                                                className="p-1 rounded-full text-red-600 hover:text-red-800 hover:bg-red-50 border border-red-200"
+                                                title="מחק משתמש"
+                                                disabled={deletingUserId === u.id}
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="text-sm text-gray-600">{u.email}</div>
                                     {u.phone && <div className="text-sm text-gray-600">טלפון: {u.phone}</div>}
@@ -228,7 +278,17 @@ export default function AdminDashboard() {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between text-sm font-semibold text-gray-900">
                                             <span className="truncate">{t.title || t.key}</span>
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">x{t.count || 1}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">x{t.count || 1}</span>
+                                                <button
+                                                    onClick={() => handleDeleteRepeatTask(t.key)}
+                                                    className="p-1 rounded-full text-red-600 hover:text-red-800 hover:bg-red-50 border border-red-200"
+                                                    title="מחק משימה"
+                                                    disabled={deletingTaskKey === t.key}
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
                                         </div>
                                         {t.lastUsedAt?.seconds && (
                                             <div className="text-xs text-gray-500">
