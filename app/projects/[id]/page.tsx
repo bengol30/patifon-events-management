@@ -99,30 +99,6 @@ export default function ProjectDetailsPage() {
     needsScholarshipVolunteers: false,
   });
 
-  // Handle edit status modal for tasks
-  const submitEditStatus = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!db || !editingStatusTask) return;
-    try {
-      await updateDoc(doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id), {
-        currentStatus: editingStatusTask.currentStatus || "",
-        nextStep: editingStatusTask.nextStep || "",
-        dueDate: editingStatusTask.dueDate || "",
-      });
-      setProjectTasks(prev =>
-        prev.map(t =>
-          t.id === editingStatusTask.id
-            ? { ...t, currentStatus: editingStatusTask.currentStatus, nextStep: editingStatusTask.nextStep, dueDate: editingStatusTask.dueDate }
-            : t
-        )
-      );
-      setEditingStatusTask(null);
-    } catch (err) {
-      console.error("Failed to update task status fields", err);
-      alert("שגיאה בעדכון המשימה");
-    }
-  };
-
   useEffect(() => {
     const loadProject = async () => {
       if (!db || !projectId) return;
@@ -901,3 +877,20 @@ function StatusBadge({ status }: { status?: string }) {
     </span>
   );
 }
+  // Handle edit status modal for tasks
+  const submitEditStatus = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!db || !editingStatusTask) return;
+    try {
+      await updateDoc(doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id), {
+        currentStatus: editingStatusTask.currentStatus || "",
+        nextStep: editingStatusTask.nextStep || "",
+        dueDate: editingStatusTask.dueDate || "",
+      });
+      setProjectTasks(prev => prev.map(t => t.id === editingStatusTask.id ? { ...t, currentStatus: editingStatusTask.currentStatus, nextStep: editingStatusTask.nextStep, dueDate: editingStatusTask.dueDate } : t));
+      setEditingStatusTask(null);
+    } catch (err) {
+      console.error("Failed to update task status fields", err);
+      alert("שגיאה בעדכון המשימה");
+    }
+  };
