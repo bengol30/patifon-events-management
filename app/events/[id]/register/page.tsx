@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection, serverTimestamp, runTransaction } from "firebase/firestore";
 import { ArrowRight, Calendar, MapPin, Users, Send, CheckCircle, AlertTriangle } from "lucide-react";
 
 interface EventData {
@@ -49,6 +49,44 @@ export default function EventRegistrationPage() {
         fetchEvent();
     }, [id]);
 
+    const updateEventTeamWithAttendee = async (fullName: string, email: string) => {
+        const firstName = (fullName || "").trim().split(/\s+/)[0] || fullName || email;
+        const trimmedEmail = email.trim();
+        try {
+            await runTransaction(db!, async (transaction) => {
+                const eventRef = doc(db!, "events", id);
+                const snap = await transaction.get(eventRef);
+                if (!snap.exists()) return;
+                const data = snap.data() as any;
+                const currentTeam = Array.isArray(data.team) ? [...data.team] : [];
+                const emailLower = trimmedEmail.toLowerCase();
+                const idx = currentTeam.findIndex((m: any) => (m?.email || "").toLowerCase() === emailLower);
+
+                if (idx >= 0) {
+                    const existing = currentTeam[idx] || {};
+                    const existingName = (existing.name || "").trim();
+                    const shouldReplaceName = !existingName || existingName === existing.email;
+                    currentTeam[idx] = {
+                        ...existing,
+                        name: shouldReplaceName ? firstName : existingName,
+                        role: existing.role || "חבר צוות",
+                        email: existing.email || trimmedEmail,
+                    };
+                } else {
+                    currentTeam.push({
+                        name: firstName,
+                        role: "נרשם",
+                        email: trimmedEmail,
+                    });
+                }
+
+                transaction.update(eventRef, { team: currentTeam });
+            });
+        } catch (err) {
+            console.error("Failed to sync attendee into team list", err);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db) return;
@@ -64,6 +102,7 @@ export default function EventRegistrationPage() {
                 email: form.email.trim(),
                 createdAt: serverTimestamp(),
             });
+            await updateEventTeamWithAttendee(form.name, form.email);
             setSubmitted(true);
             setForm({ name: "", phone: "", email: "" });
             setError("");

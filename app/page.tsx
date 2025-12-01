@@ -4,9 +4,9 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell } from "lucide-react";
+import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit } from "lucide-react";
 import { db, auth } from "@/lib/firebase";
-import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc } from "firebase/firestore";
 import TaskChat from "@/components/TaskChat";
 
 import TaskCard from "@/components/TaskCard";
@@ -59,6 +59,13 @@ interface Task {
   lastMessageMentions?: { name?: string; userId?: string; email?: string }[];
 }
 
+interface TeamNote {
+  id: string;
+  text: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -83,6 +90,12 @@ export default function Dashboard() {
   const [loadingNotifications, setLoadingNotifications] = useState(true);
   const [notificationTasks, setNotificationTasks] = useState<Task[]>([]);
   const [deleteEventRemoveTasks, setDeleteEventRemoveTasks] = useState(false);
+  const [unreadEditRequests, setUnreadEditRequests] = useState(0);
+  const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
+  const [loadingNotes, setLoadingNotes] = useState(true);
+  const [newNote, setNewNote] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
 
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
@@ -98,6 +111,8 @@ export default function Dashboard() {
 
   // Chat State
   const [chatTask, setChatTask] = useState<Task | null>(null);
+  const isProjectManager = (user?.email || "").toLowerCase() === "bengo0469@gmail.com";
+  const isAdmin = isProjectManager;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -210,6 +225,53 @@ export default function Dashboard() {
     };
     fetchNotificationTasks();
   }, [activePanel, user, events, db]);
+
+  // Fetch unread edit requests for admin badge
+  useEffect(() => {
+    const loadUnread = async () => {
+      if (!db || !isAdmin) return;
+      try {
+        const snap = await getDocs(query(collection(db, "edit_requests"), where("status", "==", "UNREAD")));
+        setUnreadEditRequests(snap.size);
+      } catch (err) {
+        console.error("Failed loading edit request unread count", err);
+      }
+    };
+    loadUnread();
+  }, [db, isAdmin]);
+
+  // Team notes (per user)
+  useEffect(() => {
+    const loadNotes = async () => {
+      if (!db || !user) {
+        setLoadingNotes(false);
+        return;
+      }
+      try {
+        setLoadingNotes(true);
+        // Avoids composite index requirement: filter by owner then sort locally.
+        const snap = await getDocs(
+          query(collection(db, "team_meeting_notes"), where("createdBy", "==", user.uid))
+        );
+        const notes: TeamNote[] = [];
+        snap.forEach(n => {
+          const data = n.data() as any;
+          notes.push({ id: n.id, text: data.text || "", createdAt: data.createdAt, updatedAt: data.updatedAt });
+        });
+        notes.sort((a, b) => {
+          const aTs = a.createdAt?.seconds || 0;
+          const bTs = b.createdAt?.seconds || 0;
+          return bTs - aTs;
+        });
+        setTeamNotes(notes);
+      } catch (err) {
+        console.error("Failed loading team notes", err);
+      } finally {
+        setLoadingNotes(false);
+      }
+    };
+    loadNotes();
+  }, [db, user]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -540,19 +602,19 @@ export default function Dashboard() {
   const handleDeleteTask = async () => {
     if (!db || !deletingTaskId) return;
 
-    const taskToDelete = myTasks.find(t => t.id === deletingTaskId);
-    if (!taskToDelete) return;
+    const taskToComplete = myTasks.find(t => t.id === deletingTaskId);
+    if (!taskToComplete) return;
 
     try {
-      const taskRef = doc(db, "events", taskToDelete.eventId, "tasks", deletingTaskId);
-      await deleteDoc(taskRef);
+      const taskRef = doc(db, "events", taskToComplete.eventId, "tasks", deletingTaskId);
+      await updateDoc(taskRef, { status: "DONE" });
 
-      // Update local state
+      // Remove from local view (DONE tasks are hidden)
       setMyTasks(prev => prev.filter(t => t.id !== deletingTaskId));
       setDeletingTaskId(null);
     } catch (err) {
-      console.error("Error deleting task:", err);
-      alert("שגיאה במחיקת המשימה");
+      console.error("Error completing task via delete:", err);
+      alert("שגיאה בסימון המשימה כהושלמה");
     }
   };
 
@@ -733,6 +795,50 @@ export default function Dashboard() {
     }
   };
 
+  const handleAddNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!db || !user) return;
+    const text = newNote.trim();
+    if (!text) return;
+    try {
+      const docRef = await addDoc(collection(db, "team_meeting_notes"), {
+        text,
+        createdBy: user.uid,
+        createdByEmail: user.email || "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setTeamNotes(prev => [{ id: docRef.id, text, createdAt: { seconds: Math.floor(Date.now() / 1000) } }, ...prev]);
+      setNewNote("");
+    } catch (err) {
+      console.error("Failed to add note", err);
+    }
+  };
+
+  const handleDeleteNote = async (id: string) => {
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, "team_meeting_notes", id));
+      setTeamNotes(prev => prev.filter(n => n.id !== id));
+    } catch (err) {
+      console.error("Failed to delete note", err);
+    }
+  };
+
+  const handleUpdateNote = async (id: string, text: string) => {
+    if (!db) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    try {
+      await updateDoc(doc(db, "team_meeting_notes", id), { text: trimmed, updatedAt: serverTimestamp() });
+      setTeamNotes(prev => prev.map(n => n.id === id ? { ...n, text: trimmed } : n));
+      setEditingNoteId(null);
+      setEditingNoteText("");
+    } catch (err) {
+      console.error("Failed to update note", err);
+    }
+  };
+
   if (loading) return <div className="p-8 text-center">טוען...</div>;
   if (!user) return null;
 
@@ -748,6 +854,18 @@ export default function Dashboard() {
             >
               <Settings size={20} />
             </Link>
+            {isAdmin && (
+              <Link
+                href="/requests/inbox"
+                className="relative p-2 rounded-full border border-gray-300 text-indigo-700 hover:bg-indigo-50 transition"
+                title="בקשות לעריכה"
+              >
+                <FileEdit size={20} />
+                {unreadEditRequests > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex h-3 w-3 rounded-full bg-red-500"></span>
+                )}
+              </Link>
+            )}
             <button
               onClick={handleLogout}
               className="p-2 rounded-full border border-red-200 text-red-600 hover:bg-red-50 transition"
@@ -761,6 +879,15 @@ export default function Dashboard() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
+          {isProjectManager && (
+            <Link
+              href="/projects"
+              className="px-4 py-2 rounded-lg border border-indigo-200 text-indigo-800 bg-indigo-50 hover:bg-indigo-100 transition flex items-center gap-2"
+            >
+              <FolderKanban size={18} />
+              ניהול פרוייקטים
+            </Link>
+          )}
           <Link
             href="/events/new"
             className="patifon-gradient text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90 transition vinyl-shadow"
@@ -906,12 +1033,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal (marks task as done) */}
       {deletingTaskId && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">אישור מחיקה</h3>
-            <p className="text-gray-600 mb-6">האם אתה בטוח שברצונך למחוק את המשימה?</p>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">סיום משימה</h3>
+            <p className="text-gray-600 mb-6">המשימה תסומן כהושלמה ותוסר מהרשימה שלך. להמשיך?</p>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setDeletingTaskId(null)}
@@ -921,9 +1048,9 @@ export default function Dashboard() {
               </button>
               <button
                 onClick={handleDeleteTask}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition shadow-sm"
               >
-                מחק
+                סמן כהושלמה
               </button>
             </div>
           </div>
@@ -1117,6 +1244,83 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Team Meeting Notes */}
+      <div className="mt-8 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+        <div className="flex items-center gap-2 mb-4">
+          <MessageCircle style={{ color: 'var(--patifon-orange)' }} />
+          <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>נקודות לפגישת הצוות הקרובה</h2>
+        </div>
+        <form onSubmit={handleAddNote} className="flex flex-col gap-3 md:flex-row md:items-center mb-4">
+          <textarea
+            className="flex-1 p-3 border rounded-lg text-sm border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="כתבו כאן נקודות, החלטות או שאלות לפגישה..."
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            rows={2}
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition"
+          >
+            הוסף
+          </button>
+        </form>
+        {loadingNotes ? (
+          <div className="text-gray-500 text-sm">טוען נקודות...</div>
+        ) : teamNotes.length === 0 ? (
+          <div className="text-gray-500 text-sm">אין נקודות עדיין. הוסף את הראשונה.</div>
+        ) : (
+          <div className="space-y-3">
+            {teamNotes.map(note => (
+              <div key={note.id} className="p-3 border border-gray-200 rounded-lg bg-gray-50">
+                {editingNoteId === note.id ? (
+                  <div className="space-y-2">
+                    <textarea
+                      className="w-full p-2 border rounded-lg text-sm"
+                      rows={2}
+                      value={editingNoteText}
+                      onChange={(e) => setEditingNoteText(e.target.value)}
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleUpdateNote(note.id, editingNoteText)}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700"
+                      >
+                        שמור
+                      </button>
+                      <button
+                        onClick={() => { setEditingNoteId(null); setEditingNoteText(""); }}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-700 hover:bg-gray-100"
+                      >
+                        בטל
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.text}</p>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.text); }}
+                        className="text-indigo-700 text-xs hover:underline"
+                      >
+                        ערוך
+                      </button>
+                      <button
+                        onClick={() => handleDeleteNote(note.id)}
+                        className="text-red-600 text-xs hover:underline"
+                      >
+                        מחק
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-8 flex justify-center gap-3 flex-wrap">

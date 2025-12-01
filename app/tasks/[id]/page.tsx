@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
 import Link from "next/link";
-import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send } from "lucide-react";
+import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake } from "lucide-react";
 import { storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -30,6 +30,7 @@ interface Task {
     nextStep?: string;
     eventId: string;
     eventTitle?: string;
+    isVolunteerTask?: boolean;
 }
 
 interface EventTeamMember {
@@ -65,6 +66,7 @@ export default function TaskDetailPage() {
     const [newMessage, setNewMessage] = useState("");
     const [error, setError] = useState("");
     const [eventTeam, setEventTeam] = useState<EventTeamMember[]>([]);
+    const [eventNeedsVolunteers, setEventNeedsVolunteers] = useState(false);
     const [attachments, setAttachments] = useState<any[]>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadFiles, setUploadFiles] = useState<File[]>([]);
@@ -133,6 +135,7 @@ export default function TaskDetailPage() {
                         } as Task,
                         eventTitle: (eventData as any).title,
                         eventTeam: ((eventData as any).team as EventTeamMember[]) || [],
+                        eventNeedsVolunteers: !!(eventData as any).needsVolunteers,
                     };
                 };
 
@@ -140,6 +143,7 @@ export default function TaskDetailPage() {
                 let foundEventId = "";
                 let foundEventTitle = "";
                 let foundEventTeam: EventTeamMember[] = [];
+                let foundEventNeedsVolunteers = false;
 
                 // Try hinted eventId first (passed from card)
                 if (hintedEventId) {
@@ -149,6 +153,7 @@ export default function TaskDetailPage() {
                         foundEventId = hintedEventId;
                         foundEventTitle = res.eventTitle;
                         foundEventTeam = res.eventTeam;
+                        foundEventNeedsVolunteers = res.eventNeedsVolunteers;
                     }
                 }
 
@@ -166,6 +171,7 @@ export default function TaskDetailPage() {
                             foundEventId = eventDoc.id;
                             foundEventTitle = res.eventTitle;
                             foundEventTeam = res.eventTeam;
+                            foundEventNeedsVolunteers = res.eventNeedsVolunteers;
                             break;
                         }
                     }
@@ -174,6 +180,7 @@ export default function TaskDetailPage() {
                 if (foundTask) {
                     setTask({ ...foundTask, eventTitle: foundEventTitle });
                     setEventTeam(foundEventTeam);
+                    setEventNeedsVolunteers(foundEventNeedsVolunteers);
 
                     // Subscribe to chat
                     if (!db) return;
@@ -219,6 +226,7 @@ export default function TaskDetailPage() {
                         if (docSnap.exists()) {
                             const data = docSnap.data();
                             setEventTeam((data.team as EventTeamMember[]) || []);
+                            setEventNeedsVolunteers(!!data.needsVolunteers);
                         }
                     });
 
@@ -268,12 +276,14 @@ export default function TaskDetailPage() {
         }
     };
 
-    const handleUpdateField = async (field: string, value: string) => {
+    const handleUpdateField = async (field: string, value: string | boolean) => {
         if (!db || !task) return;
         try {
             await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), {
                 [field]: value
             });
+            // Update local state
+            setTask(prev => prev ? { ...prev, [field]: value } : prev);
         } catch (err) {
             console.error(`Error updating ${field}:`, err);
         }
@@ -472,6 +482,22 @@ export default function TaskDetailPage() {
                                     />
                                 </div>
                             </div>
+                            {eventNeedsVolunteers && (
+                                <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg mb-4">
+                                    <input
+                                        type="checkbox"
+                                        id="isVolunteerTask"
+                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={task.isVolunteerTask || false}
+                                        onChange={(e) => handleUpdateField('isVolunteerTask', e.target.checked)}
+                                    />
+                                    <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                        <Handshake size={16} className="text-indigo-600" />
+                                        משימה למתנדב
+                                    </label>
+                                    <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                </div>
+                            )}
                         </div>
 
                         {/* Chat Section */}

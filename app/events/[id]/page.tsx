@@ -34,6 +34,7 @@ interface Task {
     lastMessageBy?: string;
     readBy?: { [key: string]: any };
     previewImage?: string;
+    isVolunteerTask?: boolean;
 }
 
 interface BudgetItem {
@@ -69,6 +70,14 @@ interface EventFileThumb {
     taskTitle?: string;
 }
 
+interface EventVolunteer {
+    id: string;
+    name?: string;
+    phone?: string;
+    email?: string;
+    createdAt?: any;
+}
+
 interface JoinRequest {
     id: string;
     eventId: string;
@@ -83,6 +92,7 @@ interface EventData {
     location: string;
     startTime: any;
     endTime: any;
+    dates?: any[];
     description: string;
     status: string;
     team: { name: string; role: string; email?: string; userId?: string }[];
@@ -94,13 +104,23 @@ interface EventData {
     budget?: string;
     durationHours?: number;
     recurrence?: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
+    recurrenceEndDate?: any;
+    needsVolunteers?: boolean;
+    volunteersCount?: number | null;
     contactPerson?: {
         name?: string;
         phone?: string;
         email?: string;
     };
+    projectId?: string | null;
+    projectName?: string | null;
     customSections?: CustomSection[];
     infoBlocks?: InfoBlock[];
+}
+
+interface ProjectOption {
+    id: string;
+    name: string;
 }
 
 export default function EventDetailsPage() {
@@ -123,6 +143,10 @@ export default function EventDetailsPage() {
     const [error, setError] = useState("");
     const [copied, setCopied] = useState(false);
     const [copiedRegister, setCopiedRegister] = useState(false);
+    const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
+    const [selectedProject, setSelectedProject] = useState<string>("");
+    const [linkingProject, setLinkingProject] = useState(false);
+    const isProjectLinker = (user?.email || "").toLowerCase() === "bengo0469@gmail.com";
 
     // Suggestions State
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -139,6 +163,7 @@ export default function EventDetailsPage() {
         assignees: [] as Assignee[],
         dueDate: "",
         priority: "NORMAL",
+        isVolunteerTask: false,
     });
     const dueDateInputRef = useRef<HTMLInputElement | null>(null);
     const newTaskFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -178,6 +203,21 @@ export default function EventDetailsPage() {
         if (assignee.userId) return String(assignee.userId);
         if (assignee.name) return assignee.name.trim().toLowerCase();
         return "";
+    };
+
+    const openWhatsApp = (phone?: string) => {
+        if (!phone) return;
+        const digits = phone.replace(/\D/g, "");
+        if (!digits) return;
+        let normalized = digits;
+        if (normalized.startsWith("972")) {
+            // already includes country code
+        } else if (normalized.startsWith("0")) {
+            normalized = "972" + normalized.slice(1);
+        } else if (normalized.length === 9) {
+            normalized = "972" + normalized;
+        }
+        window.open(`https://wa.me/${normalized}`, "_blank", "noopener,noreferrer");
     };
 
     const sanitizeAssigneesForWrite = (arr: Assignee[] = []) => {
@@ -280,10 +320,13 @@ export default function EventDetailsPage() {
         startTime: "",
         durationHours: "",
         status: "",
+        recurrence: "NONE" as "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+        recurrenceEndDate: "",
+        needsVolunteers: false,
+        volunteersCount: "",
         contactName: "",
         contactPhone: "",
         contactEmail: "",
-        recurrence: "NONE" as "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
         customSections: [] as CustomSection[],
     });
 
@@ -293,6 +336,8 @@ export default function EventDetailsPage() {
     const [showPostModal, setShowPostModal] = useState(false);
     const [postContent, setPostContent] = useState("");
     const [flyerLink, setFlyerLink] = useState("");
+    const [showVolunteerModal, setShowVolunteerModal] = useState(false);
+    const [volunteerCountInput, setVolunteerCountInput] = useState("");
     const [showEventFileModal, setShowEventFileModal] = useState(false);
     const [eventFile, setEventFile] = useState<File | null>(null);
     const [eventFileName, setEventFileName] = useState("");
@@ -300,6 +345,10 @@ export default function EventDetailsPage() {
     const eventFileInputRef = useRef<HTMLInputElement | null>(null);
     const [importantDocs, setImportantDocs] = useState<ImportantDoc[]>([]);
     const [eventFiles, setEventFiles] = useState<EventFileThumb[]>([]);
+    const [copiedVolunteersLink, setCopiedVolunteersLink] = useState(false);
+    const [volunteers, setVolunteers] = useState<EventVolunteer[]>([]);
+    const [loadingVolunteers, setLoadingVolunteers] = useState(true);
+    const [volunteerBusyId, setVolunteerBusyId] = useState<string | null>(null);
     const handleShareWhatsApp = (title: string, url?: string) => {
         if (!url) {
             alert("אין קישור לקובץ לשיתוף");
@@ -441,6 +490,47 @@ export default function EventDetailsPage() {
         }
     };
 
+    const handleLinkProject = async () => {
+        if (!isProjectLinker) {
+            alert("רק החשבון המורשה יכול לשייך אירועים לפרויקטים.");
+            return;
+        }
+        if (!db || !selectedProject) return;
+        const chosen = projectOptions.find(p => p.id === selectedProject);
+        setLinkingProject(true);
+        try {
+            await updateDoc(doc(db, "events", id), {
+                projectId: selectedProject,
+                projectName: chosen?.name || "",
+                updatedAt: serverTimestamp(),
+            });
+            setEvent(prev => prev ? { ...prev, projectId: selectedProject, projectName: chosen?.name || "" } : prev);
+        } catch (err) {
+            console.error("Failed to link project", err);
+            alert("לא הצלחנו לשייך את האירוע לפרויקט");
+        } finally {
+            setLinkingProject(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!db) return;
+        const loadProjects = async () => {
+            try {
+                const snap = await getDocs(collection(db, "projects"));
+                const opts: ProjectOption[] = [];
+                snap.forEach((d) => {
+                    const data = d.data() as any;
+                    opts.push({ id: d.id, name: data.name || "פרויקט" });
+                });
+                setProjectOptions(opts);
+            } catch (err) {
+                console.error("Failed loading projects", err);
+            }
+        };
+        loadProjects();
+    }, [db]);
+
     useEffect(() => {
         if (!id || !db) return;
 
@@ -449,6 +539,7 @@ export default function EventDetailsPage() {
                 const data = docSnap.data() as EventData;
                 const enrichedTeam = await hydrateTeamNames(data.team || []);
                 setEvent({ ...data, team: enrichedTeam });
+                setSelectedProject((data as any).projectId || "");
             } else {
                 setError("האירוע לא נמצא");
             }
@@ -511,6 +602,16 @@ export default function EventDetailsPage() {
             setEventFiles(filesData);
         });
 
+        const qVolunteers = query(collection(db, "events", id, "volunteers"), orderBy("createdAt", "desc"));
+        const unsubscribeVolunteers = onSnapshot(qVolunteers, (querySnapshot) => {
+            const vols: EventVolunteer[] = [];
+            querySnapshot.forEach((doc) => {
+                vols.push({ id: doc.id, ...doc.data() } as EventVolunteer);
+            });
+            setVolunteers(vols);
+            setLoadingVolunteers(false);
+        });
+
         return () => {
             unsubscribeEvent();
             unsubscribeTasks();
@@ -518,6 +619,7 @@ export default function EventDetailsPage() {
             unsubscribeImportant();
             unsubscribeJoinReq();
             unsubscribeEventFiles();
+            unsubscribeVolunteers();
         };
     }, [id, db]);
 
@@ -599,6 +701,9 @@ export default function EventDetailsPage() {
             durationHours: event.durationHours ? String(event.durationHours) : "",
             status: event.status || "",
             recurrence: (event.recurrence as any) || "NONE",
+            recurrenceEndDate: event.recurrenceEndDate ? toInputValue(event.recurrenceEndDate) : "",
+            needsVolunteers: !!event.needsVolunteers,
+            volunteersCount: event.volunteersCount != null ? String(event.volunteersCount) : "",
             contactName: event.contactPerson?.name || "",
             contactPhone: event.contactPerson?.phone || "",
             contactEmail: event.contactPerson?.email || "",
@@ -691,6 +796,7 @@ export default function EventDetailsPage() {
                 assignee: primary?.name || newTask.assignee,
                 assigneeId: primary?.userId || newTask.assigneeId || null,
                 status: "TODO",
+                isVolunteerTask: newTask.isVolunteerTask || false,
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
             });
@@ -699,7 +805,7 @@ export default function EventDetailsPage() {
                 await uploadTaskFiles(docRef.id, newTask.title, newTaskFiles);
             }
             setShowNewTask(false);
-            setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL" });
+            setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false });
             setNewTaskFiles([]);
         } catch (err) {
             console.error("Error adding task:", err);
@@ -725,6 +831,7 @@ export default function EventDetailsPage() {
                 status: editingTask.status,
                 currentStatus: editingTask.currentStatus || "",
                 nextStep: editingTask.nextStep || "",
+                isVolunteerTask: editingTask.isVolunteerTask || false,
             };
             await updateDoc(taskRef, updateData);
             setEditingTask(null);
@@ -822,6 +929,15 @@ export default function EventDetailsPage() {
                 ? new Date(startDateForDuration.getTime() + duration * 60 * 60 * 1000)
                 : event.endTime;
 
+            let recurrenceEnd: Date | null = null;
+            if (eventForm.recurrence !== "NONE" && eventForm.recurrenceEndDate) {
+                const parsed = new Date(eventForm.recurrenceEndDate);
+                if (!isNaN(parsed.getTime())) {
+                    recurrenceEnd = parsed;
+                }
+            }
+            const volunteersCountNum = eventForm.volunteersCount ? parseInt(eventForm.volunteersCount, 10) : null;
+
             await updateDoc(doc(db, "events", id), {
                 title: eventForm.title,
                 location: eventForm.location,
@@ -832,6 +948,9 @@ export default function EventDetailsPage() {
                 budget: eventForm.budget,
                 status: eventForm.status || event.status,
                 recurrence: eventForm.recurrence || "NONE",
+                recurrenceEndDate: recurrenceEnd,
+                needsVolunteers: eventForm.needsVolunteers,
+                volunteersCount: eventForm.needsVolunteers && Number.isFinite(volunteersCountNum) ? volunteersCountNum : null,
                 startTime: startTimeValue,
                 endTime: calculatedEnd,
                 durationHours: duration && !isNaN(duration) ? duration : null,
@@ -855,6 +974,11 @@ export default function EventDetailsPage() {
     const buildRegisterLink = () => {
         if (typeof window === "undefined") return "";
         return `${window.location.origin}/events/${id}/register`;
+    };
+
+    const buildVolunteerLink = () => {
+        if (typeof window === "undefined") return "";
+        return `${window.location.origin}/events/${id}/volunteers`;
     };
 
     const buildPostContent = () => {
@@ -1049,6 +1173,21 @@ export default function EventDetailsPage() {
         }
     };
 
+    const handleDeleteVolunteer = async (volunteerId: string) => {
+        if (!db || !event) return;
+        if (!confirm("למחוק את המתנדב מהרשימה?")) return;
+        setVolunteerBusyId(volunteerId);
+        try {
+            await deleteDoc(doc(db, "events", id, "volunteers", volunteerId));
+            setVolunteers(prev => prev.filter(v => v.id !== volunteerId));
+        } catch (err) {
+            console.error("Failed to delete volunteer", err);
+            alert("שגיאה במחיקת מתנדב");
+        } finally {
+            setVolunteerBusyId(null);
+        }
+    };
+
     const handleApproveJoinRequest = async (req: JoinRequest) => {
         if (!canManageTeam || !db || !event) return;
         try {
@@ -1147,6 +1286,37 @@ export default function EventDetailsPage() {
         } catch (err) {
             console.error("Failed to copy register link:", err);
             alert("לא הצלחנו להעתיק את הקישור לטופס ההרשמה.");
+        }
+    };
+
+    const copyVolunteerLink = async () => {
+        try {
+            const volunteerLink = `${window.location.origin}/events/${id}/volunteers/register`;
+            await navigator.clipboard.writeText(volunteerLink);
+            setCopiedVolunteersLink(true);
+            setTimeout(() => setCopiedVolunteersLink(false), 2000);
+        } catch (err) {
+            console.error("Failed to copy volunteer link:", err);
+            alert("לא הצלחנו להעתיק את הקישור להרשמת מתנדבים.");
+        }
+    };
+
+    const updateVolunteerCount = async () => {
+        if (!db || !canManageTeam) return;
+        try {
+            const count = volunteerCountInput.trim() ? parseInt(volunteerCountInput, 10) : null;
+            if (volunteerCountInput.trim() && (!Number.isFinite(count) || count! < 0)) {
+                alert("יש להזין מספר תקין של מתנדבים");
+                return;
+            }
+            const eventRef = doc(db, "events", id);
+            await updateDoc(eventRef, {
+                volunteersCount: count
+            });
+            setShowVolunteerModal(false);
+        } catch (err) {
+            console.error("Error updating volunteer count:", err);
+            alert("שגיאה בעדכון כמות המתנדבים");
         }
     };
 
@@ -1387,6 +1557,17 @@ export default function EventDetailsPage() {
                                         <option value="BIWEEKLY">כל שבועיים</option>
                                         <option value="MONTHLY">כל חודש</option>
                                     </select>
+                                    {eventForm.recurrence !== "NONE" && (
+                                        <div className="mt-2">
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">תאריך סיום החזרתיות</label>
+                                            <input
+                                                type="date"
+                                                value={eventForm.recurrenceEndDate || ""}
+                                                onChange={(e) => setEventForm({ ...eventForm, recurrenceEndDate: e.target.value })}
+                                                className="w-full p-2 border rounded-lg text-sm"
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1406,6 +1587,35 @@ export default function EventDetailsPage() {
                                         onChange={(partners) => setEventForm({ ...eventForm, partners })}
                                         placeholder="הוסף שותף ולחץ אנטר"
                                     />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מתנדבים לערב</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            id="needsVolunteers"
+                                            type="checkbox"
+                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={!!eventForm.needsVolunteers}
+                                            onChange={(e) => setEventForm({ ...eventForm, needsVolunteers: e.target.checked })}
+                                        />
+                                        <label htmlFor="needsVolunteers" className="text-gray-800 text-sm">
+                                            צריך מתנדבים לערב הזה?
+                                        </label>
+                                    </div>
+                                    {eventForm.needsVolunteers && (
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">כמה מתנדבים?</label>
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                className="w-full p-2 border rounded-lg text-sm"
+                                                value={eventForm.volunteersCount ?? ""}
+                                                onChange={(e) => setEventForm({ ...eventForm, volunteersCount: e.target.value })}
+                                                placeholder="מספר המתנדבים הדרוש"
+                                                required={eventForm.needsVolunteers}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1698,6 +1908,22 @@ export default function EventDetailsPage() {
                                     onChange={e => setEditingTask({ ...editingTask, nextStep: e.target.value })}
                                 />
                             </div>
+                            {event.needsVolunteers && (
+                                <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                    <input
+                                        type="checkbox"
+                                        id="isVolunteerTask"
+                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={editingTask.isVolunteerTask || false}
+                                        onChange={e => setEditingTask({ ...editingTask, isVolunteerTask: e.target.checked })}
+                                    />
+                                    <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                        <Handshake size={16} className="text-indigo-600" />
+                                        משימה למתנדב
+                                    </label>
+                                    <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                </div>
+                            )}
                             <div className="flex justify-end gap-3 pt-4">
                                 <button
                                     type="button"
@@ -1743,6 +1969,19 @@ export default function EventDetailsPage() {
                                         {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' }) : ""}
                                     </span>
                                 </div>
+                                {event.dates && event.dates.length > 1 && (
+                                    <div className="flex items-center gap-2 flex-wrap text-xs text-indigo-800">
+                                        {event.dates.map((d, idx) => {
+                                            const dt = d?.seconds ? new Date(d.seconds * 1000) : new Date(d);
+                                            const label = !isNaN(dt.getTime()) ? dt.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "";
+                                            return (
+                                                <span key={idx} className="px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-full">
+                                                    {label}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                                 {event.durationHours && (
                                     <div className="flex items-center gap-1">
                                         <Clock size={16} />
@@ -1755,17 +1994,57 @@ export default function EventDetailsPage() {
                                         <span>{event.participantsCount} משתתפים</span>
                                     </div>
                                 )}
-                                {partnersLabel && (
+                                {event.needsVolunteers && (
                                     <div className="flex items-center gap-1">
-                                        <Handshake size={16} />
-                                        <span>שותפים: {partnersLabel}</span>
+                                        <Users size={16} />
+                                        <span>
+                                            {event.volunteersCount != null
+                                                ? `צריך ${event.volunteersCount} מתנדבים לערב`
+                                                : "צריך מתנדבים לערב הזה"}
+                                        </span>
                                     </div>
                                 )}
+                        {partnersLabel && (
+                            <div className="flex items-center gap-1">
+                                <Handshake size={16} />
+                                <span>שותפים: {partnersLabel}</span>
                             </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2 shrink-0">
-                            <button
-                                onClick={copyInviteLink}
+                        )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        {event.projectId ? (
+                            <span className="inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                                פרויקט משויך: {event.projectName || event.projectId}
+                            </span>
+                        ) : (
+                            <span className="text-xs text-gray-600">אין פרויקט משויך</span>
+                        )}
+                        {isProjectLinker && projectOptions.length > 0 && (
+                            <div className="flex items-center gap-2">
+                                <select
+                                    className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    value={selectedProject}
+                                    onChange={(e) => setSelectedProject(e.target.value)}
+                                >
+                                    <option value="">בחר פרויקט</option>
+                                    {projectOptions.map((p) => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    onClick={handleLinkProject}
+                                    disabled={!selectedProject || linkingProject}
+                                    className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition disabled:opacity-60"
+                                >
+                                    {linkingProject ? "מקשר..." : "שייך לפרויקט"}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                    <button
+                        onClick={copyInviteLink}
                                 className={`p-2 rounded-full transition vinyl-shadow text-white ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"}`}
                                 title={copied ? "הקישור הועתק!" : "שיתוף דף ניהול האירוע"}
                             >
@@ -1847,6 +2126,20 @@ export default function EventDetailsPage() {
                                 <Paperclip size={14} />
                                 קבצים מצורפים
                             </button>
+                            {event.needsVolunteers && (
+                                <button
+                                    onClick={() => {
+                                        setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
+                                        setShowVolunteerModal(true);
+                                    }}
+                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                    style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                    title="הזמנת מתנדבים לאירוע"
+                                >
+                                    <Handshake size={14} />
+                                    הזמנת מתנדבים
+                                </button>
+                            )}
                         </div>
                         {showAdvancedActions && (
                             <div className="flex flex-wrap items-center gap-2 mt-3">
@@ -2218,6 +2511,22 @@ export default function EventDetailsPage() {
                                         {newTaskFiles.length > 0 ? `${newTaskFiles.length} קבצים יועלו אחרי שמירה` : "ניתן לצרף מסמכים, תמונות או חוזים"}
                                     </p>
                                 </div>
+                                {event.needsVolunteers && (
+                                    <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                        <input
+                                            type="checkbox"
+                                            id="newTaskIsVolunteerTask"
+                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={newTask.isVolunteerTask || false}
+                                            onChange={e => setNewTask({ ...newTask, isVolunteerTask: e.target.checked })}
+                                        />
+                                        <label htmlFor="newTaskIsVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                            <Handshake size={16} className="text-indigo-600" />
+                                            משימה למתנדב
+                                        </label>
+                                        <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                    </div>
+                                )}
                                 <div className="flex justify-end gap-2">
                                     <button
                                         type="button"
@@ -2278,9 +2587,11 @@ export default function EventDetailsPage() {
                 <div className="space-y-6">
                     {/* ... existing budget section ... */}
 
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Team Section */}
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
                             <div className="flex gap-2">
                                 <button
                                     onClick={copyInviteLink}
@@ -2484,6 +2795,66 @@ export default function EventDetailsPage() {
                                 <p className="text-xs text-gray-500">רק יוצר האירוע יכול להוסיף שותפים.</p>
                             )}
                         </div>
+                        </div>
+
+                        {/* Volunteers Section */}
+                        {event.needsVolunteers && (
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                                        <Handshake size={20} className="text-indigo-600" />
+                                        מתנדבים
+                                    </h3>
+                                    {event.volunteersCount && (
+                                        <span className="text-xs text-gray-500">
+                                            {volunteers.length} / {event.volunteersCount}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {loadingVolunteers ? (
+                                    <div className="flex items-center justify-center py-8">
+                                        <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-indigo-500"></div>
+                                    </div>
+                                ) : volunteers.length > 0 ? (
+                                    <div className="space-y-4">
+                                        {volunteers.map((volunteer) => (
+                                            <div key={volunteer.id} className="flex items-center gap-3 justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                        {(volunteer.name || volunteer.email || "?").substring(0, 2)}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-medium text-gray-900">{volunteer.name || volunteer.email || "מתנדב"}</p>
+                                                        {volunteer.email && volunteer.name && (
+                                                            <p className="text-xs text-gray-500">{volunteer.email}</p>
+                                                        )}
+                                                        {volunteer.phone && (
+                                                            <p className="text-xs text-gray-500">{volunteer.phone}</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {canManageTeam && (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (confirm("האם אתה בטוח שברצונך להסיר את המתנדב?")) {
+                                                                handleDeleteVolunteer(volunteer.id);
+                                                            }
+                                                        }}
+                                                        className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
+                                                        title="הסר מתנדב"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500">עדיין אין מתנדבים שנרשמו</p>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
@@ -2660,6 +3031,89 @@ export default function EventDetailsPage() {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Volunteer Invitation Modal */}
+            {showVolunteerModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold flex items-center gap-2">
+                                <Handshake size={20} className="text-indigo-600" />
+                                הזמנת מתנדבים לאירוע
+                            </h3>
+                            <button onClick={() => setShowVolunteerModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                                <h4 className="font-semibold text-indigo-900 mb-2">איך זה עובד?</h4>
+                                <ul className="text-sm text-indigo-800 space-y-2 list-disc list-inside">
+                                    <li>כעת מתנדבים יוכלו להתנדב לאירוע ולעזור בשמימות</li>
+                                    <li>מתנדבים יוכלו לבחור לעצמם משימות ולתייג את עצמם</li>
+                                    <li>מתנדבים שלא רשומים למערכת יוכלו להירשם דרך קישור מיוחד</li>
+                                    <li>ניתן להגביל את כמות המתנדבים בהתאם לצורך</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    כמה מתנדבים צריך? (אופציונלי - השאר ריק ללא הגבלה)
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={volunteerCountInput}
+                                    onChange={(e) => setVolunteerCountInput(e.target.value)}
+                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                    placeholder="מספר המתנדבים הדרוש"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    {volunteerCountInput && parseInt(volunteerCountInput, 10) > 0
+                                        ? `הגבלה: ${volunteerCountInput} מתנדבים מקסימום`
+                                        : "ללא הגבלה על כמות המתנדבים"}
+                                </p>
+                            </div>
+                            <div className="pt-4 border-t">
+                                <button
+                                    type="button"
+                                    onClick={updateVolunteerCount}
+                                    className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 mb-3"
+                                >
+                                    עדכן כמות מתנדבים
+                                </button>
+                                <div className="bg-gray-50 rounded-lg p-4">
+                                    <p className="text-sm font-medium text-gray-700 mb-2">קישור הרשמה למתנדבים:</p>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            readOnly
+                                            value={`${typeof window !== 'undefined' ? window.location.origin : ''}/events/${id}/volunteers/register`}
+                                            className="flex-1 rounded-lg border-gray-300 border p-2 text-sm bg-white"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={copyVolunteerLink}
+                                            className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${copiedVolunteersLink ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                        >
+                                            {copiedVolunteersLink ? (
+                                                <>
+                                                    <Check size={16} />
+                                                    הועתק!
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Copy size={16} />
+                                                    העתק קישור
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

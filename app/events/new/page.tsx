@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, CalendarPlus } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
@@ -11,12 +11,14 @@ import PartnersInput from "@/components/PartnersInput";
 
 export default function NewEventPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const projectId = searchParams?.get("projectId") || "";
+    const projectName = searchParams?.get("projectName") || "";
     const { user, loading: authLoading } = useAuth();
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
     const [formData, setFormData] = useState({
         title: "",
-        date: "",
         location: "",
         description: "",
         participantsCount: "",
@@ -24,9 +26,13 @@ export default function NewEventPage() {
         goal: "",
         budget: "",
         recurrence: "NONE" as "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+        recurrenceEndDate: "",
         contactName: "",
         contactPhone: "",
+        needsVolunteers: false,
+        volunteersCount: "",
     });
+    const [eventDates, setEventDates] = useState<string[]>([""]);
 
     // Redirect if not authenticated
     if (!authLoading && !user) {
@@ -60,12 +66,36 @@ export default function NewEventPage() {
         }
 
         try {
+            const dateValues = eventDates.map(d => d.trim()).filter(Boolean);
+            if (dateValues.length === 0) {
+                setError("יש לבחור לפחות תאריך אחד לאירוע");
+                setSubmitting(false);
+                return;
+            }
+            const dateObjects = dateValues.map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+            if (dateObjects.length === 0) {
+                setError("תאריך/ים לא תקינים");
+                setSubmitting(false);
+                return;
+            }
+            let recurrenceEnd: Date | null = null;
+            if (formData.recurrence !== "NONE" && formData.recurrenceEndDate) {
+                const parsed = new Date(formData.recurrenceEndDate);
+                if (isNaN(parsed.getTime())) {
+                    setError("תאריך סיום חזרתיות לא תקין");
+                    setSubmitting(false);
+                    return;
+                }
+                recurrenceEnd = parsed;
+            }
+            const volunteersCountNum = formData.volunteersCount ? parseInt(formData.volunteersCount, 10) : null;
             // Create event in Firestore
             const eventData = {
                 title: formData.title,
                 location: formData.location,
-                startTime: new Date(formData.date),
-                endTime: new Date(formData.date),
+                startTime: dateObjects[0],
+                endTime: dateObjects[0],
+                dates: dateObjects,
                 description: formData.description,
                 participantsCount: formData.participantsCount,
                 partners: formData.partners,
@@ -73,6 +103,9 @@ export default function NewEventPage() {
                 budget: formData.budget,
                 status: "PLANNING",
                 recurrence: formData.recurrence,
+                recurrenceEndDate: recurrenceEnd,
+                needsVolunteers: formData.needsVolunteers,
+                volunteersCount: formData.needsVolunteers && Number.isFinite(volunteersCountNum) ? volunteersCountNum : null,
                 createdBy: user.uid,
                 createdByEmail: user.email || "",
                 members: [user.uid], // Add creator as a member
@@ -89,6 +122,8 @@ export default function NewEventPage() {
                     phone: formData.contactPhone,
                     email: user.email || "",
                 },
+                projectId: projectId || null,
+                projectName: projectName || null,
                 createdAt: serverTimestamp(),
                 responsibilities: [],
             };
@@ -108,11 +143,12 @@ export default function NewEventPage() {
         date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 
     const handleSaveToCalendar = () => {
-        if (!formData.title || !formData.date) {
+        const firstDate = eventDates.find(d => d.trim());
+        if (!formData.title || !firstDate) {
             alert("מלא שם אירוע ותאריך/שעה לפני שמירה ביומן.");
             return;
         }
-        const start = new Date(formData.date);
+        const start = new Date(firstDate);
         if (isNaN(start.getTime())) {
             alert("תאריך/שעה לא תקינים");
             return;
@@ -128,6 +164,8 @@ export default function NewEventPage() {
             formData.budget ? `תקציב משוער: ${formData.budget}` : null,
             formData.partners?.length ? `שותפים: ${formData.partners.join(", ")}` : null,
             formData.recurrence && formData.recurrence !== "NONE" ? `תדירות: ${formData.recurrence}` : null,
+            formData.recurrence !== "NONE" && formData.recurrenceEndDate ? `עד תאריך: ${formData.recurrenceEndDate}` : null,
+            formData.needsVolunteers ? `מתנדבים: ${formData.volunteersCount || "צריך מתנדבים"}` : null,
             formData.contactName ? `איש קשר: ${formData.contactName}` : null,
             formData.contactPhone ? `טלפון: ${formData.contactPhone}` : null,
         ].filter(Boolean).join(" | ");
@@ -148,6 +186,11 @@ export default function NewEventPage() {
                         חזרה לדשבורד
                     </Link>
                     <h1 className="text-3xl font-bold text-gray-900">יצירת אירוע חדש</h1>
+                    {projectId && (
+                        <div className="mt-2 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                            משויך לפרויקט: {projectName || projectId}
+                        </div>
+                    )}
                 </div>
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -190,15 +233,39 @@ export default function NewEventPage() {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך ושעה</label>
-                                <input
-                                    type="datetime-local"
-                                    required
-                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                    value={formData.date}
-                                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                                />
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תאריכים ושעות</label>
+                                {eventDates.map((d, idx) => (
+                                    <div key={idx} className="flex items-center gap-2">
+                                        <input
+                                            type="datetime-local"
+                                            required={idx === 0}
+                                            className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            value={d}
+                                            onChange={(e) => {
+                                                const copy = [...eventDates];
+                                                copy[idx] = e.target.value;
+                                                setEventDates(copy);
+                                            }}
+                                        />
+                                        {eventDates.length > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setEventDates(prev => prev.filter((_, i) => i !== idx))}
+                                                className="text-red-500 text-sm px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200"
+                                            >
+                                                מחק
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={() => setEventDates(prev => [...prev, ""])}
+                                    className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                >
+                                    הוסף תאריך נוסף
+                                </button>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">מיקום</label>
@@ -210,6 +277,35 @@ export default function NewEventPage() {
                                     onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                                     placeholder="לדוגמה: פארק הזהב"
                                 />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">מתנדבים לערב</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        id="needsVolunteers"
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={formData.needsVolunteers}
+                                        onChange={(e) => setFormData({ ...formData, needsVolunteers: e.target.checked })}
+                                    />
+                                    <label htmlFor="needsVolunteers" className="text-gray-800 text-sm">
+                                        צריך מתנדבים לערב הזה?
+                                    </label>
+                                </div>
+                                {formData.needsVolunteers && (
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">כמה מתנדבים?</label>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            value={formData.volunteersCount}
+                                            onChange={(e) => setFormData({ ...formData, volunteersCount: e.target.value })}
+                                            placeholder="מספר המתנדבים הדרוש"
+                                            required={formData.needsVolunteers}
+                                        />
+                                    </div>
+                                )}
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">תדירות חוזרת</label>
@@ -223,6 +319,19 @@ export default function NewEventPage() {
                                     <option value="BIWEEKLY">כל שבועיים</option>
                                     <option value="MONTHLY">כל חודש</option>
                                 </select>
+                                {formData.recurrence !== "NONE" && (
+                                    <div className="mt-2 space-y-1">
+                                        <label className="block text-xs font-medium text-gray-600">עד איזה תאריך האירוע יחזור?</label>
+                                        <input
+                                            type="date"
+                                            className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            value={formData.recurrenceEndDate}
+                                            onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                                            placeholder="בחר תאריך סיום חזרתיות"
+                                        />
+                                        <p className="text-xs text-gray-500">אופציונלי: בחר תאריך אחרון שבו האירוע יתקיים.</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
