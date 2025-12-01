@@ -61,8 +61,8 @@ export default function VolunteerEventsPage() {
                     });
                     
                     eventsData.push({
-                        id: eventDoc.id,
                         ...eventData,
+                        id: eventDoc.id,
                         tasks: tasks,
                     });
                 }
