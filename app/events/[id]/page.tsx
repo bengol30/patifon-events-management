@@ -515,9 +515,10 @@ export default function EventDetailsPage() {
 
     useEffect(() => {
         if (!db) return;
+        const firestore = db;
         const loadProjects = async () => {
             try {
-                const snap = await getDocs(collection(db, "projects"));
+                const snap = await getDocs(collection(firestore, "projects"));
                 const opts: ProjectOption[] = [];
                 snap.forEach((d) => {
                     const data = d.data() as any;
