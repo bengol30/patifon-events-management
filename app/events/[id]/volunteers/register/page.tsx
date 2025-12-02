@@ -34,7 +34,6 @@ export default function VolunteerRegistrationPage() {
     const router = useRouter();
 
     const [event, setEvent] = useState<EventData | null>(null);
-    const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [submitted, setSubmitted] = useState(false);
@@ -43,9 +42,18 @@ export default function VolunteerRegistrationPage() {
         name: "",
         phone: "",
         email: "",
+        password: "",
+        confirmPassword: "",
     });
-    const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
     const [currentVolunteerCount, setCurrentVolunteerCount] = useState(0);
+
+    const hashPassword = async (password: string) => {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(password);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+    };
 
     useEffect(() => {
         const fetchData = async () => {
@@ -68,19 +76,6 @@ export default function VolunteerRegistrationPage() {
                     return;
                 }
 
-                // Fetch tasks - only volunteer tasks
-                const tasksQuery = query(collection(db, "events", id, "tasks"));
-                const tasksSnap = await getDocs(tasksQuery);
-                const tasksData: Task[] = [];
-                tasksSnap.forEach((doc) => {
-                    const taskData = { id: doc.id, ...doc.data() } as Task;
-                    // Only include tasks marked as volunteer tasks
-                    if (taskData.isVolunteerTask) {
-                        tasksData.push(taskData);
-                    }
-                });
-                setTasks(tasksData);
-
                 // Count current volunteers
                 const volunteersQuery = query(collection(db, "events", id, "volunteers"));
                 const volunteersSnap = await getDocs(volunteersQuery);
@@ -95,17 +90,19 @@ export default function VolunteerRegistrationPage() {
         fetchData();
     }, [id]);
 
-    const handleTaskToggle = (taskId: string) => {
-        setSelectedTasks((prev) =>
-            prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
-        );
-    };
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db) return;
         if (!form.name.trim() || !form.phone.trim() || !form.email.trim()) {
             setError("יש למלא שם, טלפון ואימייל");
+            return;
+        }
+        if (!form.password.trim() || form.password.length < 6) {
+            setError("יש להזין סיסמה עם לפחות 6 תווים");
+            return;
+        }
+        if (form.password !== form.confirmPassword) {
+            setError("הסיסמאות לא תואמות");
             return;
         }
 
@@ -129,41 +126,22 @@ export default function VolunteerRegistrationPage() {
             }
 
             // Add volunteer
+            const passwordHash = await hashPassword(form.password.trim());
             await addDoc(collection(db, "events", id, "volunteers"), {
                 name: form.name.trim(),
                 phone: form.phone.trim(),
                 email: form.email.trim(),
-                selectedTasks: selectedTasks,
+                selectedTasks: [],
+                passwordHash,
+                passwordSetAt: serverTimestamp(),
                 createdAt: serverTimestamp(),
             });
 
-            // Update tasks with volunteer assignments
-            for (const taskId of selectedTasks) {
-                const taskRef = doc(db, "events", id, "tasks", taskId);
-                const taskSnap = await getDoc(taskRef);
-                if (taskSnap.exists()) {
-                    const taskData = taskSnap.data();
-                    const currentAssignees = taskData.assignees || [];
-                    const newAssignee = {
-                        name: form.name.trim(),
-                        email: form.email.trim(),
-                    };
-                    // Check if volunteer already assigned
-                    const emailLower = form.email.trim().toLowerCase();
-                    const existingIdx = currentAssignees.findIndex(
-                        (a: any) => (a.email || "").toLowerCase() === emailLower
-                    );
-                    if (existingIdx < 0) {
-                        await updateDoc(taskRef, {
-                            assignees: arrayUnion(newAssignee)
-                        });
-                    }
-                }
-            }
-
             setSubmitted(true);
-            setForm({ name: "", phone: "", email: "" });
-            setSelectedTasks([]);
+            setTimeout(() => {
+                router.push("/volunteers/events");
+            }, 800);
+            setForm({ name: "", phone: "", email: "", password: "", confirmPassword: "" });
         } catch (err) {
             console.error("Error saving volunteer registration", err);
             setError("שגיאה בשליחת הטופס. נסו שוב.");
@@ -211,6 +189,15 @@ export default function VolunteerRegistrationPage() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#fff7ed] via-white to-[#f5f3ff] p-6">
             <div className="max-w-4xl mx-auto">
+                <div className="flex justify-end mb-4">
+                    <Link
+                        href="/volunteers/events"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-semibold transition"
+                    >
+                        לאזור האישי של המתנדב
+                        <ExternalLink size={16} />
+                    </Link>
+                </div>
                 <div className="bg-white rounded-2xl shadow-xl border border-orange-100 p-6 md:p-8">
                     <div className="flex flex-col md:flex-row gap-4 md:items-center md:justify-between mb-6">
                         <div>
@@ -268,78 +255,11 @@ export default function VolunteerRegistrationPage() {
                             <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
                                 <CheckCircle className="mx-auto mb-3 text-green-600" size={48} />
                                 <h2 className="text-xl font-bold text-green-900 mb-2">תודה שנרשמת כמתנדב!</h2>
-                                <p className="text-green-700 mb-4">ההרשמה בוצעה בהצלחה. להלן המשימות של האירוע:</p>
-                            </div>
-
-                            {tasks.length > 0 ? (
-                                <div className="space-y-4">
-                                    <h3 className="text-lg font-bold text-gray-900">משימות האירוע</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {tasks.map((task) => {
-                                            const taskDate = task.dueDate ? new Date(task.dueDate) : null;
-                                            return (
-                                                <div
-                                                    key={task.id}
-                                                    className={`border rounded-lg p-4 ${
-                                                        selectedTasks.includes(task.id)
-                                                            ? "border-indigo-500 bg-indigo-50"
-                                                            : "border-gray-200 bg-white"
-                                                    }`}
-                                                >
-                                                    <div className="flex items-start gap-3">
-                                                        <div className="mt-0.5">
-                                                            {selectedTasks.includes(task.id) ? (
-                                                                <CheckSquare className="text-indigo-600" size={18} />
-                                                            ) : (
-                                                                <Square className="text-gray-400" size={18} />
-                                                            )}
-                                                        </div>
-                                                        <div className="flex-1">
-                                                            <h4 className="font-semibold text-sm text-gray-900 mb-1">{task.title}</h4>
-                                                            {task.description && (
-                                                                <p className="text-xs text-gray-600 mb-2">{task.description}</p>
-                                                            )}
-                                                            {taskDate && (
-                                                                <div className="flex items-center gap-1 text-xs text-gray-500 mt-2">
-                                                                    <Clock size={12} />
-                                                                    <span>דד ליין: {taskDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
-                                                                </div>
-                                                            )}
-                                                            <div className="flex items-center gap-2 mt-2">
-                                                                <span className={`text-xs px-2 py-0.5 rounded ${
-                                                                    task.priority === "CRITICAL" ? "bg-red-100 text-red-700" :
-                                                                    task.priority === "HIGH" ? "bg-orange-100 text-orange-700" :
-                                                                    "bg-gray-100 text-gray-700"
-                                                                }`}>
-                                                                    {task.priority === "CRITICAL" ? "קריטי" :
-                                                                     task.priority === "HIGH" ? "גבוה" : "רגיל"}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center text-gray-500 text-sm">
-                                    אין משימות זמינות כרגע לאירוע זה
-                                </div>
-                            )}
-
-                            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-6">
-                                <h3 className="text-lg font-bold text-indigo-900 mb-2">רוצה להתנדב בעוד אירועים?</h3>
-                                <p className="text-indigo-800 text-sm mb-4">
-                                    תוכל להרשם לעוד אירועים ולבחור משימות שונות. כל האירועים והמשימות הפתוחות ממתינים לך!
-                                </p>
-                                <button
-                                    onClick={() => router.push("/volunteers/events")}
-                                    className="w-full md:w-auto px-6 py-3 bg-indigo-600 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 hover:bg-indigo-700 transition"
-                                >
+                                <p className="text-green-700 mb-4">עוד רגע נעביר אותך לאזור האישי כדי לבחור ולשריין משימות ולנהל סטטוסים.</p>
+                                <Link href="/volunteers/events" className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold">
+                                    עבור לאזור האישי
                                     <ExternalLink size={16} />
-                                    צפה בכל האירועים והמשימות הפתוחות
-                                </button>
+                                </Link>
                             </div>
                         </div>
                     ) : isAtLimit ? (
@@ -351,7 +271,13 @@ export default function VolunteerRegistrationPage() {
                     ) : (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <form onSubmit={handleSubmit} className="space-y-4">
-                                <h2 className="text-lg font-bold text-gray-900 mb-4">פרטים אישיים</h2>
+                                <div className="space-y-2">
+                                    <h2 className="text-lg font-bold text-gray-900">פרטים אישיים</h2>
+                                    <p className="text-sm text-gray-600 leading-relaxed">
+                                        ההרשמה יוצרת עבורך חשבון מתנדב עם סיסמה. אחרי השלמת הרשמה נעביר אותך לאזור האישי שלך,
+                                        שם תוכל לראות את כל המשימות הזמינות למתנדבים, לבחור ולשריין אותן, ולעקוב/לעדכן סטטוס. סימון ביצוע יעדכן גם בדף ניהול המשימות של האירוע.
+                                    </p>
+                                </div>
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-800 mb-1">שם מלא</label>
                                     <input
@@ -388,70 +314,38 @@ export default function VolunteerRegistrationPage() {
                                         disabled={submitting}
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-800 mb-1">סיסמה</label>
+                                    <input
+                                        type="password"
+                                        required
+                                        minLength={6}
+                                        value={form.password}
+                                        onChange={(e) => setForm({ ...form, password: e.target.value })}
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
+                                        placeholder="לפחות 6 תווים"
+                                        disabled={submitting}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-800 mb-1">אימות סיסמה</label>
+                                    <input
+                                        type="password"
+                                        required
+                                        minLength={6}
+                                        value={form.confirmPassword}
+                                        onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
+                                        placeholder="הקלד שוב לאימות"
+                                        disabled={submitting}
+                                    />
+                                </div>
 
                                 {error && <p className="text-sm text-red-600">{error}</p>}
                             </form>
 
-                            <div className="space-y-4">
-                                <h2 className="text-lg font-bold text-gray-900 mb-4">בחירת משימות</h2>
-                                <p className="text-sm text-gray-600 mb-4">
-                                    בחרו את המשימות שתרצו לקחת עליכם אחריות. ניתן לבחור מספר משימות.
-                                </p>
-                                {tasks.length === 0 ? (
-                                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center text-gray-500 text-sm">
-                                        אין משימות זמינות כרגע
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                                        {tasks.map((task) => (
-                                            <div
-                                                key={task.id}
-                                                className={`border rounded-lg p-3 cursor-pointer transition ${
-                                                    selectedTasks.includes(task.id)
-                                                        ? "border-indigo-500 bg-indigo-50"
-                                                        : "border-gray-200 hover:border-gray-300"
-                                                }`}
-                                                onClick={() => handleTaskToggle(task.id)}
-                                            >
-                                                <div className="flex items-start gap-3">
-                                                    <div className="mt-0.5">
-                                                        {selectedTasks.includes(task.id) ? (
-                                                            <CheckSquare className="text-indigo-600" size={18} />
-                                                        ) : (
-                                                            <Square className="text-gray-400" size={18} />
-                                                        )}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <h3 className="font-semibold text-sm text-gray-900">{task.title}</h3>
-                                                        {task.description && (
-                                                            <p className="text-xs text-gray-600 mt-1">{task.description}</p>
-                                                        )}
-                                                        <div className="flex items-center gap-2 mt-2">
-                                                            <span className={`text-xs px-2 py-0.5 rounded ${
-                                                                task.priority === "CRITICAL" ? "bg-red-100 text-red-700" :
-                                                                task.priority === "HIGH" ? "bg-orange-100 text-orange-700" :
-                                                                "bg-gray-100 text-gray-700"
-                                                            }`}>
-                                                                {task.priority === "CRITICAL" ? "קריטי" :
-                                                                 task.priority === "HIGH" ? "גבוה" : "רגיל"}
-                                                            </span>
-                                                            <span className="text-xs text-gray-500">
-                                                                {task.status === "DONE" ? "הושלם" :
-                                                                 task.status === "IN_PROGRESS" ? "בביצוע" :
-                                                                 task.status === "STUCK" ? "תקוע" : "לעשות"}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                                {selectedTasks.length > 0 && (
-                                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm text-indigo-800">
-                                        בחרת {selectedTasks.length} משימה{selectedTasks.length > 1 ? "ות" : ""}
-                                    </div>
-                                )}
+                            <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-lg p-3 text-sm">
+                                את בחירת המשימות תעשו מיד אחרי ההרשמה באזור האישי, שם תוכלו לשריין משימות פתוחות ולסמן סטטוסים.
                             </div>
                         </div>
                     )}
@@ -479,7 +373,7 @@ export default function VolunteerRegistrationPage() {
                                 ) : (
                                     <>
                                         <Send size={16} />
-                                        שלח הרשמה
+                                        שלח הרשמה ועבור לאזור האישי
                                     </>
                                 )}
                             </button>
@@ -491,4 +385,3 @@ export default function VolunteerRegistrationPage() {
         </div>
     );
 }
-

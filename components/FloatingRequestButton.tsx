@@ -21,11 +21,10 @@ export default function FloatingRequestButton() {
   return (
     <Link
       href="/requests"
-      className="fixed bottom-6 left-6 z-50 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 transition"
+      className="fixed bottom-6 left-6 z-50 inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 transition"
       title="בקשות לעריכה"
     >
-      <FileEdit size={18} />
-      בקשות לעריכה
+      <FileEdit size={20} />
     </Link>
   );
 }

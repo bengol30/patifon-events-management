@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Calendar, CheckCircle2, FolderKanban, Loader2, Pencil, Users, PlusCircle, MapPin, Trash2, MessageCircle, CheckSquare, Clock, X } from "lucide-react";
+import { ArrowRight, Calendar, CheckCircle2, FolderKanban, Loader2, Pencil, Users, PlusCircle, MapPin, Trash2, MessageCircle, CheckSquare, Clock, X, UserPlus } from "lucide-react";
 import TaskCard from "@/components/TaskCard";
 
 interface Project {
@@ -23,6 +23,7 @@ interface Project {
   ownerEmail?: string;
   createdAt?: any;
   updatedAt?: any;
+  teamMembers?: { userId: string; fullName?: string; email?: string }[];
 }
 
 interface Volunteer {
@@ -86,6 +87,10 @@ export default function ProjectDetailsPage() {
   const [editingDateTask, setEditingDateTask] = useState<ProjectTask | null>(null);
   const isAdmin = (user?.email || "").toLowerCase() === ALLOWED_EMAIL;
   const [copiedLink, setCopiedLink] = useState(false);
+  const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [showTeamPicker, setShowTeamPicker] = useState(false);
 
   const isAllowed = useMemo(() => normalizeEmail(user?.email) === ALLOWED_EMAIL, [user?.email]);
 
@@ -97,6 +102,7 @@ export default function ProjectDetailsPage() {
     dueDate: "",
     status: STATUS_OPTIONS[0],
     needsScholarshipVolunteers: false,
+    teamMembers: [] as { userId: string; fullName?: string; email?: string }[],
   });
 
   useEffect(() => {
@@ -105,12 +111,14 @@ export default function ProjectDetailsPage() {
       setLoadingProject(true);
       setLoadingVolunteers(true);
       setLoadingEvents(true);
+      setLoadingUsers(true);
       setError(null);
       try {
-        const [snap, volunteersSnap, eventsSnap] = await Promise.all([
+        const [snap, volunteersSnap, eventsSnap, usersSnap] = await Promise.all([
           getDoc(doc(db, "projects", projectId)),
           getDocs(collection(db, "projects", projectId, "volunteers")),
           getDocs(query(collection(db, "events"), where("projectId", "==", projectId))),
+          getDocs(collection(db, "users")),
         ]);
 
         if (!snap.exists()) {
@@ -131,6 +139,7 @@ export default function ProjectDetailsPage() {
           ownerEmail: data.ownerEmail,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
+          teamMembers: Array.isArray(data.teamMembers) ? data.teamMembers : [],
         };
         setProject(proj);
         setForm({
@@ -141,6 +150,7 @@ export default function ProjectDetailsPage() {
           dueDate: proj.dueDate || "",
           status: proj.status || STATUS_OPTIONS[0],
           needsScholarshipVolunteers: !!proj.needsScholarshipVolunteers,
+          teamMembers: proj.teamMembers || [],
         });
 
         const vols: Volunteer[] = [];
@@ -173,6 +183,12 @@ export default function ProjectDetailsPage() {
         });
         evs.sort((a, b) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0));
         setProjectEvents(evs);
+
+        const users = usersSnap.docs.map((u) => {
+          const d = u.data() as any;
+          return { id: u.id, fullName: d.fullName || d.name || d.displayName || d.email || "משתמש ללא שם", email: d.email || "" };
+        });
+        setUsersList(users);
 
         // Load tasks for all related events
         setLoadingProjectTasks(true);
@@ -218,6 +234,7 @@ export default function ProjectDetailsPage() {
         setLoadingVolunteers(false);
         setLoadingProjectTasks(false);
         setLoadingEvents(false);
+        setLoadingUsers(false);
       }
     };
 
@@ -236,6 +253,16 @@ export default function ProjectDetailsPage() {
       router.push("/");
     }
   }, [user, loading, isAllowed, router]);
+
+  const filteredUsers = useMemo(() => {
+    if (!userSearch.trim()) return usersList;
+    const q = userSearch.trim().toLowerCase();
+    return usersList.filter(
+      (u) =>
+        (u.fullName || "").toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q)
+    );
+  }, [usersList, userSearch]);
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
@@ -260,6 +287,7 @@ export default function ProjectDetailsPage() {
         status: form.status,
         dueDate: form.dueDate,
         needsScholarshipVolunteers: form.needsScholarshipVolunteers,
+        teamMembers: form.teamMembers,
         updatedAt: serverTimestamp(),
       });
 
@@ -272,6 +300,7 @@ export default function ProjectDetailsPage() {
         status: form.status,
         dueDate: form.dueDate,
         needsScholarshipVolunteers: form.needsScholarshipVolunteers,
+        teamMembers: form.teamMembers,
       });
       setEditMode(false);
     } catch (err) {
@@ -365,42 +394,25 @@ export default function ProjectDetailsPage() {
   }
 
   return (
-    <div className="min-h-screen p-6" style={{ background: "var(--patifon-cream)" }}>
-      <header className="flex items-start justify-between mb-8">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-xs text-indigo-800 font-semibold bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full w-fit">
-            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-indigo-100 text-indigo-700">✦</span>
-            גישה זמינה רק ל- {ALLOWED_EMAIL}
-          </div>
+    <div className="min-h-screen p-3 sm:p-6" style={{ background: "var(--patifon-cream)" }}>
+      <header className="mb-4 sm:mb-8">
+        <div className="flex flex-col gap-3 sm:gap-2">
           <div>
-            <h1 className="text-3xl font-bold leading-tight" style={{ color: "var(--patifon-burgundy)" }}>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold leading-tight" style={{ color: "var(--patifon-burgundy)" }}>
               {project.name}
             </h1>
-            <p className="text-gray-700">ניהול פרויקט</p>
+            <p className="text-sm sm:text-base text-gray-700">ניהול פרויקט</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2 mt-4">
           <Link
             href="/projects"
-            className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition flex items-center gap-2"
+            className="flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition flex items-center justify-center gap-1 sm:gap-2 text-sm"
           >
             <ArrowRight size={16} className="rotate-180" />
-            חזרה לרשימת הפרוייקטים
+            <span className="hidden sm:inline">חזרה לרשימת הפרוייקטים</span>
+            <span className="sm:hidden">חזרה</span>
           </Link>
-          <Link
-            href={`/events/new?projectId=${project.id}&projectName=${encodeURIComponent(project.name || "")}`}
-            className="px-4 py-2 rounded-lg border border-indigo-200 text-indigo-800 bg-white hover:bg-indigo-50 transition flex items-center gap-2"
-          >
-            <PlusCircle size={16} />
-            פתח אירוע לפרויקט זה
-          </Link>
-          <button
-            onClick={() => setEditMode((prev) => !prev)}
-            className="px-4 py-2 rounded-lg border border-indigo-200 text-indigo-800 bg-white hover:bg-indigo-50 transition flex items-center gap-2"
-          >
-            <Pencil size={16} />
-            {editMode ? "סגור עריכה" : "ערוך פרטים"}
-          </button>
         </div>
       </header>
 
@@ -410,11 +422,30 @@ export default function ProjectDetailsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-xl vinyl-shadow lg:col-span-2" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
-          <div className="flex items-center gap-2 mb-4">
-            <FolderKanban style={{ color: "var(--patifon-red)" }} />
-            <h2 className="text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>פרטי פרויקט</h2>
+      <div className="grid grid-cols-1 gap-4 sm:gap-6">
+        <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <FolderKanban style={{ color: "var(--patifon-red)" }} size={20} />
+              <h2 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>פרטי פרויקט</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/events/new?projectId=${project.id}&projectName=${encodeURIComponent(project.name || "")}`}
+                className="px-3 sm:px-4 py-2 rounded-lg border border-indigo-200 text-indigo-800 bg-white hover:bg-indigo-50 transition flex items-center gap-2 text-sm"
+              >
+                <PlusCircle size={16} />
+                <span className="hidden sm:inline">פתח אירוע לפרויקט זה</span>
+                <span className="sm:hidden">פתח אירוע</span>
+              </Link>
+              <button
+                onClick={() => setEditMode((prev) => !prev)}
+                className="p-2 rounded-lg border border-indigo-200 text-indigo-800 bg-white hover:bg-indigo-50 transition flex items-center justify-center"
+                title={editMode ? "סגור עריכה" : "ערוך פרטים"}
+              >
+                <Pencil size={18} />
+              </button>
+            </div>
           </div>
 
           {!editMode ? (
@@ -433,10 +464,10 @@ export default function ProjectDetailsPage() {
               <DetailRow label="סטטוס" value={<StatusBadge status={project.status} />} />
               <DetailRow label="יעד זמן" value={project.dueDate || "לא צוין"} />
               {project.needsScholarshipVolunteers && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-indigo-800 bg-indigo-50 border border-indigo-100 px-3 py-2 rounded-lg w-fit">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center gap-2 sm:gap-3">
+                  <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-indigo-800 bg-indigo-50 border border-indigo-100 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg w-fit">
                     <CheckCircle2 size={14} />
-                    דרושים מתנדבי מלגה
+                    <span className="whitespace-nowrap">דרושים מתנדבי מלגה</span>
                   </div>
                   <button
                     type="button"
@@ -451,7 +482,7 @@ export default function ProjectDetailsPage() {
                         alert(url);
                       }
                     }}
-                    className="text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
+                    className="text-xs sm:text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
                   >
                     {copiedLink ? "קישור הועתק" : "העתק קישור לטופס"}
                   </button>
@@ -535,6 +566,92 @@ export default function ProjectDetailsPage() {
                   דורש מתנדבים במסלול מלגה
                 </label>
               </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">צוות הפרויקט</label>
+                {loadingUsers ? (
+                  <p className="text-xs text-gray-500">טוען משתמשים...</p>
+                ) : usersList.length === 0 ? (
+                  <p className="text-xs text-gray-500">לא נמצאו משתמשים.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="md:col-span-2">
+                      <input
+                        type="text"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        placeholder="חפש לפי שם או אימייל"
+                        value={userSearch}
+                        onChange={(e) => setUserSearch(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700 mb-1">עבדתי איתם</p>
+                      <div className="max-h-48 overflow-auto border border-gray-200 rounded-lg p-2 space-y-1">
+                        {filteredUsers
+                          .filter((u) => project.teamMembers?.some((m) => m.userId === u.id))
+                          .map((u) => {
+                            const checked = form.teamMembers.some((m) => m.userId === u.id);
+                            return (
+                              <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-gray-50">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 text-indigo-600"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setForm((prev) => {
+                                      const exists = prev.teamMembers.some((m) => m.userId === u.id);
+                                      const nextMembers = exists
+                                        ? prev.teamMembers.filter((m) => m.userId !== u.id)
+                                        : [...prev.teamMembers, { userId: u.id, fullName: u.fullName, email: u.email }];
+                                      return { ...prev, teamMembers: nextMembers };
+                                    });
+                                  }}
+                                />
+                                <span className="text-gray-800">{u.fullName || "ללא שם"}</span>
+                                <span className="text-xs text-gray-500">{u.email}</span>
+                              </label>
+                            );
+                          })}
+                        {!(project.teamMembers || []).some((m) => filteredUsers.find((u) => u.id === m.userId)) && (
+                          <p className="text-xs text-gray-500">אין היסטוריה משותפת.</p>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700 mb-1">שאר המשתמשים</p>
+                      <div className="max-h-48 overflow-auto border border-gray-200 rounded-lg p-2 space-y-1">
+                        {filteredUsers
+                          .filter((u) => !(project.teamMembers || []).some((m) => m.userId === u.id))
+                          .map((u) => {
+                            const checked = form.teamMembers.some((m) => m.userId === u.id);
+                            return (
+                              <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-gray-50">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 text-indigo-600"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setForm((prev) => {
+                                      const exists = prev.teamMembers.some((m) => m.userId === u.id);
+                                      const nextMembers = exists
+                                        ? prev.teamMembers.filter((m) => m.userId !== u.id)
+                                        : [...prev.teamMembers, { userId: u.id, fullName: u.fullName, email: u.email }];
+                                      return { ...prev, teamMembers: nextMembers };
+                                    });
+                                  }}
+                                />
+                                <span className="text-gray-800">{u.fullName || "ללא שם"}</span>
+                                <span className="text-xs text-gray-500">{u.email}</span>
+                              </label>
+                            );
+                          })}
+                        {filteredUsers.filter((u) => !(project.teamMembers || []).some((m) => m.userId === u.id)).length === 0 && (
+                          <p className="text-xs text-gray-500">כל המשתמשים כבר עבדו איתך.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -549,6 +666,7 @@ export default function ProjectDetailsPage() {
                       dueDate: project.dueDate || "",
                       status: project.status || STATUS_OPTIONS[0],
                       needsScholarshipVolunteers: !!project.needsScholarshipVolunteers,
+                      teamMembers: project.teamMembers || [],
                     });
                     setError(null);
                   }}
@@ -568,13 +686,41 @@ export default function ProjectDetailsPage() {
             </form>
           )}
         </div>
+      </div>
 
-        <div className="bg-white p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-4">
+        <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
           <div className="flex items-center gap-2 mb-4">
-            <Calendar style={{ color: "var(--patifon-orange)" }} />
-            <h2 className="text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>מידע נוסף</h2>
+            <Calendar style={{ color: "var(--patifon-orange)" }} size={20} />
+            <h2 className="text-base sm:text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>משימות קשורות לפרויקט</h2>
           </div>
-          <div className="space-y-2 text-sm text-gray-700">
+          {loadingProjectTasks ? (
+            <div className="flex items-center gap-2 text-gray-600 py-4">
+              <Loader2 size={16} className="animate-spin" />
+              טוען משימות...
+            </div>
+          ) : projectTasks.length === 0 ? (
+            <div className="text-gray-600 text-sm">אין משימות קשורות לפרויקט.</div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-auto pr-1">
+              {projectTasks.map((t) => (
+                <div key={t.id} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-900 truncate">{t.title}</p>
+                    <p className="text-xs text-gray-600 truncate">אירוע: {t.eventTitle || t.eventId}</p>
+                  </div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">{t.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar style={{ color: "var(--patifon-orange)" }} size={20} />
+            <h2 className="text-base sm:text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>מידע נוסף</h2>
+          </div>
+          <div className="space-y-2 text-xs sm:text-sm text-gray-700">
             <div className="flex items-center gap-2">
               <Users size={16} className="text-gray-500" />
               <span>בעלים: {project.ownerEmail || "—"}</span>
@@ -593,13 +739,92 @@ export default function ProjectDetailsPage() {
             )}
           </div>
         </div>
+        <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Users style={{ color: "var(--patifon-orange)" }} size={20} />
+            <h2 className="text-base sm:text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>צוות הפרויקט</h2>
+            <button
+              type="button"
+              onClick={() => setShowTeamPicker((prev) => !prev)}
+              className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 ml-auto"
+              title="הוסף משתמשים לפרויקט"
+            >
+              <UserPlus size={16} />
+            </button>
+          </div>
+          {project.teamMembers && project.teamMembers.length > 0 ? (
+            <div className="space-y-2">
+              {project.teamMembers.map((m) => (
+                <div key={m.userId} className="flex items-center justify-between border border-gray-100 rounded-lg px-3 py-2 text-sm">
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-gray-900">{m.fullName || "ללא שם"}</span>
+                    <span className="text-xs text-gray-600">{m.email}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600">לא נבחר צוות לפרויקט.</p>
+          )}
+          {showTeamPicker && (
+            <div className="mt-3 border border-indigo-100 rounded-lg p-3 bg-indigo-50 space-y-2">
+              <input
+                type="text"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="חפש לפי שם או אימייל"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+              />
+              <div className="max-h-48 overflow-auto space-y-1">
+                {(filteredUsers || []).map((u) => {
+                  const checked = (project.teamMembers || []).some((m) => m.userId === u.id);
+                  return (
+                    <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-white">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 text-indigo-600"
+                        checked={checked}
+                        onChange={async () => {
+                          if (!db || !project) return;
+                          const exists = checked;
+                          const nextMembers = exists
+                            ? (project.teamMembers || []).filter((m) => m.userId !== u.id)
+                            : [...(project.teamMembers || []), { userId: u.id, fullName: u.fullName, email: u.email }];
+                          try {
+                            await updateDoc(doc(db, "projects", project.id), { teamMembers: nextMembers });
+                            setProject({ ...project, teamMembers: nextMembers });
+                          } catch (err) {
+                            console.error("Failed updating team", err);
+                            alert("שגיאה בעדכון צוות");
+                          }
+                        }}
+                      />
+                      <span className="text-gray-800">{u.fullName || "ללא שם"}</span>
+                      <span className="text-xs text-gray-500">{u.email}</span>
+                    </label>
+                  );
+                })}
+                {filteredUsers.length === 0 && <p className="text-xs text-gray-600">לא נמצאו משתמשים תואמים.</p>}
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowTeamPicker(false)}
+                  className="text-xs text-indigo-700 underline"
+                >
+                  סגור
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="mt-6 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+      <div className="mt-4 sm:mt-6 bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Calendar style={{ color: "var(--patifon-orange)" }} />
-            <h2 className="text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
+            <Calendar style={{ color: "var(--patifon-orange)" }} size={20} />
+            <h2 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
               אירועים שקשורים לפרויקט
             </h2>
           </div>
@@ -718,11 +943,11 @@ export default function ProjectDetailsPage() {
           </div>
         </div>
       )}
-      <div className="mt-6 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+      <div className="mt-4 sm:mt-6 bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <CheckSquare style={{ color: "var(--patifon-orange)" }} />
-            <h2 className="text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
+            <CheckSquare style={{ color: "var(--patifon-orange)" }} size={20} />
+            <h2 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
               משימות הקשורות לפרויקט
             </h2>
           </div>
@@ -778,11 +1003,11 @@ export default function ProjectDetailsPage() {
       </div>
 
       {project.needsScholarshipVolunteers && (
-        <div className="mt-6 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+        <div className="mt-4 sm:mt-6 bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Users style={{ color: "var(--patifon-orange)" }} />
-              <h2 className="text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
+              <Users style={{ color: "var(--patifon-orange)" }} size={20} />
+              <h2 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
                 מתנדבי מלגה שנרשמו
               </h2>
             </div>
@@ -873,8 +1098,8 @@ export default function ProjectDetailsPage() {
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <p className="text-sm font-semibold text-gray-800 mb-1">{label}</p>
-      <div className="text-gray-700 text-sm">{value}</div>
+      <p className="text-xs sm:text-sm font-semibold text-gray-800 mb-1">{label}</p>
+      <div className="text-gray-700 text-xs sm:text-sm leading-relaxed">{value}</div>
     </div>
   );
 }

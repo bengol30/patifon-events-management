@@ -31,6 +31,7 @@ interface Task {
     eventId: string;
     eventTitle?: string;
     isVolunteerTask?: boolean;
+    volunteerHours?: number | null;
 }
 
 interface EventTeamMember {
@@ -276,7 +277,7 @@ export default function TaskDetailPage() {
         }
     };
 
-    const handleUpdateField = async (field: string, value: string | boolean) => {
+    const handleUpdateField = async (field: string, value: string | boolean | number | null) => {
         if (!db || !task) return;
         try {
             await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), {
@@ -483,19 +484,41 @@ export default function TaskDetailPage() {
                                 </div>
                             </div>
                             {eventNeedsVolunteers && (
-                                <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg mb-4">
-                                    <input
-                                        type="checkbox"
-                                        id="isVolunteerTask"
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        checked={task.isVolunteerTask || false}
-                                        onChange={(e) => handleUpdateField('isVolunteerTask', e.target.checked)}
-                                    />
-                                    <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
-                                        <Handshake size={16} className="text-indigo-600" />
-                                        משימה למתנדב
-                                    </label>
-                                    <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                <div className="flex flex-col gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            id="isVolunteerTask"
+                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={task.isVolunteerTask || false}
+                                            onChange={(e) => {
+                                                handleUpdateField('isVolunteerTask', e.target.checked);
+                                                if (!e.target.checked) {
+                                                    handleUpdateField('volunteerHours', null);
+                                                }
+                                            }}
+                                        />
+                                        <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                            <Handshake size={16} className="text-indigo-600" />
+                                            משימה למתנדב
+                                        </label>
+                                        <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                    </div>
+                                    {task.isVolunteerTask && (
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="0.5"
+                                                className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
+                                                value={task.volunteerHours ?? ""}
+                                                onChange={(e) => handleUpdateField('volunteerHours', e.target.value ? parseFloat(e.target.value) : null)}
+                                                placeholder="לדוגמה 2"
+                                            />
+                                            <span className="text-xs text-gray-500">שעות עבודה</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

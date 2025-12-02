@@ -21,6 +21,7 @@ interface Project {
   createdAt?: any;
   updatedAt?: any;
   needsScholarshipVolunteers?: boolean;
+  teamMembers?: { userId: string; fullName?: string; email?: string }[];
 }
 
 const ALLOWED_EMAIL = "bengo0469@gmail.com";
@@ -38,6 +39,10 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [copiedProjectId, setCopiedProjectId] = useState<string | null>(null);
+  const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [collaboratedIds, setCollaboratedIds] = useState<Set<string>>(new Set());
+  const [userSearch, setUserSearch] = useState("");
 
   const emptyForm = {
     name: "",
@@ -47,6 +52,7 @@ export default function ProjectsPage() {
     dueDate: "",
     status: STATUS_OPTIONS[0],
     needsScholarshipVolunteers: false,
+    teamMembers: [] as { userId: string; fullName?: string; email?: string }[],
   };
 
   const [form, setForm] = useState(emptyForm);
@@ -107,6 +113,45 @@ export default function ProjectsPage() {
   }, [user]);
 
   useEffect(() => {
+    const loadUsers = async () => {
+      if (!db || !showForm) return;
+      setLoadingUsers(true);
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        const list = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            fullName: data.fullName || data.name || data.displayName || data.email || "משתמש ללא שם",
+            email: data.email || "",
+          };
+        });
+        setUsersList(list);
+      } catch (err) {
+        console.error("Failed loading users list", err);
+      } finally {
+        setLoadingUsers(false);
+      }
+    };
+    loadUsers();
+  }, [db, showForm]);
+  // derive collaborators from existing projects teamMembers
+  useEffect(() => {
+    const ids = new Set<string>();
+    projects.forEach((p) => (p.teamMembers || []).forEach((m) => m.userId && ids.add(m.userId)));
+    setCollaboratedIds(ids);
+  }, [projects]);
+  const filteredUsers = useMemo(() => {
+    if (!userSearch.trim()) return usersList;
+    const q = userSearch.trim().toLowerCase();
+    return usersList.filter(
+      (u) =>
+        (u.fullName || "").toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q)
+    );
+  }, [usersList, userSearch]);
+
+  useEffect(() => {
     if (loading) return;
     if (!user) {
       router.push("/login");
@@ -142,6 +187,7 @@ export default function ProjectsPage() {
         status: form.status,
         dueDate: form.dueDate,
         needsScholarshipVolunteers: form.needsScholarshipVolunteers,
+        teamMembers: form.teamMembers,
         ownerId: user.uid,
         ownerEmail: user.email || "",
         createdAt: serverTimestamp(),
@@ -157,6 +203,7 @@ export default function ProjectsPage() {
         status: form.status,
         dueDate: form.dueDate,
         needsScholarshipVolunteers: form.needsScholarshipVolunteers,
+        teamMembers: form.teamMembers,
         ownerId: user.uid,
         ownerEmail: user.email || "",
         createdAt: { seconds: Math.floor(Date.now() / 1000) },
@@ -290,18 +337,96 @@ export default function ProjectsPage() {
                     onChange={(e) => setForm((prev) => ({ ...prev, goal: e.target.value }))}
                   />
                 </div>
-        <div className="flex items-center gap-2 text-sm">
-          <input
-            id="needsScholarshipVolunteers"
-            type="checkbox"
-            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-            checked={form.needsScholarshipVolunteers}
-            onChange={(e) => setForm((prev) => ({ ...prev, needsScholarshipVolunteers: e.target.checked }))}
-          />
-          <label htmlFor="needsScholarshipVolunteers" className="text-gray-800">
-            דורש מתנדבים במסלול מלגה
-          </label>
-        </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <input
+                    id="needsScholarshipVolunteers"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    checked={form.needsScholarshipVolunteers}
+                    onChange={(e) => setForm((prev) => ({ ...prev, needsScholarshipVolunteers: e.target.checked }))}
+                  />
+                  <label htmlFor="needsScholarshipVolunteers" className="text-gray-800">
+                    דורש מתנדבים במסלול מלגה
+                  </label>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700">צוות הפרויקט</label>
+                  {loadingUsers ? (
+                    <p className="text-xs text-gray-500">טוען משתמשים...</p>
+                ) : usersList.length === 0 ? (
+                  <p className="text-xs text-gray-500">לא נמצאו משתמשים.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="md:col-span-2">
+                      <input
+                        type="text"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        placeholder="חפש לפי שם או אימייל"
+                        value={userSearch}
+                        onChange={(e) => setUserSearch(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700 mb-1">עבדתי איתם</p>
+                      <div className="max-h-48 overflow-auto border border-gray-200 rounded-lg p-2 space-y-1">
+                        {filteredUsers.filter(u => collaboratedIds.has(u.id)).map((u) => {
+                          const checked = form.teamMembers.some((m) => m.userId === u.id);
+                          return (
+                            <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-gray-50">
+                              <input
+                                type="checkbox"
+                                  className="h-4 w-4 text-indigo-600"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setForm((prev) => {
+                                      const exists = prev.teamMembers.some((m) => m.userId === u.id);
+                                      const nextMembers = exists
+                                        ? prev.teamMembers.filter((m) => m.userId !== u.id)
+                                        : [...prev.teamMembers, { userId: u.id, fullName: u.fullName, email: u.email }];
+                                      return { ...prev, teamMembers: nextMembers };
+                                    });
+                                  }}
+                                />
+                                <span className="text-gray-800">{u.fullName || "ללא שם"}</span>
+                                <span className="text-xs text-gray-500">{u.email}</span>
+                              </label>
+                            );
+                          })}
+                        {filteredUsers.filter(u => collaboratedIds.has(u.id)).length === 0 && <p className="text-xs text-gray-500">אין היסטוריה משותפת.</p>}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700 mb-1">שאר המשתמשים</p>
+                      <div className="max-h-48 overflow-auto border border-gray-200 rounded-lg p-2 space-y-1">
+                        {filteredUsers.filter(u => !collaboratedIds.has(u.id)).map((u) => {
+                          const checked = form.teamMembers.some((m) => m.userId === u.id);
+                          return (
+                            <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-gray-50">
+                              <input
+                                type="checkbox"
+                                  className="h-4 w-4 text-indigo-600"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setForm((prev) => {
+                                      const exists = prev.teamMembers.some((m) => m.userId === u.id);
+                                      const nextMembers = exists
+                                        ? prev.teamMembers.filter((m) => m.userId !== u.id)
+                                        : [...prev.teamMembers, { userId: u.id, fullName: u.fullName, email: u.email }];
+                                      return { ...prev, teamMembers: nextMembers };
+                                    });
+                                  }}
+                                />
+                                <span className="text-gray-800">{u.fullName || "ללא שם"}</span>
+                                <span className="text-xs text-gray-500">{u.email}</span>
+                              </label>
+                            );
+                          })}
+                        {filteredUsers.filter(u => !collaboratedIds.has(u.id)).length === 0 && <p className="text-xs text-gray-500">כל המשתמשים כבר עבדו איתך.</p>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">שותפים / בעלי עניין</label>

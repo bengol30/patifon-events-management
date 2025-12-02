@@ -79,10 +79,20 @@ export default function Dashboard() {
   // Stats State
   const [stats, setStats] = useState({ myEvents: 0, attendees: 0, partners: 0, tasks: 0 });
   const [loadingStats, setLoadingStats] = useState(true);
-  const [activePanel, setActivePanel] = useState<"stats" | "users" | "notifications" | null>("stats");
+  const [activePanel, setActivePanel] = useState<"stats" | "users" | "notifications" | "volunteers" | null>("stats");
   const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const [volunteersList, setVolunteersList] = useState<{ id: string; name?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project" }[]>([]);
+  const [loadingVolunteers, setLoadingVolunteers] = useState(true);
+  const [showAllVolunteers, setShowAllVolunteers] = useState(false);
+  const [editingVolunteer, setEditingVolunteer] = useState<{ id: string; eventId: string; scope?: "event" | "project" } | null>(null);
+  const [editVolunteerName, setEditVolunteerName] = useState("");
+  const [editVolunteerEmail, setEditVolunteerEmail] = useState("");
+  const [editVolunteerPhone, setEditVolunteerPhone] = useState("");
+  const [savingVolunteer, setSavingVolunteer] = useState(false);
+  const [deletingVolunteerId, setDeletingVolunteerId] = useState<string | null>(null);
+  const [confirmDeleteVolunteer, setConfirmDeleteVolunteer] = useState<{ id: string; eventId: string; scope?: "event" | "project"; name?: string; eventTitle?: string } | null>(null);
   const [userEventsMap, setUserEventsMap] = useState<Record<string, Event[]>>({});
   const [openUserEventsId, setOpenUserEventsId] = useState<string | null>(null);
   const [joinRequests, setJoinRequests] = useState<Record<string, "PENDING" | "APPROVED" | "REJECTED">>({});
@@ -280,6 +290,7 @@ export default function Dashboard() {
         setLoadingTasks(false);
         setLoadingStats(false);
         setLoadingUsers(false);
+        setLoadingVolunteers(false);
         setLoadingNotifications(false);
         return;
       }
@@ -287,6 +298,7 @@ export default function Dashboard() {
       try {
         setLoadingStats(true);
         setLoadingUsers(true);
+        setLoadingVolunteers(true);
         setLoadingNotifications(true);
         setUsersError(null);
         // Fetch all events (for per-user stats)
@@ -295,6 +307,12 @@ export default function Dashboard() {
           id: doc.id,
           ...doc.data(),
         })) as Event[];
+        // Fetch projects (for volunteer lookup from projects)
+        const allProjectsSnapshot = await getDocs(collection(db, "projects"));
+        const allProjectsData = allProjectsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as any[];
         const eventsByCreator: Record<string, Event[]> = {};
         const addToMap = (key: string | undefined | null, ev: Event) => {
           const normKey = normalizeKey(key);
@@ -478,6 +496,113 @@ export default function Dashboard() {
         });
         setUsersList([...usersFromDb, ...placeholders]);
 
+        // Fetch volunteers from all events
+        try {
+          const volunteersData: { id: string; name?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any }[] = [];
+          const eventTitleMap = new Map(allEventsData.map(e => [e.id, e.title || "אירוע ללא שם"]));
+          const projectTitleMap = new Map(allProjectsData.map(p => [p.id, (p as any).name || (p as any).title || "פרויקט ללא שם"]));
+          const seenVolunteers = new Set<string>();
+          const addVolunteer = (volDoc: any, eventId: string, volData: any, eventTitle?: string, scope: "event" | "project" = "event") => {
+            const key = `${eventId}-${volDoc.id}`;
+            if (seenVolunteers.has(key)) return;
+            seenVolunteers.add(key);
+
+            // Extract name - try multiple formats
+            let volunteerName = "";
+            if (volData.name && typeof volData.name === "string" && volData.name.trim()) {
+              volunteerName = volData.name.trim();
+            } else if (volData.firstName || volData.lastName) {
+              volunteerName = `${volData.firstName || ""} ${volData.lastName || ""}`.trim();
+            } else if (volData.email) {
+              // Use email as fallback
+              volunteerName = volData.email.split("@")[0];
+            }
+
+            if (!volunteerName) {
+              console.warn("Volunteer without name:", { volId: volDoc.id, volData, eventId });
+              volunteerName = "מתנדב ללא שם";
+            }
+
+            volunteersData.push({
+              id: volDoc.id,
+              name: volunteerName,
+              email: volData.email || "",
+              phone: volData.phone || "",
+              eventId: eventId,
+              eventTitle: eventTitleMap.get(eventId) || projectTitleMap.get(eventId) || eventTitle || (scope === "project" ? "פרויקט ללא שם" : "אירוע ללא שם"),
+              createdAt: volData.createdAt,
+              scope,
+            });
+          };
+
+          try {
+            const volunteersQuery = query(collectionGroup(db, "volunteers"));
+            const volunteersSnapshot = await getDocs(volunteersQuery);
+
+            volunteersSnapshot.forEach((volDoc) => {
+              const volData = volDoc.data();
+              const eventId = volDoc.ref.parent.parent?.id || "";
+
+              // Check if parent is an event or project
+              const parentPath = volDoc.ref.parent.parent?.path || "";
+              const isEventVolunteer = parentPath.startsWith("events/") || parentPath.includes("/events/");
+              const isProjectVolunteer = parentPath.startsWith("projects/") || parentPath.includes("/projects/");
+              if (isEventVolunteer) {
+                addVolunteer(volDoc, eventId, volData, undefined, "event");
+              } else if (isProjectVolunteer) {
+                addVolunteer(volDoc, eventId, volData, undefined, "project");
+              }
+            });
+
+            console.log(`Loaded ${volunteersData.length} volunteers from events via collectionGroup`, volunteersData.length > 0 ? volunteersData.slice(0, 3) : "No volunteers found");
+          } catch (eventsVolunteersError) {
+            console.error("Error loading volunteers from events:", eventsVolunteersError);
+          }
+
+          // Always also fetch per-event to include legacy/missing docs
+          console.log("Loading volunteers from events individually (merge + dedup)...");
+          for (const event of allEventsData) {
+            try {
+              const eventVolunteersSnap = await getDocs(collection(db, "events", event.id, "volunteers"));
+              eventVolunteersSnap.forEach((volDoc) => {
+                const volData = volDoc.data();
+                addVolunteer(volDoc, event.id, volData, event.title, "event");
+              });
+            } catch (eventError) {
+              console.error(`Error loading volunteers for event ${event.id}:`, eventError);
+            }
+          }
+          console.log("Loading volunteers from projects individually (merge + dedup)...");
+          for (const project of allProjectsData) {
+            try {
+              const projectVolunteersSnap = await getDocs(collection(db, "projects", project.id, "volunteers"));
+              projectVolunteersSnap.forEach((volDoc) => {
+                const volData = volDoc.data();
+                const projTitle = (project as any).name || (project as any).title;
+                addVolunteer(volDoc, project.id, volData, projTitle, "project");
+              });
+            } catch (projectError) {
+              console.error(`Error loading volunteers for project ${project.id}:`, projectError);
+            }
+          }
+          console.log(`Loaded ${volunteersData.length} volunteers total after merging per-event/project fetches`);
+          
+          // Sort by createdAt (newest first)
+          const ts = (val: any) => {
+            if (!val) return 0;
+            if (typeof val.seconds === "number") return val.seconds;
+            if (val instanceof Date) return Math.floor(val.getTime() / 1000);
+            const parsed = Date.parse(val);
+            return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+          };
+          volunteersData.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
+          
+          setVolunteersList(volunteersData);
+        } catch (volunteersError) {
+          console.error("Error loading volunteers:", volunteersError);
+          setVolunteersList([]);
+        }
+
         // Fetch join requests of current user to show pending/approved
         const myJoinRequestsSnap = await getDocs(query(
           collection(db, "join_requests"),
@@ -511,6 +636,7 @@ export default function Dashboard() {
         setLoadingTasks(false);
         setLoadingStats(false);
         setLoadingUsers(false);
+        setLoadingVolunteers(false);
         setLoadingNotifications(false);
       }
     };
@@ -632,6 +758,75 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Error completing task:", err);
       alert("שגיאה בסיום המשימה");
+    }
+  };
+
+  const getVolunteerRef = (vol: { id: string; eventId: string; scope?: "event" | "project" }) => {
+    if (!db) throw new Error("Missing db");
+    return vol.scope === "project"
+      ? doc(db, "projects", vol.eventId, "volunteers", vol.id)
+      : doc(db, "events", vol.eventId, "volunteers", vol.id);
+  };
+
+  const startEditVolunteer = (vol: { id: string; eventId: string; scope?: "event" | "project"; name?: string; email?: string; phone?: string; eventTitle?: string }) => {
+    setEditingVolunteer({ id: vol.id, eventId: vol.eventId, scope: vol.scope });
+    setEditVolunteerName(vol.name || "");
+    setEditVolunteerEmail(vol.email || "");
+    setEditVolunteerPhone(vol.phone || "");
+  };
+
+  const handleSaveVolunteer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!db || !editingVolunteer) return;
+    const name = editVolunteerName.trim();
+    const email = editVolunteerEmail.trim();
+    const phone = editVolunteerPhone.trim();
+    try {
+      setSavingVolunteer(true);
+      const ref = getVolunteerRef(editingVolunteer);
+      const updateData: any = { email, phone };
+      if (editingVolunteer.scope === "project") {
+        const [firstName, ...rest] = name.split(" ");
+        updateData.firstName = firstName || name;
+        updateData.lastName = rest.join(" ").trim();
+        updateData.name = name;
+      } else {
+        updateData.name = name;
+      }
+      await updateDoc(ref, updateData);
+      setVolunteersList(prev =>
+        prev.map(v =>
+          v.id === editingVolunteer.id && v.eventId === editingVolunteer.eventId
+            ? { ...v, name, email, phone }
+            : v
+        )
+      );
+      setEditingVolunteer(null);
+    } catch (err) {
+      console.error("Error updating volunteer", err);
+      alert("שגיאה בעדכון מתנדב");
+    } finally {
+      setSavingVolunteer(false);
+    }
+  };
+
+  const handleDeleteVolunteer = async (vol?: { id: string; eventId: string; scope?: "event" | "project"; name?: string }) => {
+    if (!db) return;
+    const target = vol || confirmDeleteVolunteer;
+    if (!target) return;
+    try {
+      setDeletingVolunteerId(`${target.scope || "event"}-${target.eventId}-${target.id}`);
+      const ref = getVolunteerRef(target);
+      await deleteDoc(ref);
+      setVolunteersList(prev =>
+        prev.filter(v => !(v.id === target.id && v.eventId === target.eventId && (v.scope || "event") === (target.scope || "event")))
+      );
+      setConfirmDeleteVolunteer(null);
+    } catch (err) {
+      console.error("Error deleting volunteer", err);
+      alert("שגיאה במחיקת מתנדב");
+    } finally {
+      setDeletingVolunteerId(null);
     }
   };
 
@@ -1339,6 +1534,13 @@ export default function Dashboard() {
           משתמשי מערכת
         </button>
         <button
+          onClick={() => setActivePanel(prev => prev === "volunteers" ? null : "volunteers")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "volunteers" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        >
+          <UserPlus size={18} />
+          מתנדבים רשומים
+        </button>
+        <button
           onClick={() => setActivePanel(prev => prev === "notifications" ? null : "notifications")}
           className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "notifications" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
         >
@@ -1484,6 +1686,189 @@ export default function Dashboard() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {activePanel === "volunteers" && (
+        <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <UserPlus style={{ color: 'var(--patifon-orange)' }} />
+              <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>מתנדבים רשומים</h2>
+            </div>
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
+              {volunteersList.length}
+            </span>
+          </div>
+          {loadingVolunteers ? (
+            <div className="text-gray-500 text-center py-6">טוען מתנדבים...</div>
+          ) : volunteersList.length === 0 ? (
+            <div className="text-gray-500 text-center py-6">לא נמצאו מתנדבים רשומים.</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(showAllVolunteers ? volunteersList : volunteersList.slice(0, 5)).map((vol) => {
+                  const regDate = vol.createdAt?.seconds ? new Date(vol.createdAt.seconds * 1000) : null;
+                  const deletingKey = `${vol.scope || "event"}-${vol.eventId}-${vol.id}`;
+                  return (
+                    <div key={`${vol.scope || "event"}-${vol.eventId}-${vol.id}`} className="p-3 border border-gray-200 rounded-lg bg-white">
+                      <div className="flex items-start gap-3 justify-between">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream-dark)' }}>
+                            <UserPlus size={18} className="text-gray-700" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-gray-900 truncate">{vol.name || "מתנדב ללא שם"}</p>
+                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+                                {vol.scope === "project" ? "פרויקט" : "אירוע"}
+                              </span>
+                            </div>
+                            {vol.email && (
+                              <p className="text-sm text-gray-500 truncate">{vol.email}</p>
+                            )}
+                            {vol.phone && (
+                              <p className="text-sm text-gray-500 truncate">{vol.phone}</p>
+                            )}
+                            <div className="mt-2 space-y-1">
+                              {vol.eventTitle && vol.eventId && (
+                                <Link
+                                  href={vol.scope === "project" ? `/projects/${vol.eventId}` : `/events/${vol.eventId}`}
+                                  className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline truncate flex items-center gap-1"
+                                >
+                                  {vol.scope === "project" ? <FolderKanban size={12} /> : <Calendar size={12} />}
+                                  {vol.eventTitle}
+                                </Link>
+                              )}
+                              {regDate && (
+                                <p className="text-xs text-gray-500">
+                                  {regDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })} • {regDate.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={() => startEditVolunteer(vol)}
+                            className="p-2 rounded-md border border-gray-200 hover:bg-gray-50 text-gray-700"
+                            title="עריכת מתנדב"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteVolunteer(vol)}
+                            disabled={deletingVolunteerId === deletingKey}
+                            className={`p-2 rounded-md border text-gray-700 ${deletingVolunteerId === deletingKey ? "bg-gray-100 border-gray-200 cursor-not-allowed" : "border-gray-200 hover:bg-gray-50"}`}
+                            title="מחיקת מתנדב"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {volunteersList.length > 5 && (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    onClick={() => setShowAllVolunteers(!showAllVolunteers)}
+                    className="px-4 py-2 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition text-sm font-medium"
+                  >
+                    {showAllVolunteers ? "הצג 5 ראשונים בלבד" : `הצג את כל ${volunteersList.length} המתנדבים`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {editingVolunteer && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">עריכת מתנדב</h3>
+            <form className="space-y-4" onSubmit={handleSaveVolunteer}>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">שם</label>
+                <input
+                  type="text"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={editVolunteerName}
+                  onChange={(e) => setEditVolunteerName(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">אימייל</label>
+                <input
+                  type="email"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={editVolunteerEmail}
+                  onChange={(e) => setEditVolunteerEmail(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">טלפון</label>
+                <input
+                  type="tel"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={editVolunteerPhone}
+                  onChange={(e) => setEditVolunteerPhone(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+                  onClick={() => setEditingVolunteer(null)}
+                  disabled={savingVolunteer}
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-70"
+                  disabled={savingVolunteer}
+                >
+                  {savingVolunteer ? "שומר..." : "שמור"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteVolunteer && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">מחיקת מתנדב</h3>
+            <p className="text-sm text-gray-700 mb-4">
+              למחוק את המתנדב/ת "{confirmDeleteVolunteer.name || confirmDeleteVolunteer.id}"?
+            </p>
+            <div className="text-xs text-gray-500 mb-4">
+              מקור: {confirmDeleteVolunteer.scope === "project" ? "פרויקט" : "אירוע"} • {confirmDeleteVolunteer.eventTitle || confirmDeleteVolunteer.eventId}
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+                onClick={() => setConfirmDeleteVolunteer(null)}
+                disabled={deletingVolunteerId !== null}
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-70"
+                onClick={() => handleDeleteVolunteer()}
+                disabled={deletingVolunteerId !== null}
+              >
+                {deletingVolunteerId ? "מוחק..." : "מחק"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

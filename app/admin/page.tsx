@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, orderBy, query, collectionGroup, deleteDoc as firestoreDeleteDoc, doc as firestoreDoc } from "firebase/firestore";
-import { ShieldCheck, Users, Calendar, AlertTriangle, ArrowRight, Repeat, ClipboardList, Trash2 } from "lucide-react";
+import { collection, getDocs, orderBy, query, collectionGroup, deleteDoc as firestoreDeleteDoc, doc as firestoreDoc, updateDoc } from "firebase/firestore";
+import { ShieldCheck, Users, Calendar, AlertTriangle, ArrowRight, Repeat, ClipboardList, Trash2, Edit2, Save, X } from "lucide-react";
 
 interface UserRow {
     id: string;
@@ -58,6 +58,9 @@ export default function AdminDashboard() {
     const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
     const [deletingTaskKey, setDeletingTaskKey] = useState<string | null>(null);
+    const [editingUserId, setEditingUserId] = useState<string | null>(null);
+    const [editingUserName, setEditingUserName] = useState<string>("");
+    const [savingUser, setSavingUser] = useState(false);
 
     useEffect(() => {
         if (!loading && (!user || user.email !== ADMIN_EMAIL)) {
@@ -140,6 +143,53 @@ export default function AdminDashboard() {
         }
     };
 
+    const handleOpenEditUser = (u: UserRow) => {
+        setEditingUserId(u.id);
+        setEditingUserName(u.fullName || u.email || "");
+    };
+
+    const handleSaveUserName = async () => {
+        if (!db || !editingUserId) return;
+        const newName = editingUserName.trim();
+        if (!newName) {
+            alert("יש להזין שם חדש");
+            return;
+        }
+        try {
+            setSavingUser(true);
+            // Update user document
+            await updateDoc(firestoreDoc(db, "users", editingUserId), {
+                fullName: newName,
+                displayName: newName,
+                name: newName,
+            });
+
+            // Best-effort propagate to tasks assignees where userId matches
+            try {
+                const tasksSnap = await getDocs(collectionGroup(db, "tasks"));
+                for (const t of tasksSnap.docs) {
+                    const data = t.data() as any;
+                    const assignees = (data.assignees as any[]) || [];
+                    const hasMatch = assignees.some(a => a.userId === editingUserId);
+                    if (hasMatch) {
+                        const updated = assignees.map(a => a.userId === editingUserId ? { ...a, name: newName } : a);
+                        await updateDoc(t.ref, { assignees: updated, assignee: updated[0]?.name || data.assignee });
+                    }
+                }
+            } catch (err) {
+                console.warn("Task propagation failed", err);
+            }
+
+            setUsersData(prev => prev.map(u => u.id === editingUserId ? { ...u, fullName: newName } : u));
+            setEditingUserId(null);
+        } catch (err) {
+            console.error("Error updating user name", err);
+            alert("שגיאה בעדכון שם המשתמש");
+        } finally {
+            setSavingUser(false);
+        }
+    };
+
     const handleDeleteRepeatTask = async (taskKey: string) => {
         if (!db) return;
         const taskToDelete = repeatTasks.find(t => t.key === taskKey);
@@ -184,6 +234,7 @@ export default function AdminDashboard() {
     }
 
     return (
+        <>
         <div className="min-h-screen bg-gray-50 p-6">
             <div className="max-w-6xl mx-auto space-y-6">
                 <div className="flex items-center justify-between flex-wrap gap-3">
@@ -219,6 +270,13 @@ export default function AdminDashboard() {
                                         <span>{u.fullName || "ללא שם"}</span>
                                         <div className="flex items-center gap-2">
                                             <span className="text-xs text-gray-500">{u.role || ""}</span>
+                                            <button
+                                                onClick={() => handleOpenEditUser(u)}
+                                                className="p-1 rounded-full text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 border border-indigo-200"
+                                                title="ערוך שם"
+                                            >
+                                                <Edit2 size={14} />
+                                            </button>
                                             <button
                                                 onClick={() => handleDeleteUser(u.id)}
                                                 className="p-1 rounded-full text-red-600 hover:text-red-800 hover:bg-red-50 border border-red-200"
@@ -349,6 +407,48 @@ export default function AdminDashboard() {
                 </div>
             </div>
         </div>
+
+        {editingUserId && (
+            <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900">עריכת שם משתמש</h3>
+                        <button onClick={() => setEditingUserId(null)} className="text-gray-500 hover:text-gray-700">
+                            <X size={18} />
+                        </button>
+                    </div>
+                    <div className="space-y-3">
+                        <label className="text-sm font-medium text-gray-700">שם מלא</label>
+                        <input
+                            type="text"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            value={editingUserName}
+                            onChange={(e) => setEditingUserName(e.target.value)}
+                        />
+                        <div className="flex items-center justify-end gap-2 pt-2">
+                            <button
+                                className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                onClick={() => setEditingUserId(null)}
+                                disabled={savingUser}
+                            >
+                                <X size={14} />
+                                ביטול
+                            </button>
+                            <button
+                                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-70"
+                                onClick={handleSaveUserName}
+                                disabled={savingUser}
+                            >
+                                {savingUser ? <Save size={14} className="animate-spin" /> : <Save size={14} />}
+                                שמור
+                            </button>
+                        </div>
+                        <p className="text-xs text-gray-500">השינוי יתעדכן גם במטלות שבהן המשתמש משויך (ע\"י userId).</p>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 }
 

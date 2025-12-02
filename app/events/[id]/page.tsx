@@ -35,6 +35,7 @@ interface Task {
     readBy?: { [key: string]: any };
     previewImage?: string;
     isVolunteerTask?: boolean;
+    volunteerHours?: number | null;
 }
 
 interface BudgetItem {
@@ -164,6 +165,7 @@ export default function EventDetailsPage() {
         dueDate: "",
         priority: "NORMAL",
         isVolunteerTask: false,
+        volunteerHours: null as number | null,
     });
     const dueDateInputRef = useRef<HTMLInputElement | null>(null);
     const newTaskFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -788,6 +790,13 @@ export default function EventDetailsPage() {
         if (!db || !user) return;
 
         try {
+            if (newTask.isVolunteerTask) {
+                const hours = newTask.volunteerHours;
+                if (hours == null || Number(hours) <= 0 || Number.isNaN(Number(hours))) {
+                    alert("יש למלא שעות משוערות למשימת מתנדב");
+                    return;
+                }
+            }
             const cleanAssignees = sanitizeAssigneesForWrite(newTask.assignees);
             const primary = cleanAssignees[0];
             const docRef = await addDoc(collection(db, "events", id, "tasks"), {
@@ -798,6 +807,9 @@ export default function EventDetailsPage() {
                 assigneeId: primary?.userId || newTask.assigneeId || null,
                 status: "TODO",
                 isVolunteerTask: newTask.isVolunteerTask || false,
+                volunteerHours: newTask.isVolunteerTask
+                    ? (newTask.volunteerHours != null ? Number(newTask.volunteerHours) : null)
+                    : null,
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
             });
@@ -806,7 +818,7 @@ export default function EventDetailsPage() {
                 await uploadTaskFiles(docRef.id, newTask.title, newTaskFiles);
             }
             setShowNewTask(false);
-            setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false });
+            setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false, volunteerHours: null });
             setNewTaskFiles([]);
         } catch (err) {
             console.error("Error adding task:", err);
@@ -819,6 +831,13 @@ export default function EventDetailsPage() {
         if (!db || !editingTask) return;
 
         try {
+            if (editingTask.isVolunteerTask) {
+                const hours = editingTask.volunteerHours;
+                if (hours == null || Number(hours) <= 0 || Number.isNaN(Number(hours))) {
+                    alert("יש למלא שעות משוערות למשימת מתנדב");
+                    return;
+                }
+            }
             const taskRef = doc(db, "events", id, "tasks", editingTask.id);
             const cleanAssignees = sanitizeAssigneesForWrite(editingTask.assignees || []);
             const updateData: any = {
@@ -833,6 +852,9 @@ export default function EventDetailsPage() {
                 currentStatus: editingTask.currentStatus || "",
                 nextStep: editingTask.nextStep || "",
                 isVolunteerTask: editingTask.isVolunteerTask || false,
+                volunteerHours: editingTask.isVolunteerTask
+                    ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
+                    : null,
             };
             await updateDoc(taskRef, updateData);
             setEditingTask(null);
@@ -1910,19 +1932,36 @@ export default function EventDetailsPage() {
                                 />
                             </div>
                             {event.needsVolunteers && (
-                                <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                                    <input
-                                        type="checkbox"
-                                        id="isVolunteerTask"
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        checked={editingTask.isVolunteerTask || false}
-                                        onChange={e => setEditingTask({ ...editingTask, isVolunteerTask: e.target.checked })}
-                                    />
+                                <div className="flex flex-col gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            id="isVolunteerTask"
+                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={editingTask.isVolunteerTask || false}
+                                            onChange={e => setEditingTask({ ...editingTask, isVolunteerTask: e.target.checked })}
+                                        />
                                     <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
                                         <Handshake size={16} className="text-indigo-600" />
                                         משימה למתנדב
                                     </label>
                                     <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                    </div>
+                                    {editingTask.isVolunteerTask && (
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="0.5"
+                                                className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
+                                                value={editingTask.volunteerHours ?? ""}
+                                                onChange={(e) => setEditingTask({ ...editingTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
+                                                placeholder="לדוגמה 2"
+                                            />
+                                            <span className="text-xs text-gray-500">שעות עבודה</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             <div className="flex justify-end gap-3 pt-4">
@@ -2514,19 +2553,34 @@ export default function EventDetailsPage() {
                                 </div>
                                 {event.needsVolunteers && (
                                     <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                                        <input
-                                            type="checkbox"
-                                            id="newTaskIsVolunteerTask"
-                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                            checked={newTask.isVolunteerTask || false}
-                                            onChange={e => setNewTask({ ...newTask, isVolunteerTask: e.target.checked })}
-                                        />
-                                        <label htmlFor="newTaskIsVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
-                                            <Handshake size={16} className="text-indigo-600" />
-                                            משימה למתנדב
-                                        </label>
-                                        <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
-                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        id="newTaskIsVolunteerTask"
+                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={newTask.isVolunteerTask || false}
+                                        onChange={e => setNewTask({ ...newTask, isVolunteerTask: e.target.checked })}
+                                    />
+                                    <label htmlFor="newTaskIsVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                        <Handshake size={16} className="text-indigo-600" />
+                                        משימה למתנדב
+                                    </label>
+                                    <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                    {newTask.isVolunteerTask && (
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="0.5"
+                                                className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
+                                                value={newTask.volunteerHours ?? ""}
+                                                onChange={(e) => setNewTask({ ...newTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
+                                                placeholder="לדוגמה 2"
+                                            />
+                                            <span className="text-xs text-gray-500">שעות עבודה</span>
+                                        </div>
+                                    )}
+                                </div>
                                 )}
                                 <div className="flex justify-end gap-2">
                                     <button

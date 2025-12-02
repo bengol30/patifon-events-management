@@ -35,7 +35,17 @@ export default function VolunteersFormPage() {
     email: "",
     program: "",
     year: "",
+    password: "",
+    confirmPassword: "",
   });
+
+  const hashPassword = async (password: string) => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
 
   useEffect(() => {
     const loadProject = async () => {
@@ -87,16 +97,33 @@ export default function VolunteersFormPage() {
       setError("יש לבחור פרויקט.");
       return;
     }
+    if (!form.password.trim() || form.password.length < 6) {
+      setError("יש להזין סיסמה עם לפחות 6 תווים");
+      return;
+    }
+    if (form.password !== form.confirmPassword) {
+      setError("הסיסמאות לא תואמות");
+      return;
+    }
     setSaving(true);
     setError(null);
     setSuccess(false);
     try {
+      const passwordHash = await hashPassword(form.password.trim());
       await addDoc(collection(db, "projects", selectedProjectId, "volunteers"), {
-        ...form,
+        firstName: form.firstName,
+        lastName: form.lastName,
+        idNumber: form.idNumber,
+        phone: form.phone,
+        email: form.email,
+        program: form.program,
+        year: form.year,
+        passwordHash,
+        passwordSetAt: serverTimestamp(),
         createdAt: serverTimestamp(),
       });
       setSuccess(true);
-      setForm({ firstName: "", lastName: "", idNumber: "", phone: "", email: "", program: "", year: "" });
+      setForm({ firstName: "", lastName: "", idNumber: "", phone: "", email: "", program: "", year: "", password: "", confirmPassword: "" });
     } catch (err) {
       console.error("Failed saving volunteer", err);
       setError("לא הצלחנו לשמור את ההרשמה. נסה שוב בעוד רגע.");
@@ -138,6 +165,9 @@ export default function VolunteersFormPage() {
           <Users style={{ color: "var(--patifon-orange)" }} />
           <h2 className="text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>פרטי מתנדב</h2>
         </div>
+        <p className="text-sm text-gray-700 mb-4 leading-relaxed">
+          ההרשמה יוצרת עבורך חשבון מתנדב עם סיסמה. אחרי מילוי הפרטים תוכל לבחור/לקבל משימות, ובהמשך להיכנס לאזור האישי כדי לראות ולעקוב אחרי המשימות שבחרת ולסמן מה הושלם (הסטטוס יתעדכן גם במסך ניהול המשימות של הפרויקט/האירוע הרלוונטי).
+        </p>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="בחר פרויקט" required>
             <select
@@ -205,6 +235,28 @@ export default function VolunteersFormPage() {
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               value={form.year}
               onChange={(e) => setForm((prev) => ({ ...prev, year: e.target.value }))}
+            />
+          </Field>
+          <Field label="סיסמה" required>
+            <input
+              type="password"
+              minLength={6}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={form.password}
+              onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
+              required
+              placeholder="לפחות 6 תווים"
+            />
+          </Field>
+          <Field label="אימות סיסמה" required>
+            <input
+              type="password"
+              minLength={6}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={form.confirmPassword}
+              onChange={(e) => setForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+              required
+              placeholder="הקלד שוב לאימות"
             />
           </Field>
           <div className="md:col-span-2 flex justify-end">
