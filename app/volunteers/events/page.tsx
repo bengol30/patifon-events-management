@@ -117,7 +117,7 @@ export default function VolunteerEventsPage() {
         if (!db) return;
         setLoading(true);
         const taskUnsubs = new Map<string, () => void>();
-        const eventsQuery = collection(db, "events");
+        const eventsQuery = collection(db!, "events");
 
         const unsubEvents = onSnapshot(eventsQuery, (eventsSnap) => {
             const eventsData: EventData[] = [];
@@ -135,7 +135,7 @@ export default function VolunteerEventsPage() {
                 // attach task listener if not exists
                 if (!taskUnsubs.has(evId)) {
                     const tasksQuery = query(
-                        collection(db, "events", evId, "tasks"),
+                        collection(db!, "events", evId, "tasks"),
                         where("isVolunteerTask", "==", true)
                     );
                     const unsubTask = onSnapshot(tasksQuery, (tasksSnap) => {
