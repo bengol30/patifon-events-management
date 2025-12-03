@@ -60,6 +60,8 @@ export default function VolunteerEventsPage() {
     const [completedLogs, setCompletedLogs] = useState<CompletedLog[]>([]);
     const [autoAuthTried, setAutoAuthTried] = useState(false);
     const [autoAuthInProgress, setAutoAuthInProgress] = useState(false);
+    const [showPendingOnly, setShowPendingOnly] = useState(true);
+    const [showAllCompleted, setShowAllCompleted] = useState(false);
 
     const currentEmail = useMemo(() => {
         const first = Object.values(sessionMap)[0];
@@ -96,7 +98,9 @@ export default function VolunteerEventsPage() {
 
     const completedTasks = useMemo(() => {
         if (!currentEmail || !isAuthed) return [] as { eventId?: string; eventTitle?: string; task: Task }[];
-        return completedLogs.map((log) => ({
+        // Sort by completion time descending
+        const sorted = [...completedLogs].sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
+        return sorted.map((log) => ({
             eventId: log.eventId,
             eventTitle: log.eventTitle,
             task: {
@@ -108,6 +112,7 @@ export default function VolunteerEventsPage() {
                 dueDate: "",
                 volunteerHours: log.volunteerHours ?? null,
             } as Task,
+            completedAt: log.completedAt,
         }));
     }, [currentEmail, isAuthed, completedLogs]);
 
@@ -121,6 +126,10 @@ export default function VolunteerEventsPage() {
     const totalAvailableVolunteerTasks = useMemo(() => {
         return Object.values(tasksByEvent).reduce((acc, arr) => acc + (arr?.length || 0), 0);
     }, [tasksByEvent]);
+
+    const visibleMyTasks = useMemo(() => {
+        return showPendingOnly ? myTasks.filter(({ task }) => task.status !== "DONE") : myTasks;
+    }, [showPendingOnly, myTasks]);
 
     useEffect(() => {
         if (!db) return;
@@ -566,25 +575,41 @@ export default function VolunteerEventsPage() {
                     <div className="space-y-6">
                         {completedTasks.length > 0 && (
                             <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6">
-                                <h3 className="text-lg font-bold text-gray-900 mb-3">סיכום שעות מתנדב</h3>
-                                <div className="flex items-center gap-3 mb-4">
-                                    <span className="text-sm text-gray-700">משימות שהושלמו: {completedTasks.length}</span>
-                                    <span className="text-sm font-semibold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-                                        סה\"כ שעות: {totalCompletedHours}
-                                    </span>
+                                <div className="flex items-center justify-between gap-2 mb-3">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-gray-900">סיכום שעות מתנדב</h3>
+                                        <div className="flex items-center gap-3 mt-1">
+                                            <span className="text-sm text-gray-700">משימות שהושלמו: {completedTasks.length}</span>
+                                            <span className="text-sm font-semibold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
+                                                סה\"כ שעות: {totalCompletedHours}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowAllCompleted((v) => !v)}
+                                        className="text-xs px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 font-semibold"
+                                    >
+                                        {showAllCompleted ? "הצג פחות" : "הצג הכל"}
+                                    </button>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-auto pr-1">
-                                    {completedTasks.map(({ eventId, eventTitle, task }) => {
+                                <div className="space-y-2 max-h-60 overflow-auto pr-1">
+                                    {(showAllCompleted ? completedTasks : completedTasks.slice(0, 4)).map(({ eventId, eventTitle, task, completedAt }) => {
                                         return (
-                                            <div key={`${eventId}-${task.id}`} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <p className="font-semibold text-sm text-gray-900 truncate">{task.title}</p>
-                                                    <span className="text-[11px] text-emerald-700 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100">הושלם</span>
+                                            <div key={`${eventId}-${task.id}-${completedAt?.seconds || ""}`} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2 bg-gray-50">
+                                                <div className="flex flex-col gap-0.5 min-w-0">
+                                                    <p className="text-sm font-semibold text-gray-900 truncate">{task.title}</p>
+                                                    <div className="text-[11px] text-gray-500 truncate">
+                                                        אירוע: {eventTitle || eventId || "אירוע"}
+                                                    </div>
                                                 </div>
-                                                <p className="text-xs text-gray-600 truncate">אירוע: {eventTitle || eventId}</p>
-                                                {task.volunteerHours != null && (
-                                                    <p className="text-xs text-gray-700 mt-1">שעות: {task.volunteerHours}</p>
-                                                )}
+                                                <div className="flex items-center gap-2 text-xs text-gray-600">
+                                                    {task.volunteerHours != null && (
+                                                        <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                                            {task.volunteerHours} ש\"ע
+                                                        </span>
+                                                    )}
+                                                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">בוצע</span>
+                                                </div>
                                             </div>
                                         );
                                     })}
@@ -599,10 +624,27 @@ export default function VolunteerEventsPage() {
                         )}
                         {myTasks.length > 0 && (
                             <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6">
-                                <h3 className="text-lg font-bold text-gray-900 mb-3">המשימות שלי</h3>
-                                <p className="text-sm text-gray-600 mb-4">משימות שסימנת או הוקצתה אליך באירועים שלך.</p>
+                                <div className="flex items-center justify-between mb-3 gap-3">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-gray-900">המשימות שלי</h3>
+                                        <p className="text-sm text-gray-600">משימות שסימנת או הוקצתה אליך באירועים שלך.</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowPendingOnly((v) => !v)}
+                                        className={`text-xs px-3 py-2 rounded-lg border font-semibold transition ${
+                                            showPendingOnly
+                                                ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                                : "bg-white text-gray-700 border-gray-200"
+                                        }`}
+                                    >
+                                        {showPendingOnly ? "הצג הכל" : "הצג רק משימות פתוחות"}
+                                    </button>
+                                </div>
+                                {showPendingOnly && visibleMyTasks.length === 0 && (
+                                    <p className="text-sm text-gray-500 mb-3">אין משימות פתוחות כרגע.</p>
+                                )}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {myTasks.map(({ eventId, eventTitle, task }) => {
+                                    {visibleMyTasks.map(({ eventId, eventTitle, task }) => {
                                         const taskDate = task.dueDate ? new Date(task.dueDate) : null;
                                         return (
                                             <div
