@@ -79,10 +79,11 @@ const [uploadFiles, setUploadFiles] = useState<File[]>([]);
     // Backfill creator contact details from the user profile (registration info)
     useEffect(() => {
         const creatorId = task?.createdBy;
-        if (!db || !creatorId) return;
+        const dbInstance = db;
+        if (!dbInstance || !creatorId) return;
         const fetchCreator = async () => {
             try {
-                const snap = await getDoc(doc(db, "users", creatorId));
+                const snap = await getDoc(doc(dbInstance, "users", creatorId));
                 if (snap.exists()) {
                     const data = snap.data() as any;
                     setTask(prev => prev ? {
