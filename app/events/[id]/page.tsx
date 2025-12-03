@@ -857,7 +857,7 @@ export default function EventDetailsPage() {
                 volunteerHours: editingTask.isVolunteerTask
                     ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
                     : null,
-                createdByName: editingTask.createdByName || user.displayName || user.email || "משתמש",
+                createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
             };
             await updateDoc(taskRef, updateData);
             setEditingTask(null);
