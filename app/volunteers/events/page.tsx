@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { collection, doc, getDocs, query, where, updateDoc, arrayUnion, arrayRemove, onSnapshot, addDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
+import { collection, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc } from "firebase/firestore";
 import { Calendar, MapPin, Users, Handshake, Clock, Target, AlertCircle, ArrowRight, CheckSquare, Square, UserCheck, Lock, Circle, CheckCircle2 } from "lucide-react";
 
 interface Task {
@@ -39,6 +40,8 @@ interface EventData {
 }
 
 export default function VolunteerEventsPage() {
+    const router = useRouter();
+    const LOCAL_AUTH_KEY = "volunteerAuthSession";
     const [events, setEvents] = useState<EventData[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -55,6 +58,8 @@ export default function VolunteerEventsPage() {
     const [saveStatus, setSaveStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
     const [tasksByEvent, setTasksByEvent] = useState<Record<string, Task[]>>({});
     const [completedLogs, setCompletedLogs] = useState<CompletedLog[]>([]);
+    const [autoAuthTried, setAutoAuthTried] = useState(false);
+    const [autoAuthInProgress, setAutoAuthInProgress] = useState(false);
 
     const currentEmail = useMemo(() => {
         const first = Object.values(sessionMap)[0];
@@ -112,6 +117,10 @@ export default function VolunteerEventsPage() {
             return sum + (Number.isFinite(hrs) && hrs > 0 ? hrs : 0);
         }, 0);
     }, [completedTasks]);
+
+    const totalAvailableVolunteerTasks = useMemo(() => {
+        return Object.values(tasksByEvent).reduce((acc, arr) => acc + (arr?.length || 0), 0);
+    }, [tasksByEvent]);
 
     useEffect(() => {
         if (!db) return;
@@ -197,6 +206,7 @@ export default function VolunteerEventsPage() {
         return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
     };
 
+    // Helper: validate volunteer credentials against event volunteer lists
     const openAuth = (eventId?: string) => {
         if (eventId) setAuthEventId(eventId);
         setAuthEmail("");
@@ -204,6 +214,107 @@ export default function VolunteerEventsPage() {
         setAuthError("");
         setAuthModalVisible(true);
     };
+
+    const performAuthWithHash = async (emailInput: string, passwordHash: string) => {
+        if (!db) return { matched: {} as Record<string, { volunteerId: string; name: string; email: string }>, matchedIds: [] as string[] };
+        const emailLower = emailInput.trim().toLowerCase();
+        const matched: Record<string, { volunteerId: string; name: string; email: string }> = {};
+
+        for (const ev of events) {
+            try {
+                const volunteersSnap = await getDocs(
+                    query(collection(db, "events", ev.id, "volunteers"), where("email", "==", emailInput.trim()))
+                );
+                if (!volunteersSnap.empty) {
+                    const docSnap = volunteersSnap.docs[0];
+                    const data = docSnap.data() as any;
+                    const storedHash = data.passwordHash;
+                    if (storedHash && storedHash === passwordHash) {
+                        const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || "מתנדב/ת";
+                        matched[ev.id] = { volunteerId: docSnap.id, name, email: emailInput.trim() };
+                        continue;
+                    }
+                }
+                const volunteersSnapAll = await getDocs(collection(db, "events", ev.id, "volunteers"));
+                for (const volDoc of volunteersSnapAll.docs) {
+                    const data = volDoc.data() as any;
+                    const emailVal = (data.email || "").toLowerCase();
+                    if (emailVal !== emailLower) continue;
+                    const storedHash = data.passwordHash;
+                    if (storedHash && storedHash === passwordHash) {
+                        const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || "מתנדב/ת";
+                        matched[ev.id] = { volunteerId: volDoc.id, name, email: emailInput.trim() };
+                        break;
+                    }
+                }
+            } catch (lookupErr) {
+                console.warn("Login lookup failed", lookupErr);
+            }
+        }
+
+        const matchedIds = Object.keys(matched);
+        return { matched, matchedIds };
+    };
+
+    const applyAuthResult = (matched: Record<string, { volunteerId: string; name: string; email: string }>, matchedIds: string[], emailLower: string) => {
+        setSessionMap(matched);
+        setMatchedEventIds(new Set(matchedIds));
+        setIsAuthed(true);
+        setSelectedTasksByEvent(() => {
+            const next: Record<string, Set<string>> = {};
+            events.forEach((ev) => {
+                if (!matched[ev.id]) return;
+                const selected = new Set<string>();
+                ev.tasks?.forEach((t) => {
+                    const assignees = t.assignees || [];
+                    if (assignees.some((a) => (a.email || "").toLowerCase() === emailLower)) {
+                        selected.add(t.id);
+                    }
+                });
+                next[ev.id] = selected;
+            });
+            return next;
+        });
+        setAuthEventId(null);
+        setAuthModalVisible(false);
+    };
+
+    // Attempt auto-auth from stored session (email + hashed password)
+    useEffect(() => {
+        if (!db || autoAuthTried || isAuthed || events.length === 0) return;
+        const saved = typeof window !== "undefined" ? localStorage.getItem(LOCAL_AUTH_KEY) : null;
+        if (!saved) {
+            setAutoAuthTried(true);
+            return;
+        }
+        try {
+            const parsed = JSON.parse(saved) as { email?: string; passwordHash?: string };
+            if (!parsed.email || !parsed.passwordHash) {
+                setAutoAuthTried(true);
+                return;
+            }
+            setAutoAuthInProgress(true);
+            // Optimistically mark as authed to avoid jump to login while we verify
+            setIsAuthed(true);
+            (async () => {
+                const { matched, matchedIds } = await performAuthWithHash(parsed.email!, parsed.passwordHash!);
+                if (matchedIds.length > 0) {
+                    const emailLower = parsed.email!.trim().toLowerCase();
+                    applyAuthResult(matched, matchedIds, emailLower);
+                } else {
+                    // fallback: clear optimistic auth if no match
+                    setIsAuthed(false);
+                    localStorage.removeItem(LOCAL_AUTH_KEY);
+                }
+                setAutoAuthTried(true);
+                setAutoAuthInProgress(false);
+            })();
+        } catch (err) {
+            console.warn("Auto auth parse failed", err);
+            setAutoAuthTried(true);
+            setAutoAuthInProgress(false);
+        }
+    }, [db, events.length, isAuthed, autoAuthTried]);
 
     const handleAuth = async () => {
         if (!db) return;
@@ -215,71 +326,18 @@ export default function VolunteerEventsPage() {
             setAuthing(true);
             setAuthError("");
             const emailLower = authEmail.trim().toLowerCase();
-            const matched: Record<string, { volunteerId: string; name: string; email: string }> = {};
+            const computed = await hashPassword(authPassword.trim());
+            const { matched, matchedIds } = await performAuthWithHash(authEmail.trim(), computed);
 
-            // Try to find volunteer across events (case-insensitive)
-            for (const ev of events) {
-                try {
-                    const volunteersSnap = await getDocs(
-                        query(collection(db, "events", ev.id, "volunteers"), where("email", "==", authEmail.trim()))
-                    );
-                    if (!volunteersSnap.empty) {
-                        const docSnap = volunteersSnap.docs[0];
-                        const data = docSnap.data() as any;
-                        const storedHash = data.passwordHash;
-                        const computed = await hashPassword(authPassword.trim());
-                        if (storedHash && storedHash === computed) {
-                            const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || "מתנדב/ת";
-                            matched[ev.id] = { volunteerId: docSnap.id, name, email: authEmail.trim() };
-                            continue;
-                        }
-                    }
-                    // fallback scan for case-insensitive match
-                    const volunteersSnapAll = await getDocs(collection(db, "events", ev.id, "volunteers"));
-                    for (const volDoc of volunteersSnapAll.docs) {
-                        const data = volDoc.data() as any;
-                        const emailVal = (data.email || "").toLowerCase();
-                        if (emailVal !== emailLower) continue;
-                        const storedHash = data.passwordHash;
-                        const computed = await hashPassword(authPassword.trim());
-                        if (storedHash && storedHash === computed) {
-                            const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || "מתנדב/ת";
-                            matched[ev.id] = { volunteerId: volDoc.id, name, email: authEmail.trim() };
-                            break;
-                        }
-                    }
-                } catch (lookupErr) {
-                    console.warn("Login lookup failed", lookupErr);
-                }
-            }
-
-            const matchedIds = Object.keys(matched);
             if (matchedIds.length === 0) {
                 setAuthError("לא נמצא חשבון מתנדב עם הפרטים שהוזנו. ודא/י שנרשמת לאירוע הזה.");
                 return;
             }
 
-            setSessionMap(matched);
-            setMatchedEventIds(new Set(matchedIds));
-            setIsAuthed(true);
-            setSelectedTasksByEvent(() => {
-                const next: Record<string, Set<string>> = {};
-                events.forEach((ev) => {
-                    if (!matched[ev.id]) return;
-                    const selected = new Set<string>();
-                    ev.tasks?.forEach((t) => {
-                        const assignees = t.assignees || [];
-                        if (assignees.some((a) => (a.email || "").toLowerCase() === emailLower)) {
-                            selected.add(t.id);
-                        }
-                    });
-                    next[ev.id] = selected;
-                });
-                return next;
-            });
-
-            setAuthEventId(null);
-            setAuthModalVisible(false);
+            applyAuthResult(matched, matchedIds, emailLower);
+            if (typeof window !== "undefined") {
+                localStorage.setItem(LOCAL_AUTH_KEY, JSON.stringify({ email: authEmail.trim(), passwordHash: computed }));
+            }
         } catch (err) {
             console.error("Volunteer auth failed", err);
             setAuthError("שגיאה באימות. נסו שוב.");
@@ -288,111 +346,62 @@ export default function VolunteerEventsPage() {
         }
     };
 
-    const toggleTask = (eventId: string, taskId: string) => {
-        setSelectedTasksByEvent((prev) => {
-            const current = new Set(prev[eventId] || []);
-            if (current.has(taskId)) current.delete(taskId);
-            else current.add(taskId);
-            return { ...prev, [eventId]: current };
-        });
-    };
-
-    const saveSelection = async (eventId: string) => {
+    const setTaskSelectionImmediate = async (eventId: string, taskId: string, select: boolean) => {
         if (!db) return;
-        if (!isAuthed) return;
-        const availableIds = new Set((tasksByEvent[eventId] || []).map((t) => t.id));
-        const selected = Array.from(getSelectedForEvent(eventId)).filter((id) => availableIds.has(id));
-        // Drop selections for tasks that no longer exist (e.g., נמחקו)
-        setSelectedTasksByEvent((prev) => ({ ...prev, [eventId]: new Set(selected) }));
+        if (!isAuthed) {
+            openAuth(eventId);
+            return;
+        }
+
         try {
-            if (!isAuthed) {
-                openAuth(eventId);
+            setSaveStatus((prev) => ({ ...prev, [eventId]: "saving" }));
+            const taskRef = doc(db, "events", eventId, "tasks", taskId);
+            const snap = await getDoc(taskRef);
+            if (!snap.exists()) {
+                setSaveStatus((prev) => ({ ...prev, [eventId]: "error" }));
                 return;
             }
-            setSaveStatus((prev) => ({ ...prev, [eventId]: "saving" }));
-            for (const taskId of selected) {
-                const taskRef = doc(db, "events", eventId, "tasks", taskId);
-                try {
-                    await updateDoc(taskRef, {
-                        assignees: arrayUnion({ name: sessionIdentity.name, email: sessionIdentity.email }),
-                    });
-                } catch (err: any) {
-                    // Skip missing tasks without failing the whole save
-                    console.warn("Skipping task that no longer exists", taskId, err);
-                    continue;
-                }
-            }
-            // reflect locally so התצוגה מסונכרנת עם דף הניהול
+
+            const data = snap.data() as any;
+            const currentAssignees = Array.isArray(data.assignees) ? data.assignees : [];
+            const filtered = currentAssignees.filter((a: any) => (a?.email || "").toLowerCase() !== sessionIdentity.email);
+            const updatedAssignees = select ? [...filtered, { name: sessionIdentity.name, email: sessionIdentity.email }] : filtered;
+
+            await updateDoc(taskRef, { assignees: updatedAssignees });
+
+            // Update local selections
+            setSelectedTasksByEvent((prev) => {
+                const next = { ...prev };
+                const set = new Set(next[eventId] || []);
+                if (select) set.add(taskId);
+                else set.delete(taskId);
+                next[eventId] = set;
+                return next;
+            });
+
+            // Update local events/tasks for immediate UI sync
             setEvents((prev) =>
                 prev.map((ev) =>
                     ev.id === eventId
                         ? {
                             ...ev,
                             tasks: (ev.tasks || []).map((t) =>
-                                selected.includes(t.id)
-                                    ? {
-                                        ...t,
-                                        assignees: [
-                                            ...(t.assignees || []),
-                                            { name: sessionIdentity.name, email: sessionIdentity.email },
-                                        ],
-                                    }
-                                    : t
+                                t.id === taskId ? { ...t, assignees: updatedAssignees } : t
                             ),
                         }
                         : ev
                 )
             );
+
             setSaveStatus((prev) => ({ ...prev, [eventId]: "saved" }));
         } catch (err) {
             console.error("Error saving volunteer tasks", err);
             setSaveStatus((prev) => ({ ...prev, [eventId]: "error" }));
-            return;
         }
     };
 
     const removeTaskSelection = async (eventId: string, taskId: string) => {
-        if (!db) return;
-        if (!isAuthed) return;
-        const assignee = { name: sessionIdentity.name, email: sessionIdentity.email };
-        try {
-            setSaveStatus((prev) => ({ ...prev, [eventId]: "saving" }));
-            const taskRef = doc(db, "events", eventId, "tasks", taskId);
-            await updateDoc(taskRef, {
-                assignees: arrayRemove(assignee),
-            });
-            // remove from local selection and events state
-            setSelectedTasksByEvent((prev) => {
-                const next = { ...prev };
-                const set = new Set(next[eventId] || []);
-                set.delete(taskId);
-                next[eventId] = set;
-                return next;
-            });
-            setEvents((prev) =>
-                prev.map((ev) =>
-                    ev.id === eventId
-                        ? {
-                            ...ev,
-                            tasks: (ev.tasks || []).map((t) =>
-                                t.id === taskId
-                                    ? {
-                                        ...t,
-                                        assignees: (t.assignees || []).filter(
-                                            (a) => (a.email || "").toLowerCase() !== sessionIdentity.email.toLowerCase()
-                                        ),
-                                    }
-                                    : t
-                            ),
-                        }
-                        : ev
-                )
-            );
-            setSaveStatus((prev) => ({ ...prev, [eventId]: "saved" }));
-        } catch (err) {
-            console.error("Error removing volunteer task", err);
-            setSaveStatus((prev) => ({ ...prev, [eventId]: "error" }));
-        }
+        await setTaskSelectionImmediate(eventId, taskId, false);
     };
 
     const toggleTaskDone = async (eventId: string, taskId: string, currentStatus: string) => {
@@ -455,7 +464,7 @@ export default function VolunteerEventsPage() {
         }
     };
 
-    if (loading) {
+    if (loading || autoAuthInProgress) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
@@ -496,6 +505,7 @@ export default function VolunteerEventsPage() {
                         </button>
                     </div>
                     
+                {!isAuthed && (
                     <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
                         <h2 className="font-semibold text-indigo-900 mb-2">איך זה עובד?</h2>
                         <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
@@ -505,6 +515,7 @@ export default function VolunteerEventsPage() {
                             <li>ניתן לבחור מספר משימות ולעדכן סטטוס באזור האישי</li>
                         </ul>
                     </div>
+                )}
                 </div>
 
                 {!isAuthed ? (
@@ -580,6 +591,12 @@ export default function VolunteerEventsPage() {
                                 </div>
                             </div>
                         )}
+                        {isAuthed && totalAvailableVolunteerTasks === 0 && (
+                            <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 text-center text-gray-700">
+                                <p className="text-lg font-semibold mb-1">אין כרגע משימות פנויות למתנדבים.</p>
+                                <p className="text-sm text-gray-500">כשתתווסף משימה חדשה שמתאימה למתנדבים היא תופיע כאן.</p>
+                            </div>
+                        )}
                         {myTasks.length > 0 && (
                             <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6">
                                 <h3 className="text-lg font-bold text-gray-900 mb-3">המשימות שלי</h3>
@@ -588,7 +605,19 @@ export default function VolunteerEventsPage() {
                                     {myTasks.map(({ eventId, eventTitle, task }) => {
                                         const taskDate = task.dueDate ? new Date(task.dueDate) : null;
                                         return (
-                                            <div key={`${eventId}-${task.id}`} className="border border-gray-200 rounded-lg p-4 bg-white">
+                                            <div
+                                                key={`${eventId}-${task.id}`}
+                                                className="border border-gray-200 rounded-lg p-4 bg-white cursor-pointer hover:border-indigo-300 hover:shadow-sm transition"
+                                                onClick={() => router.push(`/tasks/${task.id}?eventId=${eventId}&source=volunteer`)}
+                                                role="button"
+                                                tabIndex={0}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter" || e.key === " ") {
+                                                        e.preventDefault();
+                                                        router.push(`/tasks/${task.id}?eventId=${eventId}&source=volunteer`);
+                                                    }
+                                                }}
+                                            >
                                                 <div className="flex items-center justify-between mb-2">
                                                     <h4 className="font-semibold text-sm text-gray-900 truncate">{task.title}</h4>
                                                     <span className="text-[11px] text-gray-600">{eventTitle || "אירוע"}</span>
@@ -606,7 +635,7 @@ export default function VolunteerEventsPage() {
                                                 <div className="flex items-center justify-between mt-2">
                                                     <div className="flex items-center gap-3">
                                                         <button
-                                                            onClick={() => toggleTaskDone(eventId, task.id, task.status)}
+                                                            onClick={(e) => { e.stopPropagation(); toggleTaskDone(eventId, task.id, task.status); }}
                                                             className="flex items-center gap-1 text-sm font-semibold"
                                                         >
                                                             {task.status === "DONE" ? (
@@ -619,7 +648,7 @@ export default function VolunteerEventsPage() {
                                                             </span>
                                                         </button>
                                                         <button
-                                                            onClick={() => removeTaskSelection(eventId, task.id)}
+                                                            onClick={(e) => { e.stopPropagation(); removeTaskSelection(eventId, task.id); }}
                                                             className="text-xs text-red-600 hover:text-red-700 font-semibold"
                                                         >
                                                             שחרר משימה
@@ -630,6 +659,11 @@ export default function VolunteerEventsPage() {
                                         );
                                     })}
                                 </div>
+                            </div>
+                        )}
+                        {isAuthed && (
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4 text-sm text-indigo-900">
+                                זהו האזור לבחירת משימות פתוחות. בחירה וסימון השלמה יצברו שעות התנדבות בפרופיל האישי שלך.
                             </div>
                         )}
                         {events.map((event) => {
@@ -721,9 +755,8 @@ export default function VolunteerEventsPage() {
                                                             >
                                                                 <div className="flex items-start gap-2">
                                                                     <button
-                                                                        disabled={!isAuthed}
-                                                                        onClick={() => isAuthed && toggleTask(event.id, task.id)}
-                                                                        className={`mt-0.5 ${isAuthed ? "cursor-pointer" : "cursor-not-allowed"}`}
+                                                                        onClick={() => setTaskSelectionImmediate(event.id, task.id, !isSelected)}
+                                                                        className="mt-0.5 cursor-pointer"
                                                                     >
                                                                         {isSelected ? <CheckSquare className="text-indigo-600" size={18} /> : <Square className="text-gray-400" size={18} />}
                                                                     </button>
@@ -755,27 +788,6 @@ export default function VolunteerEventsPage() {
                                                         );
                                                     })}
                                                 </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="text-sm text-gray-600">
-                                                        {!isAuthed && "התחבר/י כדי לבחור ולשמור משימות"}
-                                                        {isAuthed && `נבחרו ${getSelectedForEvent(event.id).size} משימות`}
-                                                    </div>
-                                                        <div className="flex items-center gap-3">
-                                                            {saveStatus[event.id] === "saved" && (
-                                                                <span className="text-xs text-emerald-600">נשמר בהצלחה</span>
-                                                            )}
-                                                            {saveStatus[event.id] === "error" && (
-                                                                <span className="text-xs text-red-600">שגיאה בשמירה</span>
-                                                            )}
-                                                            <button
-                                                                onClick={() => saveSelection(event.id)}
-                                                                disabled={!isAuthed || saveStatus[event.id] === "saving"}
-                                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                                                            >
-                                                                {saveStatus[event.id] === "saving" ? "שומר..." : "שמור שריון משימות"}
-                                                            </button>
-                                                        </div>
-                                                    </div>
                                                 </>
                                             ) : (
                                                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center text-gray-500 text-sm mb-6">

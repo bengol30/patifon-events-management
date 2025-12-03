@@ -1748,23 +1748,25 @@ export default function Dashboard() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex flex-col gap-2">
-                          <button
-                            onClick={() => startEditVolunteer(vol)}
-                            className="p-2 rounded-md border border-gray-200 hover:bg-gray-50 text-gray-700"
-                            title="עריכת מתנדב"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteVolunteer(vol)}
-                            disabled={deletingVolunteerId === deletingKey}
-                            className={`p-2 rounded-md border text-gray-700 ${deletingVolunteerId === deletingKey ? "bg-gray-100 border-gray-200 cursor-not-allowed" : "border-gray-200 hover:bg-gray-50"}`}
-                            title="מחיקת מתנדב"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
+                        {isAdmin && (
+                          <div className="flex flex-col gap-2">
+                            <button
+                              onClick={() => startEditVolunteer(vol)}
+                              className="p-2 rounded-md border border-gray-200 hover:bg-gray-50 text-gray-700"
+                              title="עריכת מתנדב"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteVolunteer(vol)}
+                              disabled={deletingVolunteerId === deletingKey}
+                              className={`p-2 rounded-md border text-gray-700 ${deletingVolunteerId === deletingKey ? "bg-gray-100 border-gray-200 cursor-not-allowed" : "border-gray-200 hover:bg-gray-50"}`}
+                              title="מחיקת מתנדב"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

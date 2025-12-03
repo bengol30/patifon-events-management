@@ -32,6 +32,9 @@ interface Task {
     eventTitle?: string;
     isVolunteerTask?: boolean;
     volunteerHours?: number | null;
+    createdByName?: string;
+    createdByPhone?: string;
+    createdBy?: string | null;
 }
 
 interface EventTeamMember {
@@ -57,6 +60,7 @@ export default function TaskDetailPage() {
     const params = useParams();
     const taskId = params?.id as string;
     const searchParams = useSearchParams();
+    const viewSource = searchParams?.get("source") || "";
     const hintedEventId = searchParams?.get("eventId") || null;
     const focusSection = searchParams?.get("focus");
     const assigneeSectionRef = useRef<HTMLDivElement | null>(null);
@@ -70,7 +74,29 @@ export default function TaskDetailPage() {
     const [eventNeedsVolunteers, setEventNeedsVolunteers] = useState(false);
     const [attachments, setAttachments] = useState<any[]>([]);
     const [uploading, setUploading] = useState(false);
-    const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+
+    // Backfill creator contact details from the user profile (registration info)
+    useEffect(() => {
+        const creatorId = task?.createdBy;
+        if (!db || !creatorId) return;
+        const fetchCreator = async () => {
+            try {
+                const snap = await getDoc(doc(db, "users", creatorId));
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    setTask(prev => prev ? {
+                        ...prev,
+                        createdByPhone: data.phone || prev.createdByPhone || "",
+                        createdByName: prev.createdByName || data.fullName || data.name || data.email || prev.createdBy || ""
+                    } : prev);
+                }
+            } catch (err) {
+                console.error("Error loading creator contact:", err);
+            }
+        };
+        fetchCreator();
+    }, [db, task?.createdBy]);
 
     const normalizeAssignees = (data: any): Assignee[] => {
         if (!data) return [];
@@ -132,6 +158,9 @@ export default function TaskDetailPage() {
                             ...taskData,
                             assignee: taskData.assignee || normalizeAssignees(taskData)[0]?.name || "",
                             assignees: normalizeAssignees(taskData),
+                            createdByName: (taskData as any).createdByName || (taskData as any).createdBy || "",
+                            createdByPhone: (taskData as any).createdByPhone || (taskData as any).creatorPhone || "",
+                            createdBy: (taskData as any).createdBy || null,
                             eventId
                         } as Task,
                         eventTitle: (eventData as any).title,
@@ -216,7 +245,10 @@ export default function TaskDetailPage() {
                                 ...prev!,
                                 ...data,
                                 assignee: data.assignee || normalizeAssignees(data)[0]?.name || "",
-                                assignees: normalizeAssignees(data)
+                                assignees: normalizeAssignees(data),
+                                createdByName: (data as any).createdByName || (data as any).createdBy || prev?.createdByName || "",
+                                createdByPhone: (data as any).createdByPhone || (data as any).creatorPhone || prev?.createdByPhone || "",
+                                createdBy: (data as any).createdBy || prev?.createdBy || null,
                             } as Task));
                         }
                     });
@@ -415,17 +447,48 @@ export default function TaskDetailPage() {
         );
     }
 
+    const rawCreatorPhoneDigits = (task.createdByPhone || "").replace(/[^\d]/g, "");
+    const normalizeForWhatsapp = (digits: string) => {
+        if (!digits) return "";
+        // If user stored local format (e.g., 05x...), add Israel country code
+        if (digits.startsWith("0")) {
+            const trimmed = digits.replace(/^0+/, "");
+            return trimmed ? `972${trimmed}` : "";
+        }
+        return digits;
+    };
+    const creatorPhoneDigits = normalizeForWhatsapp(rawCreatorPhoneDigits);
+    const whatsappMessage = encodeURIComponent(`היי ${task.createdByName || ""}, יש לי שאלה לגבי המשימה "${task.title}"`);
+    const whatsappLink = creatorPhoneDigits && creatorPhoneDigits.length >= 8 ? `https://wa.me/${creatorPhoneDigits}?text=${whatsappMessage}` : null;
+
     return (
         <div className="min-h-screen p-6 bg-gray-50">
             <div className="max-w-4xl mx-auto">
                 <div className="mb-6">
-                    <Link
-                        href={task ? `/events/${task.eventId}` : "/"}
-                        className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition w-fit"
-                    >
-                        <ArrowRight size={20} />
-                        חזרה לדף האירוע
-                    </Link>
+                    {viewSource === "volunteer" ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (typeof window !== "undefined" && window.history.length > 1) {
+                                    router.back();
+                                } else {
+                                    router.push("/volunteers/events");
+                                }
+                            }}
+                            className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition w-fit"
+                        >
+                            <ArrowRight size={20} />
+                            חזרה למשימות
+                        </button>
+                    ) : (
+                        <Link
+                            href={task ? `/events/${task.eventId}` : "/"}
+                            className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition w-fit"
+                        >
+                            <ArrowRight size={20} />
+                            חזרה לדף האירוע
+                        </Link>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -616,6 +679,29 @@ export default function TaskDetailPage() {
                             <h3 className="font-semibold text-gray-900 mb-4">פרטים נוספים</h3>
 
                             <div className="space-y-4">
+                                <div>
+                                    <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                        נוצר ע"י
+                                    </label>
+                                    <div className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800 flex items-center justify-between gap-2">
+                                        <span>{task.createdByName || "לא צויין"}</span>
+                                        {whatsappLink ? (
+                                            <a
+                                                href={whatsappLink}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                                                title="שליחת הודעת וואטסאפ ליוצר המשימה"
+                                            >
+                                                <MessageCircle size={14} />
+                                                וואטסאפ
+                                            </a>
+                                        ) : (
+                                            <span className="text-xs text-gray-400">אין מספר וואטסאפ שמור</span>
+                                        )}
+                                    </div>
+                                </div>
+
                                 <div>
                                     <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
                                         <Calendar size={16} />

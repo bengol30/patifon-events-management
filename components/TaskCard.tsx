@@ -27,6 +27,7 @@ interface TaskProps {
     onEditStatus?: (task: TaskProps) => void;
     onEditDate?: (task: TaskProps) => void;
     previewImage?: string;
+    createdByName?: string;
 }
 
 export default function TaskCard({
@@ -53,6 +54,7 @@ export default function TaskCard({
     onEditStatus,
     onEditDate,
     previewImage,
+    createdByName,
 }: TaskProps) {
     const router = useRouter();
 

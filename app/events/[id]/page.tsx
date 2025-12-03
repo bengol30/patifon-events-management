@@ -36,6 +36,7 @@ interface Task {
     previewImage?: string;
     isVolunteerTask?: boolean;
     volunteerHours?: number | null;
+    createdByName?: string;
 }
 
 interface BudgetItem {
@@ -812,6 +813,7 @@ export default function EventDetailsPage() {
                     : null,
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
+                createdByName: user.displayName || user.email || "משתמש",
             });
             updateRepeatTaskStats(newTask.title);
             if (newTaskFiles.length) {
@@ -855,6 +857,7 @@ export default function EventDetailsPage() {
                 volunteerHours: editingTask.isVolunteerTask
                     ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
                     : null,
+                createdByName: editingTask.createdByName || user.displayName || user.email || "משתמש",
             };
             await updateDoc(taskRef, updateData);
             setEditingTask(null);
@@ -2620,6 +2623,7 @@ export default function EventDetailsPage() {
                                         status={task.status}
                                         dueDate={task.dueDate}
                                         priority={task.priority}
+                                        createdByName={task.createdByName}
                                         onEdit={() => setEditingTask(task)}
                                         onDelete={() => confirmDeleteTask(task.id)}
                                         onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
