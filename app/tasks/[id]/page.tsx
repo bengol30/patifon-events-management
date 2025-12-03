@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, type Firestore } from "firebase/firestore";
 import Link from "next/link";
 import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake } from "lucide-react";
 import { storage } from "@/lib/firebase";
@@ -74,16 +74,15 @@ export default function TaskDetailPage() {
     const [eventNeedsVolunteers, setEventNeedsVolunteers] = useState(false);
     const [attachments, setAttachments] = useState<any[]>([]);
     const [uploading, setUploading] = useState(false);
-const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+    const [uploadFiles, setUploadFiles] = useState<File[]>([]);
 
     // Backfill creator contact details from the user profile (registration info)
     useEffect(() => {
         const creatorId = task?.createdBy;
-        const dbInstance = db;
-        if (!dbInstance || !creatorId) return;
-        const fetchCreator = async () => {
+        if (!db || !creatorId) return;
+        const fetchCreator = async (database: Firestore, id: string) => {
             try {
-                const snap = await getDoc(doc(dbInstance, "users", creatorId));
+                const snap = await getDoc(doc(database, "users", id));
                 if (snap.exists()) {
                     const data = snap.data() as any;
                     setTask(prev => prev ? {
@@ -96,7 +95,7 @@ const [uploadFiles, setUploadFiles] = useState<File[]>([]);
                 console.error("Error loading creator contact:", err);
             }
         };
-        fetchCreator();
+        fetchCreator(db, creatorId);
     }, [db, task?.createdBy]);
 
     const normalizeAssignees = (data: any): Assignee[] => {

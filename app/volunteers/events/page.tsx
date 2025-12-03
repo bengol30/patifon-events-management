@@ -28,6 +28,13 @@ interface CompletedLog {
     completedAt?: any;
 }
 
+interface CompletedTaskItem {
+    eventId?: string;
+    eventTitle?: string;
+    task: Task;
+    completedAt?: any;
+}
+
 interface EventData {
     id: string;
     title: string;
@@ -96,11 +103,11 @@ export default function VolunteerEventsPage() {
         return res;
     }, [currentEmail, events, getSelectedForEvent, tasksByEvent, isAuthed]);
 
-    const completedTasks = useMemo(() => {
-        if (!currentEmail || !isAuthed) return [] as { eventId?: string; eventTitle?: string; task: Task }[];
+    const completedTasks = useMemo<CompletedTaskItem[]>(() => {
+        if (!currentEmail || !isAuthed) return [];
         // Sort by completion time descending
         const sorted = [...completedLogs].sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
-        return sorted.map((log) => ({
+        return sorted.map<CompletedTaskItem>((log) => ({
             eventId: log.eventId,
             eventTitle: log.eventTitle,
             task: {
