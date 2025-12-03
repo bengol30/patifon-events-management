@@ -830,7 +830,7 @@ export default function EventDetailsPage() {
 
     const handleUpdateTask = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!db || !editingTask) return;
+        if (!db || !editingTask || !user) return;
 
         try {
             if (editingTask.isVolunteerTask) {
