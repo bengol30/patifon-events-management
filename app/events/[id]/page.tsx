@@ -542,7 +542,7 @@ export default function EventDetailsPage() {
     useEffect(() => {
         if (!id || !db) return;
 
-        const unsubscribeEvent = onSnapshot(doc(db, "events", id), async (docSnap) => {
+        const unsubscribeEvent = onSnapshot(doc(db!, "events", id), async (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data() as EventData;
                 const enrichedTeam = await hydrateTeamNames(data.team || []);
@@ -554,14 +554,14 @@ export default function EventDetailsPage() {
                 try {
                     let name = "";
                     if (creatorUid) {
-                        const userDoc = await getDoc(doc(db, "users", creatorUid));
+                        const userDoc = await getDoc(doc(db!, "users", creatorUid));
                         if (userDoc.exists()) {
                             const u = userDoc.data() as any;
                             name = u.fullName || u.name || u.displayName || u.email || "";
                         }
                     }
                     if (!name && creatorEmail) {
-                        const matchByEmail = await getDocs(query(collection(db, "users"), where("email", "==", creatorEmail)));
+                        const matchByEmail = await getDocs(query(collection(db!, "users"), where("email", "==", creatorEmail)));
                         const found = matchByEmail.docs[0];
                         if (found?.exists()) {
                             const u = found.data() as any;
