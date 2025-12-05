@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit } from "lucide-react";
 import { db, auth } from "@/lib/firebase";
-import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc, onSnapshot } from "firebase/firestore";
 import TaskChat from "@/components/TaskChat";
 
 import TaskCard from "@/components/TaskCard";
@@ -50,6 +50,7 @@ interface Task {
   priority: "NORMAL" | "HIGH" | "CRITICAL";
   eventId: string;
   eventTitle: string;
+  scope?: "event" | "project";
   lastMessageTime?: any;
   lastMessageBy?: string;
   readBy?: Record<string, boolean>;
@@ -57,6 +58,7 @@ interface Task {
   nextStep?: string;
   lastMessageText?: string;
   lastMessageMentions?: { name?: string; userId?: string; email?: string }[];
+  pendingApproval?: boolean;
 }
 
 interface TeamNote {
@@ -66,11 +68,64 @@ interface TeamNote {
   updatedAt?: any;
 }
 
+interface Project {
+  id: string;
+  name?: string;
+  status?: string;
+  summary?: string;
+  goal?: string;
+  dueDate?: string;
+  ownerId?: string;
+  ownerEmail?: string;
+  teamMembers?: { userId?: string; email?: string; fullName?: string }[];
+  updatedAt?: any;
+}
+
+const matchAssignee = (opts: {
+  taskData: any;
+  userId?: string | null;
+  userName?: string | null;
+  userEmail?: string | null;
+}) => {
+  const { taskData, userId, userName, userEmail } = opts;
+  const assigneeStr = (taskData.assignee || "").toLowerCase().trim();
+  const userNameLower = (userName || "").toLowerCase().trim();
+  const userEmailLower = (userEmail || "").toLowerCase().trim();
+  const userEmailPrefix = userEmailLower ? userEmailLower.split("@")[0] : "";
+  const assigneeId = taskData.assigneeId as string | undefined;
+  const assigneesArr = (taskData.assignees as { name: string; userId?: string; email?: string }[] | undefined) ||
+    (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId, email: (taskData as any).assigneeEmail }] : []);
+  const mentionsArr = (taskData.lastMessageMentions as { name?: string; userId?: string; email?: string }[] | undefined) || [];
+  const isAssigned =
+    (assigneeId && userId && assigneeId === userId) ||
+    assigneesArr.some(a => a.userId && userId && a.userId === userId) ||
+    assigneesArr.some(a => a.email && userEmailLower && a.email.toLowerCase().trim() === userEmailLower) ||
+    (assigneeStr && (
+      (userNameLower && assigneeStr === userNameLower) ||
+      (userEmailPrefix && assigneeStr === userEmailPrefix) ||
+      assigneeStr === "אני"
+    )) ||
+    assigneesArr.some(a => {
+      const nameLower = (a.name || "").toLowerCase().trim();
+      return (userNameLower && nameLower === userNameLower) ||
+        (userEmailPrefix && nameLower === userEmailPrefix) ||
+        nameLower === "אני";
+    });
+  const isMentioned = mentionsArr.some(m =>
+    (m.userId && userId && m.userId === userId) ||
+    (m.email && userEmail && m.email.toLowerCase() === userEmail.toLowerCase())
+  );
+  return { isAssigned, isMentioned, assigneesArr, assigneeId };
+};
+
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [projectIndex, setProjectIndex] = useState<Record<string, Project>>({});
 
   // My Tasks State
   const [myTasks, setMyTasks] = useState<Task[]>([]);
@@ -83,7 +138,7 @@ export default function Dashboard() {
   const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
-  const [volunteersList, setVolunteersList] = useState<{ id: string; name?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project" }[]>([]);
+  const [volunteersList, setVolunteersList] = useState<{ id: string; name?: string; firstName?: string; lastName?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project"; program?: string; year?: string; idNumber?: string }[]>([]);
   const [loadingVolunteers, setLoadingVolunteers] = useState(true);
   const [showAllVolunteers, setShowAllVolunteers] = useState(false);
   const [editingVolunteer, setEditingVolunteer] = useState<{ id: string; eventId: string; scope?: "event" | "project" } | null>(null);
@@ -93,6 +148,14 @@ export default function Dashboard() {
   const [savingVolunteer, setSavingVolunteer] = useState(false);
   const [deletingVolunteerId, setDeletingVolunteerId] = useState<string | null>(null);
   const [confirmDeleteVolunteer, setConfirmDeleteVolunteer] = useState<{ id: string; eventId: string; scope?: "event" | "project"; name?: string; eventTitle?: string } | null>(null);
+  const [viewVolunteer, setViewVolunteer] = useState<{ id: string; name?: string; firstName?: string; lastName?: string; email?: string; phone?: string; program?: string; year?: string; idNumber?: string } | null>(null);
+  const [volTasksPending, setVolTasksPending] = useState<Task[]>([]);
+  const [volTasksDone, setVolTasksDone] = useState<Task[]>([]);
+  const [volTasksHours, setVolTasksHours] = useState<number>(0);
+  const [loadingVolTasks, setLoadingVolTasks] = useState(false);
+  const [volTasksError, setVolTasksError] = useState<string | null>(null);
+  const [completionRequests, setCompletionRequests] = useState<any[]>([]);
+  const [showRequestsModal, setShowRequestsModal] = useState(false);
   const [userEventsMap, setUserEventsMap] = useState<Record<string, Event[]>>({});
   const [openUserEventsId, setOpenUserEventsId] = useState<string | null>(null);
   const [joinRequests, setJoinRequests] = useState<Record<string, "PENDING" | "APPROVED" | "REJECTED">>({});
@@ -118,6 +181,7 @@ export default function Dashboard() {
   const [editingDateTask, setEditingDateTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [confirmingEventId, setConfirmingEventId] = useState<string | null>(null);
+  const [confirmingProjectId, setConfirmingProjectId] = useState<string | null>(null);
 
   // Chat State
   const [chatTask, setChatTask] = useState<Task | null>(null);
@@ -137,13 +201,121 @@ export default function Dashboard() {
     return [];
   };
 
+  const isProjectTaskRef = (ref?: any) => {
+    if (!ref?.path) return false;
+    const path = ref.path.toString();
+    const marker = "/documents/";
+    const idx = path.indexOf(marker);
+    if (idx !== -1) {
+      const sub = path.slice(idx + marker.length);
+      if (sub.startsWith("projects/")) return true;
+    }
+    return path.startsWith("projects/") || path.includes("/projects/");
+  };
+
+  const fetchTasksForContainers = async ({
+    eventIds = [],
+    projectIds = [],
+    eventLookup,
+    projectLookup,
+    currentUser,
+    includeMentions = true,
+  }: {
+    eventIds: string[];
+    projectIds: string[];
+    eventLookup: Map<string, any>;
+    projectLookup: Map<string, any>;
+    currentUser: { id?: string; name?: string | null; email?: string | null };
+    includeMentions?: boolean;
+  }) => {
+    if (!db) return { tasks: [] as Task[], notif: [] as Task[], tasksInMyEvents: 0 };
+    const tasks: Task[] = [];
+    const notif: Task[] = [];
+    let tasksInMyEvents = 0;
+
+    const loadFor = async (scope: "event" | "project", id: string) => {
+      const parent = scope === "event" ? eventLookup.get(id) : projectLookup.get(id);
+      if (!parent) return;
+      try {
+        const snap = await getDocs(collection(db, scope === "event" ? "events" : "projects", id, "tasks"));
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          const match = matchAssignee({
+            taskData: data,
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userEmail: currentUser.email,
+          });
+          const baseTask: Task = {
+            id: docSnap.id,
+            title: data.title,
+            description: data.description,
+            assignee: data.assignee,
+            assigneeId: data.assigneeId,
+            assignees: data.assignees,
+            status: (data.status as Task["status"]) || "TODO",
+            dueDate: data.dueDate,
+            priority: (data.priority as Task["priority"]) || "NORMAL",
+            eventId: id,
+            eventTitle: (scope === "event" ? parent?.title : parent?.name) || (scope === "project" ? "פרויקט" : "אירוע לא ידוע"),
+            scope,
+            currentStatus: data.currentStatus,
+            nextStep: data.nextStep,
+            lastMessageTime: data.lastMessageTime,
+            lastMessageBy: data.lastMessageBy,
+            readBy: data.readBy,
+            lastMessageText: data.lastMessageText,
+            lastMessageMentions: data.lastMessageMentions,
+          };
+          tasks.push(baseTask);
+          const shouldIncludeNotif = match.isAssigned || (includeMentions && match.isMentioned);
+          if (shouldIncludeNotif) {
+            notif.push({
+              ...baseTask,
+              assignees: match.assigneesArr,
+              assigneeId: match.assigneeId,
+            });
+          }
+          if (scope === "event") tasksInMyEvents += 1;
+        });
+      } catch (err) {
+        console.error("Failed loading tasks for", scope, id, err);
+      }
+    };
+
+    await Promise.all([
+      ...eventIds.map(eid => loadFor("event", eid)),
+      ...projectIds.map(pid => loadFor("project", pid)),
+    ]);
+
+    return { tasks, notif, tasksInMyEvents };
+  };
+
   const isEventActive = (event: Event) => {
     const statusLower = (event.status || "").toString().toLowerCase();
     if (["done", "cancelled", "canceled", "בוטל"].includes(statusLower)) return false;
     return true;
   };
 
+  const isProjectActive = (project: Project) => {
+    const statusLower = (project.status || "").toString().toLowerCase();
+    return !["הושלם", "done", "completed", "סגור", "cancelled", "canceled"].includes(statusLower);
+  };
+
+  const isEventDeletedFlag = (eventObj: any) => {
+    const statusLower = (eventObj?.status || "").toString().toLowerCase();
+    return eventObj?.deleted === true || ["deleted", "cancelled", "canceled", "archive", "archived"].includes(statusLower);
+  };
+
   const normalizeKey = (val?: string | null) => (val || "").toString().trim().toLowerCase();
+  const isProjectOwner = (proj: Project, currentUser?: typeof user) => {
+    const u = currentUser || user;
+    if (!u) return false;
+    return (
+      (proj.ownerId && proj.ownerId === u.uid) ||
+      (proj.ownerEmail && u.email && normalizeKey(proj.ownerEmail) === normalizeKey(u.email))
+    );
+  };
 
   // Onboarding gate: new users must complete profile
   useEffect(() => {
@@ -173,11 +345,21 @@ export default function Dashboard() {
         const userEmail = user.email || "";
         const currentUid = user.uid;
         const eventLookup = new Map(events.map(e => [e.id, e]));
+        const projectLookup = new Map(Object.entries(projectIndex || {}));
 
         tasksSnapshot.forEach(docSnap => {
           const taskData = docSnap.data();
+          const isProjectTask = isProjectTaskRef(docSnap.ref);
+          const parentCollectionId = docSnap.ref.parent.parent?.parent?.id;
           const eventId = docSnap.ref.parent.parent?.id || "";
-          const event = eventLookup.get(eventId);
+          let event = isProjectTask ? projectLookup.get(eventId) : eventLookup.get(eventId);
+          if (!event && isProjectTask) {
+            event = { id: eventId, title: taskData.eventTitle || "פרויקט" } as any;
+          }
+          // Skip tasks whose parent event no longer exists or marked deleted
+          if (!isProjectTask && (!event || isEventDeletedFlag(event))) {
+            return;
+          }
 
           const assigneeStr = (taskData.assignee || "").toLowerCase();
           const assigneeId = taskData.assigneeId as string | undefined;
@@ -216,7 +398,10 @@ export default function Dashboard() {
               assignees: assigneesArr,
               status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
               eventId: eventId,
-              eventTitle: event?.title || taskData.eventTitle || "אירוע לא ידוע",
+              eventTitle: isProjectTask
+                ? (event as any)?.name || (event as any)?.title || taskData.eventTitle || "פרויקט"
+                : (event as any)?.title || taskData.eventTitle || "אירוע לא ידוע",
+              scope: isProjectTask ? "project" : "event",
               currentStatus: taskData.currentStatus || "",
               nextStep: taskData.nextStep || "",
               lastMessageTime: taskData.lastMessageTime || null,
@@ -287,6 +472,7 @@ export default function Dashboard() {
     const fetchData = async () => {
       if (!db || !user) {
         setLoadingEvents(false);
+        setLoadingProjects(false);
         setLoadingTasks(false);
         setLoadingStats(false);
         setLoadingUsers(false);
@@ -297,6 +483,7 @@ export default function Dashboard() {
 
       try {
         setLoadingStats(true);
+        setLoadingProjects(true);
         setLoadingUsers(true);
         setLoadingVolunteers(true);
         setLoadingNotifications(true);
@@ -313,6 +500,7 @@ export default function Dashboard() {
           id: doc.id,
           ...doc.data(),
         })) as any[];
+        setProjectIndex(Object.fromEntries(allProjectsData.map((p: any) => [p.id, p])));
         const eventsByCreator: Record<string, Event[]> = {};
         const addToMap = (key: string | undefined | null, ev: Event) => {
           const normKey = normalizeKey(key);
@@ -344,6 +532,34 @@ export default function Dashboard() {
           return aDate - bDate;
         });
         setEvents(sortedByDate);
+
+        // Fetch projects relevant to current user
+        const projectsForUser = allProjectsData.filter((p) => {
+          const ownerMatch =
+            p.ownerId === user.uid ||
+            (p.ownerEmail && user.email && normalizeKey(p.ownerEmail) === normalizeKey(user.email));
+          const teamMembers = (p as any).teamMembers as { userId?: string; email?: string }[] | undefined;
+          const teamMatch = (teamMembers || []).some(
+            (m) =>
+              (m.userId && m.userId === user.uid) ||
+              (m.email && user.email && normalizeKey(m.email) === normalizeKey(user.email))
+          );
+          return ownerMatch || teamMatch;
+        });
+        const activeProjects = projectsForUser
+          .filter(isProjectActive)
+          .sort((a, b) => {
+            const aTime = a.updatedAt?.seconds || 0;
+            const bTime = b.updatedAt?.seconds || 0;
+            return bTime - aTime;
+          })
+          .map((p) => ({
+            ...p,
+            name: (p as any).name || (p as any).title || "פרויקט ללא שם",
+            summary: (p as any).summary || (p as any).description || "",
+          }));
+        setProjects(activeProjects);
+        setLoadingProjects(false);
         const myCreatedEvents = allEventsData.filter(e =>
           e.createdBy === user.uid ||
           (e.createdByEmail && user.email && normalizeKey(e.createdByEmail) === normalizeKey(user.email))
@@ -367,53 +583,63 @@ export default function Dashboard() {
         let tasksInMyEvents = 0;
 
         const eventLookup = new Map(allEventsData.map(e => [e.id, e]));
+        const projectLookup = new Map(allProjectsData.map(p => [p.id, p]));
+
+        const isTaskAssignedToCurrentUser = (task: any) => {
+          const uid = user.uid;
+          const emailNorm = normalizeKey(user.email);
+          const assigneeEmailNorm = normalizeKey(task.assigneeEmail) || normalizeKey(task.assignee);
+          const assigneesArr: { userId?: string; email?: string }[] = Array.isArray(task.assignees) ? task.assignees : [];
+          const hasUid = uid && (
+            (task.assigneeId && task.assigneeId === uid) ||
+            assigneesArr.some(a => a.userId && a.userId === uid)
+          );
+          const hasEmail = emailNorm && (
+            assigneeEmailNorm === emailNorm ||
+            assigneesArr.some(a => normalizeKey(a.email) === emailNorm)
+          );
+          return Boolean(hasUid || hasEmail);
+        };
 
         tasksSnapshot.forEach(doc => {
           const taskData = doc.data();
+          const isProjectTask = isProjectTaskRef(doc.ref);
+          const scope: "event" | "project" = isProjectTask ? "project" : "event";
           const eventId = doc.ref.parent.parent?.id || "";
-          const event = eventLookup.get(eventId);
-          if (!event) return;
-          if (myEventIds.has(eventId)) {
+          let container = isProjectTask ? projectLookup.get(eventId) : eventLookup.get(eventId);
+          if (!container && isProjectTask) {
+            container = { id: eventId, name: taskData.eventTitle || taskData.title || "פרויקט" } as any;
+          }
+          if (!container) return;
+          if (!isProjectTask && isEventDeletedFlag(container)) return;
+          if (scope === "event" && myEventIds.has(eventId)) {
             tasksInMyEvents += 1;
           }
 
-          const assigneeStr = (taskData.assignee || "").toLowerCase();
-          const assigneeId = taskData.assigneeId as string | undefined;
-          const assigneesArr = (taskData.assignees as { name: string; userId?: string; email?: string }[] | undefined) ||
-            (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId, email: (taskData as any).assigneeEmail }] : []);
+          const match = matchAssignee({
+            taskData,
+            userId: user.uid,
+            userName,
+            userEmail,
+          });
           const mentionsArr = (taskData.lastMessageMentions as { name?: string; userId?: string; email?: string }[] | undefined) || [];
-          const isAssigned =
-            (assigneeId && assigneeId === user.uid) ||
-            assigneesArr.some(a => a.userId && a.userId === user.uid) ||
-            assigneesArr.some(a => a.email && userEmail && a.email.toLowerCase() === userEmail.toLowerCase()) ||
-            (assigneeStr && (
-              (userName && assigneeStr.includes(userName.toLowerCase())) ||
-              (userEmail && assigneeStr.includes(userEmail.split('@')[0].toLowerCase())) ||
-              assigneeStr === "אני"
-            )) ||
-            assigneesArr.some(a => {
-              const nameLower = (a.name || "").toLowerCase();
-              return (userName && nameLower.includes(userName.toLowerCase())) ||
-                (userEmail && nameLower.includes(userEmail.split('@')[0].toLowerCase())) ||
-                nameLower === "אני";
-            });
-          const isMentioned = mentionsArr.some(m =>
-            (m.userId && m.userId === user.uid) ||
-            (m.email && userEmail && m.email.toLowerCase() === userEmail.toLowerCase())
-          );
+          const containerTitle = scope === "project"
+            ? (container as any)?.name || (container as any)?.title || taskData.eventTitle || "פרויקט"
+            : (container as any)?.title || taskData.eventTitle || "אירוע לא ידוע";
 
-          if (isAssigned || isMentioned) {
+          if (match.isAssigned || match.isMentioned) {
             notifTasks.push({
               id: doc.id,
               title: taskData.title,
               dueDate: taskData.dueDate,
               priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
               assignee: taskData.assignee,
-              assigneeId,
-              assignees: assigneesArr,
+              assigneeId: match.assigneeId,
+              assignees: match.assigneesArr,
               status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
-              eventId: eventId,
-              eventTitle: event?.title || "אירוע לא ידוע",
+              eventId,
+              eventTitle: containerTitle,
+              scope,
               currentStatus: taskData.currentStatus || "",
               nextStep: taskData.nextStep || "",
               lastMessageTime: taskData.lastMessageTime || null,
@@ -424,7 +650,11 @@ export default function Dashboard() {
             } as Task);
           }
 
-          const isAssignedToUser = taskData.status !== "DONE" && isAssigned;
+          const isAssignedToUser = taskData.status !== "DONE" && isTaskAssignedToCurrentUser({
+            ...taskData,
+            assignees: match.assigneesArr,
+            assigneeEmail: (taskData as any).assigneeEmail || (match.assigneesArr[0]?.email) || taskData.assigneeEmail,
+          });
 
           if (isAssignedToUser) {
             userTasks.push({
@@ -433,11 +663,13 @@ export default function Dashboard() {
               dueDate: taskData.dueDate,
               priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
               assignee: taskData.assignee,
-              assigneeId,
-              assignees: assigneesArr,
+              assigneeId: match.assigneeId,
+              assigneeEmail: (taskData as any).assigneeEmail || (match.assigneesArr[0]?.email) || "",
+              assignees: match.assigneesArr,
               status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
-              eventId: eventId,
-              eventTitle: event?.title || "אירוע לא ידוע",
+              eventId,
+              eventTitle: containerTitle,
+              scope,
               currentStatus: taskData.currentStatus || "",
               nextStep: taskData.nextStep || "",
               lastMessageTime: taskData.lastMessageTime || null,
@@ -498,12 +730,12 @@ export default function Dashboard() {
 
         // Fetch volunteers from all events
         try {
-          const volunteersData: { id: string; name?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project" }[] = [];
+          const volunteersData: { id: string; name?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project"; program?: string; year?: string; idNumber?: string }[] = [];
           const eventTitleMap = new Map(allEventsData.map(e => [e.id, e.title || "אירוע ללא שם"]));
           const projectTitleMap = new Map(allProjectsData.map(p => [p.id, (p as any).name || (p as any).title || "פרויקט ללא שם"]));
           const seenVolunteers = new Set<string>();
           const addVolunteer = (volDoc: any, eventId: string, volData: any, eventTitle?: string, scope: "event" | "project" = "event") => {
-            const key = `${eventId}-${volDoc.id}`;
+            const key = `${scope}-${eventId}-${volDoc.id}`;
             if (seenVolunteers.has(key)) return;
             seenVolunteers.add(key);
 
@@ -526,12 +758,17 @@ export default function Dashboard() {
             volunteersData.push({
               id: volDoc.id,
               name: volunteerName,
+              firstName: volData.firstName,
+              lastName: volData.lastName,
               email: volData.email || "",
               phone: volData.phone || "",
               eventId: eventId,
               eventTitle: eventTitleMap.get(eventId) || projectTitleMap.get(eventId) || eventTitle || (scope === "project" ? "פרויקט ללא שם" : "אירוע ללא שם"),
               createdAt: volData.createdAt,
               scope,
+              program: volData.program || "",
+              year: volData.year || "",
+              idNumber: volData.idNumber || "",
             });
           };
 
@@ -633,6 +870,7 @@ export default function Dashboard() {
         setUsersError("שגיאה בטעינת משתמשים");
       } finally {
         setLoadingEvents(false);
+        setLoadingProjects(false);
         setLoadingTasks(false);
         setLoadingStats(false);
         setLoadingUsers(false);
@@ -645,6 +883,42 @@ export default function Dashboard() {
       fetchData();
     }
   }, [user]);
+
+  // Load completion approval requests for task owners
+  useEffect(() => {
+    if (!db || !user) {
+      setCompletionRequests([]);
+      setShowRequestsModal(false);
+      return;
+    }
+    const normEmail = (user.email || "").trim().toLowerCase();
+    const unsubscribers: (() => void)[] = [];
+    const mergeAndSet = (snapArr: any[]) => {
+      const map = new Map<string, any>();
+      snapArr.forEach(s => s.forEach((d: any) => map.set(d.id, d)));
+      const arr = Array.from(map.values());
+      setCompletionRequests(arr);
+      setShowRequestsModal(arr.length > 0);
+    };
+    const snaps: any[] = [];
+    const q1 = query(collection(db, "task_completion_requests"), where("status", "==", "PENDING"), where("ownerId", "==", user.uid));
+    const unsub1 = onSnapshot(q1, (snap) => {
+      snaps[0] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      mergeAndSet(snaps);
+    });
+    unsubscribers.push(unsub1);
+    if (normEmail) {
+      const q2 = query(collection(db, "task_completion_requests"), where("status", "==", "PENDING"), where("ownerEmail", "==", normEmail));
+      const unsub2 = onSnapshot(q2, (snap) => {
+        snaps[1] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        mergeAndSet(snaps);
+      });
+      unsubscribers.push(unsub2);
+    }
+    return () => {
+      unsubscribers.forEach(u => u && u());
+    };
+  }, [db, user]);
 
   // Filter and sort tasks
   let filteredTasks = myTasks.filter(task => {
@@ -708,7 +982,9 @@ export default function Dashboard() {
     e.preventDefault();
     if (!db || !editingTask) return;
     try {
-      const taskRef = doc(db, "events", editingTask.eventId, "tasks", editingTask.id);
+      const taskRef = editingTask.scope === "project"
+        ? doc(db, "projects", editingTask.eventId, "tasks", editingTask.id)
+        : doc(db, "events", editingTask.eventId, "tasks", editingTask.id);
       await updateDoc(taskRef, {
         title: editingTask.title,
         dueDate: editingTask.dueDate,
@@ -732,7 +1008,9 @@ export default function Dashboard() {
     if (!taskToComplete) return;
 
     try {
-      const taskRef = doc(db, "events", taskToComplete.eventId, "tasks", deletingTaskId);
+      const taskRef = taskToComplete.scope === "project"
+        ? doc(db, "projects", taskToComplete.eventId, "tasks", deletingTaskId)
+        : doc(db, "events", taskToComplete.eventId, "tasks", deletingTaskId);
       await updateDoc(taskRef, { status: "DONE" });
 
       // Remove from local view (DONE tasks are hidden)
@@ -748,7 +1026,9 @@ export default function Dashboard() {
     if (!db) return;
 
     try {
-      const taskRef = doc(db, "events", task.eventId, "tasks", task.id);
+      const taskRef = task.scope === "project"
+        ? doc(db, "projects", task.eventId, "tasks", task.id)
+        : doc(db, "events", task.eventId, "tasks", task.id);
       await updateDoc(taskRef, {
         status: "DONE"
       });
@@ -830,6 +1110,102 @@ export default function Dashboard() {
     }
   };
 
+  const loadVolunteerTasks = async (vol: { email?: string; name?: string }) => {
+    if (!db || !vol.email) {
+      setVolTasksPending([]);
+      setVolTasksDone([]);
+      setVolTasksHours(0);
+      setVolTasksError("לא נמצא אימייל למתנדב, לכן לא ניתן לטעון משימות.");
+      return;
+    }
+    setVolTasksError(null);
+    const emailLower = vol.email.trim().toLowerCase();
+    setLoadingVolTasks(true);
+    try {
+      const tasksSnap = await getDocs(collectionGroup(db, "tasks"));
+      const pending: Task[] = [];
+      const done: Task[] = [];
+      let hours = 0;
+
+      tasksSnap.forEach((docSnap) => {
+        const data = docSnap.data() as any;
+        const assignees = (data.assignees as { name?: string; email?: string; userId?: string }[] | undefined) || [];
+        const assigneeEmail = (data.assigneeEmail || "").toString().toLowerCase();
+        const match = assignees.some(a => (a.email || "").toLowerCase() === emailLower) || (assigneeEmail && assigneeEmail === emailLower);
+        if (!match) return;
+        const scope: "event" | "project" = docSnap.ref.parent.parent?.path?.includes("/projects/") ? "project" : "event";
+        const parentId = docSnap.ref.parent.parent?.id || "";
+        const task: Task = {
+          id: docSnap.id,
+          title: data.title || "משימה",
+          description: data.description,
+          assignee: data.assignee || assignees[0]?.name || "",
+          assigneeId: data.assigneeId,
+          assignees: assignees,
+          status: data.status || "TODO",
+          dueDate: data.dueDate,
+          priority: data.priority || "NORMAL",
+          currentStatus: data.currentStatus,
+          nextStep: data.nextStep,
+          eventId: parentId,
+          eventTitle: data.eventTitle || (scope === "project" ? "פרויקט" : "אירוע"),
+          scope,
+          volunteerHours: data.volunteerHours ?? null,
+        };
+        if (task.status === "DONE") {
+          done.push(task);
+          const h = Number(task.volunteerHours);
+          if (Number.isFinite(h) && h > 0) hours += h;
+        } else {
+          pending.push(task);
+        }
+      });
+
+      const completionsSnap = await getDocs(query(
+        collection(db, "volunteer_completions"),
+        where("email", "==", emailLower)
+      ));
+      const seenDone = new Set(done.map(t => t.id));
+      completionsSnap.forEach(c => {
+        const d = c.data() as any;
+        const taskId = d.taskId || "";
+        if (!taskId || seenDone.has(taskId)) return;
+        seenDone.add(taskId);
+        const scope: "event" | "project" = (d.eventId || "").startsWith("proj-") || (d.eventId || "").startsWith("project-") ? "project" : "event";
+        const task: Task = {
+          id: taskId,
+          title: d.taskTitle || "משימה",
+          description: "",
+          assignee: vol.name || "",
+          assigneeId: "",
+          assignees: [{ name: vol.name || "", email: vol.email }],
+          status: "DONE",
+          dueDate: "",
+          priority: "NORMAL",
+          eventId: d.eventId || "",
+          eventTitle: d.eventTitle || "אירוע/פרויקט",
+          scope,
+          volunteerHours: d.volunteerHours ?? null,
+        };
+        done.push(task);
+        const h = Number(task.volunteerHours);
+        if (Number.isFinite(h) && h > 0) hours += h;
+      });
+
+      setVolTasksPending(pending);
+      setVolTasksDone(done);
+      setVolTasksHours(hours);
+    } catch (err) {
+      console.error("Failed loading volunteer tasks", err);
+      setVolTasksPending([]);
+      setVolTasksDone([]);
+      setVolTasksHours(0);
+      setVolTasksError("שגיאה בטעינת המשימות למתנדב.");
+    } finally {
+      setLoadingVolTasks(false);
+    }
+  };
+
   const handleApproveJoinRequest = async (reqId: string) => {
     if (!db || !user) return;
     const req = incomingJoinRequests.find(r => r.id === reqId);
@@ -887,6 +1263,15 @@ export default function Dashboard() {
     return date.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
   };
 
+  const formatProjectDueDate = (dueDate: any) => {
+    if (!dueDate) return "";
+    if (typeof dueDate === "string") return dueDate;
+    if (dueDate?.seconds) {
+      return new Date(dueDate.seconds * 1000).toLocaleDateString("he-IL");
+    }
+    return "";
+  };
+
   const handleUpdateEventField = async (eventId: string, field: "startTime" | "location" | "participantsCount" | "status") => {
     if (!db) return;
     const event = events.find(e => e.id === eventId);
@@ -929,6 +1314,15 @@ export default function Dashboard() {
     }
   };
 
+  const deleteAllTasksFor = async (type: "events" | "projects", id: string) => {
+    try {
+      const tasksSnap = await getDocs(collection(db!, type, id, "tasks"));
+      await Promise.all(tasksSnap.docs.map(d => deleteDoc(d.ref).catch(err => console.error("Error deleting task doc", err))));
+    } catch (err) {
+      console.error(`Error deleting tasks for ${type}/${id}`, err);
+    }
+  };
+
   const handleDeleteEvent = async (eventId: string) => {
     if (!db || !user) return;
     const ev = events.find(e => e.id === eventId);
@@ -942,11 +1336,7 @@ export default function Dashboard() {
       return;
     }
     try {
-      if (deleteEventRemoveTasks) {
-        const tasksSnap = await getDocs(collection(db, "events", eventId, "tasks"));
-        const deletes = tasksSnap.docs.map(d => deleteDoc(d.ref).catch(err => console.error("Error deleting task doc", err)));
-        await Promise.all(deletes);
-      }
+      await deleteAllTasksFor("events", eventId);
       await deleteDoc(doc(db, "events", eventId));
       setEvents(prev => prev.filter(e => e.id !== eventId));
       setMyTasks(prev => prev.filter(t => t.eventId !== eventId));
@@ -956,6 +1346,33 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Error deleting event:", err);
       alert("שגיאה במחיקת האירוע");
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    if (!db || !user) return;
+    const proj = projects.find(p => p.id === projectId);
+    if (!proj || !isProjectOwner(proj, user)) {
+      alert("רק יוצר הפרויקט יכול למחוק אותו.");
+      setConfirmingProjectId(null);
+      return;
+    }
+    try {
+      await deleteAllTasksFor("projects", projectId);
+      await deleteDoc(doc(db, "projects", projectId));
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+      setProjectIndex(prev => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setMyTasks(prev => prev.filter(t => !(t.scope === "project" && t.eventId === projectId)));
+      setNotificationTasks(prev => prev.filter(t => !(t.scope === "project" && t.eventId === projectId)));
+    } catch (err) {
+      console.error("Error deleting project:", err);
+      alert("שגיאה במחיקת הפרויקט");
+    } finally {
+      setConfirmingProjectId(null);
     }
   };
 
@@ -1034,6 +1451,39 @@ export default function Dashboard() {
     }
   };
 
+  const handleApproveCompletion = async (req: any, approve: boolean) => {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, "task_completion_requests", req.id), { status: approve ? "APPROVED" : "REJECTED", respondedAt: serverTimestamp() });
+      const taskRef = req.scope === "project"
+        ? doc(db, "projects", req.eventId, "tasks", req.taskId)
+        : doc(db, "events", req.eventId, "tasks", req.taskId);
+      if (!approve) {
+        await updateDoc(taskRef, { status: "TODO", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "REJECTED" });
+      } else {
+        await updateDoc(taskRef, { status: "DONE", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "APPROVED" });
+        await addDoc(collection(db, "volunteer_completions"), {
+          email: req.volunteerEmail,
+          name: req.volunteerName,
+          eventId: req.eventId,
+          eventTitle: req.eventTitle || "",
+          taskId: req.taskId,
+          taskTitle: req.taskTitle || "משימה",
+          volunteerHours: req.volunteerHours ?? null,
+          completedAt: serverTimestamp(),
+        });
+      }
+      setCompletionRequests(prev => {
+        const next = prev.filter(r => r.id !== req.id);
+        if (next.length === 0) setShowRequestsModal(false);
+        return next;
+      });
+    } catch (err) {
+      console.error("Failed handling completion approval", err);
+      alert("שגיאה בעדכון סטטוס המשימה");
+    }
+  };
+
   if (loading) return <div className="p-8 text-center">טוען...</div>;
   if (!user) return null;
 
@@ -1103,6 +1553,48 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Completion Approval Modal */}
+      {showRequestsModal && completionRequests.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">אישורי משימות ממתנדבים</h3>
+              <button onClick={() => setShowRequestsModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {completionRequests.map((req) => (
+                <div key={req.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-gray-900">{req.taskTitle || "משימה"}</p>
+                      <p className="text-sm text-gray-600">אירוע/פרויקט: {req.eventTitle || req.eventId}</p>
+                      <p className="text-sm text-gray-600">מתנדב: {req.volunteerName || req.volunteerEmail}</p>
+                    </div>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">{req.scope === "project" ? "פרויקט" : "אירוע"}</span>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => handleApproveCompletion(req, true)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
+                    >
+                      אשר ביצוע
+                    </button>
+                    <button
+                      onClick={() => handleApproveCompletion(req, false)}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+                    >
+                      דחה
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Event Delete Confirmation Modal */}
       {confirmingEventId && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1131,6 +1623,32 @@ export default function Dashboard() {
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
               >
                 מחק אירוע
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Project Delete Confirmation Modal */}
+      {confirmingProjectId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">אישור מחיקת פרויקט</h3>
+            <p className="text-gray-600 mb-6">
+              למחוק את הפרויקט הזה? המשימות שלו יימחקו והרשימות יוסרו ממסך הבית.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmingProjectId(null)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={() => handleDeleteProject(confirmingProjectId)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
+              >
+                מחק פרויקט
               </button>
             </div>
           </div>
@@ -1194,7 +1712,9 @@ export default function Dashboard() {
               e.preventDefault();
               if (!db || !editingStatusTask) return;
               try {
-                const taskRef = doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id);
+                const taskRef = editingStatusTask.scope === "project"
+                  ? doc(db, "projects", editingStatusTask.eventId, "tasks", editingStatusTask.id)
+                  : doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id);
                 await updateDoc(taskRef, {
                   currentStatus: editingStatusTask.currentStatus || "",
                   nextStep: editingStatusTask.nextStep || "",
@@ -1317,6 +1837,7 @@ export default function Dashboard() {
                     nextStep={task.nextStep}
                     eventId={task.eventId}
                     eventTitle={task.eventTitle}
+                    scope={task.scope}
                     onEdit={() => setEditingTask(task)}
                     onDelete={() => setDeletingTaskId(task.id)}
                     onStatusChange={async (newStatus) => {
@@ -1326,7 +1847,9 @@ export default function Dashboard() {
                         // Update status for other transitions
                         if (!db) return;
                         try {
-                          const taskRef = doc(db, "events", task.eventId, "tasks", task.id);
+                          const taskRef = task.scope === "project"
+                            ? doc(db, "projects", task.eventId, "tasks", task.id)
+                            : doc(db, "events", task.eventId, "tasks", task.id);
                           await updateDoc(taskRef, { status: newStatus });
                           setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
                         } catch (err) {
@@ -1339,12 +1862,14 @@ export default function Dashboard() {
                     onEditStatus={(t) => setEditingStatusTask({
                       ...t,
                       eventId: t.eventId || "",
-                      eventTitle: t.eventTitle || ""
+                      eventTitle: t.eventTitle || "",
+                      scope: task.scope
                     } as Task)}
                     onEditDate={(t) => setEditingDateTask({
                       ...t,
                       eventId: t.eventId || "",
-                      eventTitle: t.eventTitle || ""
+                      eventTitle: t.eventTitle || "",
+                      scope: task.scope
                     } as Task)}
                     onManageAssignees={() => {
                       // מוביל למסך פרטי המשימה עם רמז אירוע כדי לאפשר תיוג גם במובייל
@@ -1370,7 +1895,7 @@ export default function Dashboard() {
               אין אירועים פעילים.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
               {events.map((event) => (
                 <div
                   key={event.id}
@@ -1439,6 +1964,76 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Active Projects Section */}
+      <div className="mt-8 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <FolderKanban style={{ color: 'var(--patifon-orange)' }} />
+            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>פרויקטים פעילים</h2>
+          </div>
+          <Link
+            href="/projects?openForm=1"
+            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 transition"
+            title="פתיחת פרויקט חדש עם אותו טופס של האדמין"
+          >
+            <Plus size={16} />
+            פתיחת פרויקט חדש
+          </Link>
+        </div>
+        {loadingProjects ? (
+          <div className="text-gray-500 text-center py-8">טוען פרויקטים...</div>
+        ) : projects.length === 0 ? (
+          <div className="text-gray-500 text-center py-8">אין פרויקטים פעילים עבורך כרגע.</div>
+        ) : (
+          <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+            {projects.map((project) => (
+              <div
+                key={project.id}
+                className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+              >
+                <Link href={`/projects/${project.id}`} className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-900 truncate">{project.name || "פרויקט ללא שם"}</h3>
+                    {project.status && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        {project.status}
+                      </span>
+                    )}
+                  </div>
+                  {project.summary && (
+                    <p className="text-sm text-gray-600 mt-1 truncate" title={project.summary}>
+                      {project.summary}
+                    </p>
+                  )}
+                  <div className="mt-2 flex items-center gap-3 text-xs text-gray-600 flex-wrap">
+                    {project.goal && <span className="truncate" title={project.goal}>מטרה: {project.goal}</span>}
+                    {formatProjectDueDate(project.dueDate) && (
+                      <span className="flex items-center gap-1">
+                        <Calendar size={14} className="shrink-0" />
+                        יעד: {formatProjectDueDate(project.dueDate)}
+                      </span>
+                    )}
+                  </div>
+                </Link>
+                {isProjectOwner(project, user) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setConfirmingProjectId(project.id);
+                    }}
+                    className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
+                    title="מחק פרויקט"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Team Meeting Notes */}
@@ -1537,8 +2132,13 @@ export default function Dashboard() {
           onClick={() => setActivePanel(prev => prev === "volunteers" ? null : "volunteers")}
           className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "volunteers" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
         >
-          <UserPlus size={18} />
-          מתנדבים רשומים
+          <div className="relative flex items-center gap-2">
+            <UserPlus size={18} />
+            {completionRequests.length > 0 && (
+              <span className="absolute -top-1 -right-2 h-3 w-3 rounded-full bg-red-500"></span>
+            )}
+            <span>מתנדבים רשומים</span>
+          </div>
         </button>
         <button
           onClick={() => setActivePanel(prev => prev === "notifications" ? null : "notifications")}
@@ -1700,6 +2300,45 @@ export default function Dashboard() {
               {volunteersList.length}
             </span>
           </div>
+          {completionRequests.length > 0 && (
+            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Bell className="text-amber-700" size={18} />
+                  <h3 className="font-semibold text-amber-900">בקשות לאישור משימות</h3>
+                </div>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white border border-amber-200 text-amber-800">{completionRequests.length}</span>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {completionRequests.map((req) => (
+                  <div key={req.id} className="border border-amber-200 rounded-lg p-3 bg-white">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 truncate">{req.taskTitle || "משימה"}</p>
+                        <p className="text-sm text-gray-600 truncate">אירוע/פרויקט: {req.eventTitle || req.eventId}</p>
+                        <p className="text-sm text-gray-600 truncate">מתנדב: {req.volunteerName || req.volunteerEmail}</p>
+                      </div>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">{req.scope === "project" ? "פרויקט" : "אירוע"}</span>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => handleApproveCompletion(req, true)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
+                      >
+                        אשר ביצוע
+                      </button>
+                      <button
+                        onClick={() => handleApproveCompletion(req, false)}
+                        className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+                      >
+                        דחה
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {loadingVolunteers ? (
             <div className="text-gray-500 text-center py-6">טוען מתנדבים...</div>
           ) : volunteersList.length === 0 ? (
@@ -1711,7 +2350,11 @@ export default function Dashboard() {
                   const regDate = vol.createdAt?.seconds ? new Date(vol.createdAt.seconds * 1000) : null;
                   const deletingKey = `${vol.scope || "event"}-${vol.eventId}-${vol.id}`;
                   return (
-                    <div key={`${vol.scope || "event"}-${vol.eventId}-${vol.id}`} className="p-3 border border-gray-200 rounded-lg bg-white">
+                    <div
+                      key={`${vol.scope || "event"}-${vol.eventId}-${vol.id}`}
+                      className="p-3 border border-gray-200 rounded-lg bg-white cursor-pointer hover:border-indigo-200"
+                      onClick={() => { setViewVolunteer(vol); loadVolunteerTasks(vol); }}
+                    >
                       <div className="flex items-start gap-3 justify-between">
                         <div className="flex items-start gap-3 min-w-0 flex-1">
                           <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream-dark)' }}>
@@ -1842,6 +2485,97 @@ export default function Dashboard() {
         </div>
       )}
 
+      {viewVolunteer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-3xl p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">
+                  {viewVolunteer.name || `${viewVolunteer.firstName || ""} ${viewVolunteer.lastName || ""}`.trim() || "מתנדב"}
+                </h3>
+                <p className="text-sm text-gray-600">{viewVolunteer.email || ""}</p>
+                {viewVolunteer.phone && <p className="text-sm text-gray-600">טלפון: {viewVolunteer.phone}</p>}
+                {viewVolunteer.firstName && <p className="text-sm text-gray-600">שם פרטי: {viewVolunteer.firstName}</p>}
+                {viewVolunteer.lastName && <p className="text-sm text-gray-600">שם משפחה: {viewVolunteer.lastName}</p>}
+                {viewVolunteer.program && <p className="text-sm text-gray-600">חוג/תחום לימוד: {viewVolunteer.program}</p>}
+                {viewVolunteer.year && <p className="text-sm text-gray-600">שנת לימודים: {viewVolunteer.year}</p>}
+                {viewVolunteer.idNumber && <p className="text-sm text-gray-600">ת.ז: {viewVolunteer.idNumber}</p>}
+              </div>
+              <button
+                onClick={() => { setViewVolunteer(null); setVolTasksPending([]); setVolTasksDone([]); setVolTasksHours(0); }}
+                className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {volTasksError && (
+                <div className="md:col-span-2 bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
+                  {volTasksError}
+                </div>
+              )}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-gray-900">משימות פתוחות</h4>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white border border-amber-200">{volTasksPending.length}</span>
+                </div>
+                {loadingVolTasks ? (
+                  <p className="text-sm text-gray-500">טוען...</p>
+                ) : volTasksPending.length === 0 ? (
+                  <p className="text-sm text-gray-500">אין משימות פתוחות.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {volTasksPending.map((t) => (
+                      <div key={t.id} className="p-2 rounded border border-gray-200 bg-white">
+                        <div className="flex items-center justify-between text-sm mb-1">
+                          <span className="font-semibold text-gray-900 truncate">{t.title}</span>
+                          <span className="text-xs text-gray-500">{t.eventTitle}</span>
+                        </div>
+                        {t.volunteerHours != null && <p className="text-xs text-gray-700">שעות משימה: {t.volunteerHours}</p>}
+                        {t.dueDate && <p className="text-xs text-gray-600">דד ליין: {t.dueDate}</p>}
+                        <p className="text-xs text-gray-600">סוג: {t.scope === "project" ? "פרויקט" : "אירוע"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-gray-900">משימות שהושלמו</h4>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white border border-green-200">{volTasksDone.length}</span>
+                </div>
+                {loadingVolTasks ? (
+                  <p className="text-sm text-gray-500">טוען...</p>
+                ) : volTasksDone.length === 0 ? (
+                  <p className="text-sm text-gray-500">אין משימות שהושלמו.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {volTasksDone.map((t) => (
+                      <div key={t.id} className="p-2 rounded border border-gray-200 bg-white">
+                        <div className="flex items-center justify-between text-sm mb-1">
+                          <span className="font-semibold text-gray-900 truncate">{t.title}</span>
+                          <span className="text-xs text-gray-500">{t.eventTitle}</span>
+                        </div>
+                        {t.volunteerHours != null && <p className="text-xs text-gray-700">שעות משימה: {t.volunteerHours}</p>}
+                        <p className="text-xs text-gray-600">סוג: {t.scope === "project" ? "פרויקט" : "אירוע"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-indigo-800">
+                סה״כ שעות שצבר: {volTasksHours}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmDeleteVolunteer && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
@@ -1967,7 +2701,9 @@ export default function Dashboard() {
               e.preventDefault();
               if (!db || !editingDateTask) return;
               try {
-                const taskRef = doc(db, "events", editingDateTask.eventId, "tasks", editingDateTask.id);
+                const taskRef = editingDateTask.scope === "project"
+                  ? doc(db, "projects", editingDateTask.eventId, "tasks", editingDateTask.id)
+                  : doc(db, "events", editingDateTask.eventId, "tasks", editingDateTask.id);
                 await updateDoc(taskRef, {
                   dueDate: editingDateTask.dueDate,
                 });

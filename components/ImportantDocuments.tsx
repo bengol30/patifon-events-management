@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, updateDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
@@ -21,6 +21,10 @@ interface Document {
     fileUrl?: string;
     fileName?: string;
     createdAt: any;
+}
+
+interface ImportantDocumentsProps {
+    focusDocumentId?: string;
 }
 
 const PREDEFINED_CATEGORIES = [
@@ -86,10 +90,11 @@ const PREDEFINED_CATEGORIES = [
     }
 ];
 
-export default function ImportantDocuments() {
+export default function ImportantDocuments({ focusDocumentId }: ImportantDocumentsProps) {
     const [categories, setCategories] = useState<DocumentCategory[]>([]);
     const [documents, setDocuments] = useState<Document[]>([]);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+    const autoOpenedDocumentId = useRef<string | null>(null);
 
     // Modals
     const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -278,6 +283,22 @@ export default function ImportantDocuments() {
         return documents.filter(d => d.categoryId === categoryId);
     };
 
+    useEffect(() => {
+        if (!focusDocumentId || documents.length === 0) return;
+        if (autoOpenedDocumentId.current === focusDocumentId) return;
+        const targetDoc = documents.find(doc => doc.id === focusDocumentId);
+        if (!targetDoc) return;
+
+        autoOpenedDocumentId.current = focusDocumentId;
+        setExpandedCategories(prev => {
+            if (prev.has(targetDoc.categoryId)) return prev;
+            const next = new Set(prev);
+            next.add(targetDoc.categoryId);
+            return next;
+        });
+        handleEditDocument(targetDoc);
+    }, [focusDocumentId, documents]);
+
     const handleSeedDefaults = async () => {
         if (!db) return;
         setShowSeedModal(false);
@@ -406,14 +427,15 @@ export default function ImportantDocuments() {
                                                     key={document.id}
                                                     role="button"
                                                     tabIndex={0}
-                                                    onClick={() => handleOpenDocument(document.fileUrl)}
+                                                    onClick={() => handleEditDocument(document)}
                                                     onKeyDown={(e) => {
                                                         if (e.key === "Enter" || e.key === " ") {
                                                             e.preventDefault();
-                                                            handleOpenDocument(document.fileUrl);
+                                                            handleEditDocument(document);
                                                         }
                                                     }}
-                                                    className={`flex items-center justify-between p-3 border border-gray-100 rounded-lg transition group ${document.fileUrl ? "hover:bg-gray-50 cursor-pointer" : "cursor-default"}`}
+                                                    className="flex items-center justify-between p-3 border border-gray-100 rounded-lg transition group hover:bg-gray-50 cursor-pointer"
+                                                    title="פתח לעריכת המסמך והעלאת קובץ"
                                                 >
                                                     <div className="flex items-center gap-3 flex-1">
                                                         <FileText className="text-gray-400" size={18} />
@@ -434,26 +456,26 @@ export default function ImportantDocuments() {
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
                                                                 className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
-                                                                title="פתח קישור"
+                                                                title="הורד/צפה בקובץ"
                                                                 onClick={(e) => e.stopPropagation()}
                                                             >
                                                                 <Download size={16} />
                                                             </a>
                                                         )}
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); handleEditDocument(document); }}
-                                                            className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                                                            title="ערוך"
-                                                        >
-                                                            <Edit2 size={16} />
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); handleDeleteDocument(document.id); }}
-                                                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                                                            title="מחק"
-                                                        >
-                                                            <Trash2 size={16} />
-                                                        </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleEditDocument(document); }}
+                                                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                                                        title="ערוך"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDeleteDocument(document.id); }}
+                                                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                                                        title="מחק"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
                                                     </div>
                                                 </div>
                                             ))

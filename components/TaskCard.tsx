@@ -28,6 +28,8 @@ interface TaskProps {
     onEditDate?: (task: TaskProps) => void;
     previewImage?: string;
     createdByName?: string;
+    onOpen?: () => void;
+    scope?: "event" | "project";
 }
 
 export default function TaskCard({
@@ -55,6 +57,8 @@ export default function TaskCard({
     onEditDate,
     previewImage,
     createdByName,
+    onOpen,
+    scope,
 }: TaskProps) {
     const router = useRouter();
 
@@ -85,7 +89,7 @@ export default function TaskCard({
             onEditStatus({
                 id, title, description, assignee, status, dueDate, priority,
                 isSelected, onSelect, onDelete, onEdit, onStatusChange,
-                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate
+                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate, scope
             });
         }
     };
@@ -96,12 +100,16 @@ export default function TaskCard({
             onEditDate({
                 id, title, description, assignee, status, dueDate, priority,
                 isSelected, onSelect, onDelete, onEdit, onStatusChange,
-                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate
+                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate, scope
             });
         }
     };
 
     const handleCardClick = () => {
+        if (onOpen) {
+            onOpen();
+            return;
+        }
         if (eventId) {
             router.push(`/tasks/${id}?eventId=${eventId}`);
         } else {

@@ -199,6 +199,9 @@ export default function EventDetailsPage() {
     const [editingDateTask, setEditingDateTask] = useState<Task | null>(null);
     const [taggingTask, setTaggingTask] = useState<Task | null>(null);
     const [tagSelection, setTagSelection] = useState<Assignee[]>([]);
+    const [tagSearch, setTagSearch] = useState("");
+    const [newTaskSearch, setNewTaskSearch] = useState("");
+    const [editTaskSearch, setEditTaskSearch] = useState("");
 
     const getAssigneeKey = (assignee?: Assignee | null) => {
         if (!assignee) return "";
@@ -352,6 +355,7 @@ export default function EventDetailsPage() {
     const [volunteers, setVolunteers] = useState<EventVolunteer[]>([]);
     const [loadingVolunteers, setLoadingVolunteers] = useState(true);
     const [volunteerBusyId, setVolunteerBusyId] = useState<string | null>(null);
+    const [creatorName, setCreatorName] = useState("");
     const handleShareWhatsApp = (title: string, url?: string) => {
         if (!url) {
             alert("אין קישור לקובץ לשיתוף");
@@ -544,6 +548,30 @@ export default function EventDetailsPage() {
                 const enrichedTeam = await hydrateTeamNames(data.team || []);
                 setEvent({ ...data, team: enrichedTeam });
                 setSelectedProject((data as any).projectId || "");
+                // fetch creator name (prefers user profile by UID/email)
+                const creatorUid = (data as any).createdBy;
+                const creatorEmail = (data as any).createdByEmail;
+                try {
+                    let name = "";
+                    if (creatorUid) {
+                        const userDoc = await getDoc(doc(db, "users", creatorUid));
+                        if (userDoc.exists()) {
+                            const u = userDoc.data() as any;
+                            name = u.fullName || u.name || u.displayName || u.email || "";
+                        }
+                    }
+                    if (!name && creatorEmail) {
+                        const matchByEmail = await getDocs(query(collection(db, "users"), where("email", "==", creatorEmail)));
+                        const found = matchByEmail.docs[0];
+                        if (found?.exists()) {
+                            const u = found.data() as any;
+                            name = u.fullName || u.name || u.displayName || u.email || "";
+                        }
+                    }
+                    setCreatorName(name || "");
+                } catch (creatorErr) {
+                    console.warn("Failed loading creator name", creatorErr);
+                }
             } else {
                 setError("האירוע לא נמצא");
             }
@@ -813,6 +841,7 @@ export default function EventDetailsPage() {
                     : null,
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
+                createdByEmail: user.email || "",
                 createdByName: user.displayName || user.email || "משתמש",
             });
             updateRepeatTaskStats(newTask.title);
@@ -857,6 +886,7 @@ export default function EventDetailsPage() {
                 volunteerHours: editingTask.isVolunteerTask
                     ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
                     : null,
+                createdByEmail: editingTask.createdByEmail || user?.email || "",
                 createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
             };
             await updateDoc(taskRef, updateData);
@@ -1792,13 +1822,28 @@ export default function EventDetailsPage() {
                     <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold">תיוג אחראים למשימה</h3>
-                            <button onClick={() => { setTaggingTask(null); setTagSelection([]); }} className="text-gray-400 hover:text-gray-600">
+                            <button onClick={() => { setTaggingTask(null); setTagSelection([]); setTagSearch(""); }} className="text-gray-400 hover:text-gray-600">
                                 <X size={20} />
                             </button>
                         </div>
-                        <p className="text-sm text-gray-600 mb-4">בחרו את אנשי הצוות למשימה "{taggingTask.title}". ניתן לבחור יותר מאחד.</p>
+                        <p className="text-sm text-gray-600 mb-2">בחרו את אנשי הצוות למשימה "{taggingTask.title}". ניתן לבחור יותר מאחד.</p>
+                        <div className="flex items-center justify-between mb-1">
+                            <label className="text-sm font-medium text-gray-700">תיוג/הקצאה</label>
+                            <span className="text-xs text-gray-500">{tagSelection.length} נבחרו</span>
+                        </div>
+                        <div className="mb-3">
+                            <input
+                                type="text"
+                                value={tagSearch}
+                                onChange={(e) => setTagSearch(e.target.value)}
+                                placeholder="חיפוש לפי שם"
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            />
+                        </div>
                         <div className="flex flex-wrap gap-2 mb-4">
-                            {event.team?.map((member, idx) => {
+                            {event.team
+                                ?.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase()))
+                                .map((member, idx) => {
                                 const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
                                 const checked = tagSelection.some(a => getAssigneeKey(a) === memberKey);
                                 return (
@@ -1812,13 +1857,13 @@ export default function EventDetailsPage() {
                                     </button>
                                 );
                             })}
-                            {(!event.team || event.team.length === 0) && (
+                            {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase())).length === 0)) && (
                                 <span className="text-sm text-gray-500">אין חברי צוות זמינים</span>
                             )}
                         </div>
                         <div className="flex justify-end gap-3">
                             <button
-                                onClick={() => { setTaggingTask(null); setTagSelection([]); }}
+                                onClick={() => { setTaggingTask(null); setTagSelection([]); setTagSearch(""); }}
                                 className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
                             >
                                 ביטול
@@ -1840,7 +1885,7 @@ export default function EventDetailsPage() {
                     <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 animate-in fade-in zoom-in-95 duration-200">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold">עריכת משימה</h3>
-                            <button onClick={() => setEditingTask(null)} className="text-gray-400 hover:text-gray-600">
+                            <button onClick={() => { setEditingTask(null); setEditTaskSearch(""); }} className="text-gray-400 hover:text-gray-600">
                                 <X size={20} />
                             </button>
                         </div>
@@ -1866,9 +1911,21 @@ export default function EventDetailsPage() {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">אחראים</label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-sm font-medium text-gray-700">תיוג/הקצאה</label>
+                                        <span className="text-xs text-gray-500">{editingTask.assignees?.length || 0} נבחרו</span>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={editTaskSearch}
+                                        onChange={(e) => setEditTaskSearch(e.target.value)}
+                                        placeholder="חיפוש לפי שם"
+                                        className="w-full p-2 border rounded-lg text-xs mb-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    />
                                     <div className="flex flex-wrap gap-2">
-                                        {event.team?.map((member, idx) => {
+                                        {event.team
+                                            ?.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase()))
+                                            .map((member, idx) => {
                                             const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
                                             const checked = editingTask.assignees?.some(a => getAssigneeKey(a) === memberKey);
                                             return (
@@ -1887,7 +1944,7 @@ export default function EventDetailsPage() {
                                                 </label>
                                             );
                                         })}
-                                        {(!event.team || event.team.length === 0) && (
+                                        {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase())).length === 0)) && (
                                             <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
                                         )}
                                     </div>
@@ -1999,6 +2056,9 @@ export default function EventDetailsPage() {
                     <div className="flex items-start justify-between gap-3">
                         <div className="space-y-3 w-full">
                             <h1 className="text-3xl font-bold leading-tight" style={{ color: 'var(--patifon-burgundy)' }}>{event.title}</h1>
+                            <p className="text-sm font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>
+                                יוצר האירוע: {creatorName || event.creatorName || event.createdByEmail || event.createdBy || "לא ידוע"}
+                            </p>
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" style={{ color: 'var(--patifon-orange)' }}>
                                 <div className="flex items-center gap-1">
                                     <MapPin size={16} />
@@ -2437,9 +2497,21 @@ export default function EventDetailsPage() {
                                 />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <div className="space-y-2">
-                                        <p className="text-xs font-semibold text-gray-600">אחראים</p>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <p className="text-xs font-semibold text-gray-600">תיוג/הקצאה</p>
+                                            <span className="text-xs text-gray-500">{newTask.assignees.length} נבחרו</span>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={newTaskSearch}
+                                            onChange={(e) => setNewTaskSearch(e.target.value)}
+                                            placeholder="חיפוש לפי שם"
+                                            className="w-full p-2 border rounded-lg text-xs mb-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        />
                                         <div className="flex flex-wrap gap-2">
-                                            {event.team?.map((member, idx) => {
+                                            {event.team
+                                                ?.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase()))
+                                                .map((member, idx) => {
                                                 const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
                                                 const checked = newTask.assignees.some(a => getAssigneeKey(a) === memberKey);
                                                 return (
@@ -2458,7 +2530,7 @@ export default function EventDetailsPage() {
                                                     </label>
                                                 );
                                             })}
-                                            {(!event.team || event.team.length === 0) && (
+                                            {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase())).length === 0)) && (
                                                 <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
                                             )}
                                         </div>
@@ -2623,6 +2695,9 @@ export default function EventDetailsPage() {
                                         status={task.status}
                                         dueDate={task.dueDate}
                                         priority={task.priority}
+                                        eventId={id}
+                                        eventTitle={event?.title}
+                                        scope={task.scope}
                                         createdByName={task.createdByName}
                                         onEdit={() => setEditingTask(task)}
                                         onDelete={() => confirmDeleteTask(task.id)}
@@ -2987,30 +3062,33 @@ export default function EventDetailsPage() {
                                             {importantDocs.slice(0, 6).map(doc => (
                                                 <div
                                                     key={doc.id}
-                                                    className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:shadow-md transition text-xs text-gray-700"
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={() => router.push(`/settings?tab=documents&docId=${doc.id}`)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === "Enter" || e.key === " ") {
+                                                            e.preventDefault();
+                                                            router.push(`/settings?tab=documents&docId=${doc.id}`);
+                                                        }
+                                                    }}
+                                                    className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:shadow-md transition text-xs text-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                    title="פתח למסך העלאה ועדכון פרטי המסמך"
                                                 >
-                                                    <a
-                                                        href={doc.fileUrl || "#"}
-                                                        target={doc.fileUrl ? "_blank" : undefined}
-                                                        rel="noreferrer"
-                                                        className="block"
-                                                    >
-                                                        <div className="h-20 bg-white flex items-center justify-center">
-                                                            {doc.fileUrl ? (
-                                                                <img
-                                                                    src={doc.fileUrl}
-                                                                    alt={doc.title}
-                                                                    className="w-full h-full object-cover"
-                                                                />
-                                                            ) : (
-                                                                <span className="text-gray-400">תצוגה לא זמינה</span>
-                                                            )}
-                                                        </div>
-                                                        <div className="px-2 py-2 truncate font-semibold">{doc.title || doc.fileName || "מסמך"}</div>
-                                                    </a>
+                                                    <div className="h-20 bg-white flex items-center justify-center">
+                                                        {doc.fileUrl ? (
+                                                            <img
+                                                                src={doc.fileUrl}
+                                                                alt={doc.title}
+                                                                className="w-full h-full object-cover"
+                                                            />
+                                                        ) : (
+                                                            <span className="text-gray-400">תצוגה לא זמינה</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="px-2 py-2 truncate font-semibold">{doc.title || doc.fileName || "מסמך"}</div>
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleShareWhatsApp(doc.title || doc.fileName || "מסמך", doc.fileUrl)}
+                                                        onClick={(e) => { e.stopPropagation(); handleShareWhatsApp(doc.title || doc.fileName || "מסמך", doc.fileUrl); }}
                                                         className="w-full text-indigo-600 hover:text-indigo-800 border-t border-gray-200 py-1 text-[11px] font-semibold flex items-center justify-center gap-1"
                                                     >
                                                         שיתוף בוואטסאפ

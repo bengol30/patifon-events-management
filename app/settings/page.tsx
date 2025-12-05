@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { auth, db } from "@/lib/firebase";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
@@ -105,8 +105,14 @@ const PREDEFINED_TASKS = [
 
 export default function SettingsPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { user, loading: authLoading } = useAuth();
-    const [activeTab, setActiveTab] = useState("defaultTasks");
+    const validTabs = ["defaultTasks", "documents", "account"] as const;
+    const getInitialTab = () => {
+        const tabParam = searchParams.get("tab");
+        return validTabs.includes((tabParam || "") as (typeof validTabs)[number]) ? (tabParam as (typeof validTabs)[number]) : "defaultTasks";
+    };
+    const [activeTab, setActiveTab] = useState<(typeof validTabs)[number]>(getInitialTab);
     const [defaultTasks, setDefaultTasks] = useState<DefaultTask[]>([]);
     const [loading, setLoading] = useState(true);
     const [profileName, setProfileName] = useState("");
@@ -136,6 +142,27 @@ export default function SettingsPage() {
         daysOffset: 0,
         assigneeRole: ""
     });
+
+    useEffect(() => {
+        const tabParam = searchParams.get("tab");
+        const normalized = validTabs.includes((tabParam || "") as (typeof validTabs)[number]) ? (tabParam as (typeof validTabs)[number]) : null;
+        if (normalized && normalized !== activeTab) {
+            setActiveTab(normalized);
+        }
+    }, [searchParams, activeTab]);
+
+    const handleTabChange = (tab: (typeof validTabs)[number]) => {
+        setActiveTab(tab);
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.set("tab", tab);
+        if (tab !== "documents") {
+            params.delete("docId");
+        }
+        const query = params.toString();
+        router.replace(query ? `/settings?${query}` : "/settings", { scroll: false });
+    };
+
+    const documentIdFromQuery = searchParams.get("docId") || undefined;
 
     useEffect(() => {
         if (!authLoading && !user) {
@@ -749,7 +776,7 @@ export default function SettingsPage() {
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 h-fit">
                         <nav className="space-y-1">
                             <button
-                                onClick={() => setActiveTab("defaultTasks")}
+                                onClick={() => handleTabChange("defaultTasks")}
                                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "defaultTasks"
                                     ? "bg-indigo-50 text-indigo-700"
                                     : "text-gray-600 hover:bg-gray-50"
@@ -759,7 +786,7 @@ export default function SettingsPage() {
                                 משימות קבועות
                             </button>
                             <button
-                                onClick={() => setActiveTab("documents")}
+                                onClick={() => handleTabChange("documents")}
                                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "documents"
                                     ? "bg-indigo-50 text-indigo-700"
                                     : "text-gray-600 hover:bg-gray-50"
@@ -769,7 +796,7 @@ export default function SettingsPage() {
                                 מסמכים חשובים
                             </button>
                             <button
-                                onClick={() => setActiveTab("account")}
+                                onClick={() => handleTabChange("account")}
                                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "account"
                                     ? "bg-indigo-50 text-indigo-700"
                                     : "text-gray-600 hover:bg-gray-50"
@@ -928,7 +955,7 @@ export default function SettingsPage() {
                         )}
 
                         {activeTab === "documents" && (
-                            <ImportantDocuments />
+                            <ImportantDocuments focusDocumentId={documentIdFromQuery} />
                         )}
 
                         {activeTab === "account" && (

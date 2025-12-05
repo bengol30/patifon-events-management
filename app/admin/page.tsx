@@ -42,6 +42,16 @@ interface TaskRow {
     title?: string;
 }
 
+interface ProjectRow {
+    id: string;
+    name?: string;
+    status?: string;
+    dueDate?: any;
+    ownerId?: string;
+    ownerEmail?: string;
+    updatedAt?: any;
+}
+
 const ADMIN_EMAIL = "bengo0469@gmail.com";
 
 export default function AdminDashboard() {
@@ -56,6 +66,8 @@ export default function AdminDashboard() {
     const [ownerFilter, setOwnerFilter] = useState<string>("all");
     const [partnerFilter, setPartnerFilter] = useState<string>("");
     const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+    const [projectsData, setProjectsData] = useState<ProjectRow[]>([]);
+    const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
     const [deletingTaskKey, setDeletingTaskKey] = useState<string | null>(null);
     const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -74,10 +86,12 @@ export default function AdminDashboard() {
             try {
                 const usersSnap = await getDocs(query(collection(db, "users"), orderBy("createdAt", "desc")));
                 const eventsSnap = await getDocs(query(collection(db, "events"), orderBy("createdAt", "desc")));
+                const projectsSnap = await getDocs(query(collection(db, "projects"), orderBy("updatedAt", "desc")));
                 const repeatSnap = await getDocs(query(collection(db, "repeat_tasks"), orderBy("count", "desc")));
                 const tasksSnap = await getDocs(collectionGroup(db, "tasks"));
                 setUsersData(usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as UserRow)));
                 setEventsData(eventsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EventRow)));
+                setProjectsData(projectsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectRow)));
                 setRepeatTasks(repeatSnap.docs.map(d => ({ key: d.id, ...d.data() } as RepeatTaskRow)));
                 setTasksCount(tasksSnap.size);
                 setTasksData(tasksSnap.docs.map(d => ({
@@ -209,12 +223,22 @@ export default function AdminDashboard() {
         }
     };
 
+    const deleteAllTasksFor = async (type: "events" | "projects", id: string) => {
+        try {
+            const tasksSnap = await getDocs(collection(db!, type, id, "tasks"));
+            await Promise.all(tasksSnap.docs.map(d => firestoreDeleteDoc(d.ref).catch(err => console.error("Error deleting task doc", err))));
+        } catch (err) {
+            console.error(`Error deleting tasks for ${type}/${id}`, err);
+        }
+    };
+
     const handleDeleteEvent = async (eventId: string) => {
         if (!db) return;
         const ok = confirm("למחוק את האירוע הזה?");
         if (!ok) return;
         setDeletingEventId(eventId);
         try {
+            await deleteAllTasksFor("events", eventId);
             await firestoreDeleteDoc(firestoreDoc(db, "events", eventId));
             setEventsData(prev => prev.filter(e => e.id !== eventId));
         } catch (err) {
@@ -222,6 +246,23 @@ export default function AdminDashboard() {
             alert("שגיאה במחיקת האירוע");
         } finally {
             setDeletingEventId(null);
+        }
+    };
+
+    const handleDeleteProject = async (projectId: string) => {
+        if (!db) return;
+        const ok = confirm("למחוק את הפרויקט הזה?");
+        if (!ok) return;
+        setDeletingProjectId(projectId);
+        try {
+            await deleteAllTasksFor("projects", projectId);
+            await firestoreDeleteDoc(firestoreDoc(db, "projects", projectId));
+            setProjectsData(prev => prev.filter(p => p.id !== projectId));
+        } catch (err) {
+            console.error("Error deleting project", err);
+            alert("שגיאה במחיקת הפרויקט");
+        } finally {
+            setDeletingProjectId(null);
         }
     };
 
@@ -354,6 +395,51 @@ export default function AdminDashboard() {
                                             </div>
                                         )}
                                     </div>
+                                </div>
+                            ))}
+                        </div>
+                    </Panel>
+
+                    <Panel title="פרויקטים שנפתחו">
+                        <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                            {projectsData.length === 0 && <EmptyRow text="אין פרויקטים במערכת." />}
+                            {projectsData.map(p => (
+                                <div key={p.id} className="p-3 bg-white border border-gray-100 rounded-xl shadow-sm flex flex-col gap-2">
+                                    <div className="flex justify-between items-start text-sm font-semibold text-gray-900">
+                                        <div className="flex items-center gap-2">
+                                            <span className="truncate">{p.name || "פרויקט ללא שם"}</span>
+                                            <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">פרויקט</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{p.status || "N/A"}</span>
+                                            <Link
+                                                href={`/projects/${p.id}`}
+                                                className="p-1 rounded-full text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 border border-indigo-200"
+                                                title="ערוך/פתח פרויקט"
+                                            >
+                                                <Edit2 size={14} />
+                                            </Link>
+                                            <button
+                                                onClick={() => handleDeleteProject(p.id)}
+                                                className="p-1 rounded-full text-red-600 hover:text-red-800 hover:bg-red-50 border border-red-200"
+                                                title="מחק פרויקט"
+                                                disabled={deletingProjectId === p.id}
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {p.ownerEmail && <div className="text-sm text-gray-600">יוצר: {p.ownerEmail}</div>}
+                                    {p.dueDate?.seconds && (
+                                        <div className="text-sm text-gray-600">
+                                            יעד: {new Date(p.dueDate.seconds * 1000).toLocaleDateString("he-IL")}
+                                        </div>
+                                    )}
+                                    {p.updatedAt?.seconds && (
+                                        <div className="text-xs text-gray-500">
+                                            עודכן לאחרונה: {new Date(p.updatedAt.seconds * 1000).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>

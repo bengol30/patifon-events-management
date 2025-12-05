@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
-import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc, query, where, deleteDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc, query, where, deleteDoc, addDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
@@ -59,11 +59,12 @@ interface ProjectTask {
   currentStatus?: string;
   nextStep?: string;
   previewImage?: string;
+  scope?: "event" | "project";
+  isVolunteerTask?: boolean;
+  volunteerHours?: number | null;
 }
 
-const ALLOWED_EMAIL = "bengo0469@gmail.com";
 const STATUS_OPTIONS = ["בתכנון", "בביצוע", "בהקפאה", "הושלם"];
-const normalizeEmail = (val?: string | null) => (val || "").toLowerCase();
 
 export default function ProjectDetailsPage() {
   const { user, loading } = useAuth();
@@ -85,14 +86,27 @@ export default function ProjectDetailsPage() {
   const [loadingProjectTasks, setLoadingProjectTasks] = useState(true);
   const [editingStatusTask, setEditingStatusTask] = useState<ProjectTask | null>(null);
   const [editingDateTask, setEditingDateTask] = useState<ProjectTask | null>(null);
-  const isAdmin = (user?.email || "").toLowerCase() === ALLOWED_EMAIL;
+  const isAdmin = true; // כל המשתמשים יכולים לראות ולערוך כמו באדמין
   const [copiedLink, setCopiedLink] = useState(false);
   const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [showTeamPicker, setShowTeamPicker] = useState(false);
-
-  const isAllowed = useMemo(() => normalizeEmail(user?.email) === ALLOWED_EMAIL, [user?.email]);
+  const [showNewTask, setShowNewTask] = useState(false);
+  const [savingNewTask, setSavingNewTask] = useState(false);
+  const [newTask, setNewTask] = useState({
+    title: "",
+    description: "",
+    dueDate: "",
+    priority: "NORMAL" as "NORMAL" | "HIGH" | "CRITICAL",
+    assignees: [] as { name: string; userId?: string; email?: string }[],
+    isVolunteerTask: false,
+    volunteerHours: null as number | null,
+  });
+  const [newTaskSearch, setNewTaskSearch] = useState("");
+  const [taggingProjectTask, setTaggingProjectTask] = useState<ProjectTask | null>(null);
+  const [projectTagSelection, setProjectTagSelection] = useState<{ name: string; userId?: string; email?: string }[]>([]);
+  const [projectTagSearch, setProjectTagSearch] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -104,6 +118,15 @@ export default function ProjectDetailsPage() {
     needsScholarshipVolunteers: false,
     teamMembers: [] as { userId: string; fullName?: string; email?: string }[],
   });
+
+  const isProjectOwner = (proj: Project | null, currentUser: typeof user) => {
+    if (!proj || !currentUser) return false;
+    const norm = (v?: string | null) => (v || "").trim().toLowerCase();
+    return (
+      (proj.ownerId && proj.ownerId === currentUser.uid) ||
+      (proj.ownerEmail && currentUser.email && norm(proj.ownerEmail) === norm(currentUser.email))
+    );
+  };
 
   useEffect(() => {
     const loadProject = async () => {
@@ -206,17 +229,47 @@ export default function ProjectDetailsPage() {
                 priority: (d.priority as any) || "NORMAL",
                 eventId: ev.id,
                 eventTitle: ev.title,
-                assignee: d.assignee,
-                assignees: d.assignees,
-                description: d.description,
-                currentStatus: d.currentStatus,
-                nextStep: d.nextStep,
-                previewImage: d.previewImage,
-              });
+              assignee: d.assignee,
+              assignees: d.assignees,
+              description: d.description,
+              currentStatus: d.currentStatus,
+              nextStep: d.nextStep,
+              previewImage: d.previewImage,
+              scope: "event",
+              isVolunteerTask: !!d.isVolunteerTask,
+              volunteerHours: d.volunteerHours ?? null,
             });
-          } catch (err) {
-            console.error("Failed loading tasks for event", ev.id, err);
-          }
+          });
+        } catch (err) {
+          console.error("Failed loading tasks for event", ev.id, err);
+        }
+        }
+        // Project-level tasks
+        try {
+          const pTasksSnap = await getDocs(collection(db, "projects", projectId, "tasks"));
+          pTasksSnap.forEach((t) => {
+            const d = t.data() as any;
+            tasks.push({
+              id: t.id,
+              title: d.title || "משימה",
+              status: (d.status as any) || "TODO",
+              dueDate: d.dueDate,
+              priority: (d.priority as any) || "NORMAL",
+              eventId: projectId,
+              eventTitle: proj.name,
+              assignee: d.assignee,
+              assignees: d.assignees,
+              description: d.description,
+              currentStatus: d.currentStatus,
+              nextStep: d.nextStep,
+              previewImage: d.previewImage,
+              scope: "project",
+              isVolunteerTask: !!d.isVolunteerTask,
+              volunteerHours: d.volunteerHours ?? null,
+            });
+          });
+        } catch (err) {
+          console.error("Failed loading project tasks", err);
         }
         // sort by due date or status
         tasks.sort((a, b) => {
@@ -238,10 +291,10 @@ export default function ProjectDetailsPage() {
       }
     };
 
-    if (!loading && user && isAllowed) {
+    if (!loading && user) {
       loadProject();
     }
-  }, [loading, user, isAllowed, projectId]);
+  }, [loading, user, projectId]);
 
   useEffect(() => {
     if (loading) return;
@@ -249,10 +302,7 @@ export default function ProjectDetailsPage() {
       router.push("/login");
       return;
     }
-    if (!isAllowed) {
-      router.push("/");
-    }
-  }, [user, loading, isAllowed, router]);
+  }, [user, loading, router]);
 
   const filteredUsers = useMemo(() => {
     if (!userSearch.trim()) return usersList;
@@ -266,7 +316,7 @@ export default function ProjectDetailsPage() {
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
-    if (!db || !project || !isAllowed) return;
+    if (!db || !project) return;
     if (!form.name.trim()) {
       setError("חייבים לתת שם לפרויקט.");
       return;
@@ -311,8 +361,29 @@ export default function ProjectDetailsPage() {
     }
   };
 
+  const handleDeleteProject = async () => {
+    if (!db || !project || !user) return;
+    if (!isProjectOwner(project, user)) {
+      alert("רק יוצר הפרויקט יכול למחוק אותו.");
+      return;
+    }
+    const confirmDelete = window.confirm("למחוק את הפרויקט הזה וכל המשימות שלו?");
+    if (!confirmDelete) return;
+    try {
+      const tasksSnap = await getDocs(collection(db, "projects", project.id, "tasks"));
+      const deletes = tasksSnap.docs.map((d) => deleteDoc(d.ref).catch(err => console.error("Failed deleting project task", err)));
+      await Promise.all(deletes);
+      await deleteDoc(doc(db, "projects", project.id));
+      alert("הפרויקט נמחק בהצלחה");
+      router.push("/projects");
+    } catch (err) {
+      console.error("Failed deleting project", err);
+      alert("שגיאה במחיקת הפרויקט");
+    }
+  };
+
   const handleDeleteVolunteer = async (volunteerId: string) => {
-    if (!db || !project || !isAdmin) return;
+    if (!db || !project) return;
     if (!confirm("למחוק את המתנדב מהרשימה?")) return;
     setVolunteerBusy(volunteerId);
     try {
@@ -345,7 +416,10 @@ export default function ProjectDetailsPage() {
   const handleProjectTaskStatus = async (task: ProjectTask, newStatus: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") => {
     if (!db) return;
     try {
-      await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), { status: newStatus });
+      const taskRef = task.scope === "project"
+        ? doc(db, "projects", projectId, "tasks", task.id)
+        : doc(db, "events", task.eventId, "tasks", task.id);
+      await updateDoc(taskRef, { status: newStatus });
       setProjectTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
     } catch (err) {
       console.error("Failed to update task status", err);
@@ -356,7 +430,10 @@ export default function ProjectDetailsPage() {
   const handleProjectTaskDate = async (task: ProjectTask, date: string) => {
     if (!db) return;
     try {
-      await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), { dueDate: date });
+      const taskRef = task.scope === "project"
+        ? doc(db, "projects", projectId, "tasks", task.id)
+        : doc(db, "events", task.eventId, "tasks", task.id);
+      await updateDoc(taskRef, { dueDate: date });
       setProjectTasks(prev => prev.map(t => t.id === task.id ? { ...t, dueDate: date } : t));
     } catch (err) {
       console.error("Failed to update task date", err);
@@ -364,11 +441,132 @@ export default function ProjectDetailsPage() {
     }
   };
 
+  const getAssigneeKey = (a?: { name?: string; userId?: string; email?: string } | null) => {
+    if (!a) return "";
+    if (a.userId) return a.userId;
+    if (a.email) return a.email.toLowerCase();
+    if (a.name) return a.name.toLowerCase();
+    return "";
+  };
+
+  const sanitizeAssignees = (arr: { name?: string; userId?: string; email?: string }[]) => {
+    const seen = new Set<string>();
+    return (arr || [])
+      .map(a => ({
+        name: (a.name || "").trim(),
+        ...(a.userId ? { userId: a.userId } : {}),
+        ...(a.email ? { email: a.email.toLowerCase().trim() } : {}),
+      }))
+      .filter(a => {
+        const key = getAssigneeKey(a);
+        if (!a.name || !key) return false;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  };
+
+  const toggleNewTaskAssignee = (userId: string, fullName?: string, email?: string) => {
+    setNewTask(prev => {
+      const exists = prev.assignees.some(a => getAssigneeKey(a) === getAssigneeKey({ userId, email, name: fullName }));
+      const next = exists
+        ? prev.assignees.filter(a => getAssigneeKey(a) !== getAssigneeKey({ userId, email, name: fullName }))
+        : [...prev.assignees, { userId, email, name: fullName || email || "משתמש" }];
+      return { ...prev, assignees: next };
+    });
+  };
+
+  const handleCreateProjectTask = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!db || !projectId || !project) return;
+    const title = newTask.title.trim();
+    if (!title) {
+      alert("יש להזין כותרת למשימה");
+      return;
+    }
+    const cleanAssignees = sanitizeAssignees(newTask.assignees);
+    const primary = cleanAssignees[0];
+    setSavingNewTask(true);
+    try {
+      const docRef = await addDoc(collection(db, "projects", projectId, "tasks"), {
+        title,
+        description: newTask.description.trim(),
+        status: "TODO",
+        dueDate: newTask.dueDate,
+        priority: newTask.priority,
+        assignee: primary?.name || "",
+        assigneeId: primary?.userId || "",
+        assignees: cleanAssignees,
+        currentStatus: "",
+        nextStep: "",
+        isVolunteerTask: !!newTask.isVolunteerTask,
+        volunteerHours: newTask.isVolunteerTask
+          ? (newTask.volunteerHours != null ? Number(newTask.volunteerHours) : null)
+          : null,
+        createdBy: user.uid,
+        createdByEmail: user.email || "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      const added: ProjectTask = {
+        id: docRef.id,
+        title,
+        description: newTask.description.trim(),
+        status: "TODO",
+        dueDate: newTask.dueDate,
+        priority: newTask.priority,
+        assignee: primary?.name,
+        assignees: cleanAssignees,
+        currentStatus: "",
+        nextStep: "",
+        eventId: projectId,
+        eventTitle: project.name,
+        scope: "project",
+        isVolunteerTask: !!newTask.isVolunteerTask,
+        volunteerHours: newTask.isVolunteerTask
+          ? (newTask.volunteerHours != null ? Number(newTask.volunteerHours) : null)
+          : null,
+      };
+      setProjectTasks(prev => [added, ...prev]);
+      setShowNewTask(false);
+      setNewTask({ title: "", description: "", dueDate: "", priority: "NORMAL", assignees: [], isVolunteerTask: false, volunteerHours: null });
+    } catch (err) {
+      console.error("Failed creating project task", err);
+      alert("שגיאה ביצירת המשימה");
+    } finally {
+      setSavingNewTask(false);
+    }
+  };
+
+  const handleSaveProjectTagging = async () => {
+    if (!db || !projectId || !taggingProjectTask) return;
+    const clean = sanitizeAssignees(projectTagSelection);
+    const primary = clean[0];
+    try {
+      await updateDoc(doc(db, "projects", projectId, "tasks", taggingProjectTask.id), {
+        assignees: clean,
+        assignee: primary?.name || "",
+        assigneeId: primary?.userId || "",
+        updatedAt: serverTimestamp(),
+      });
+      setProjectTasks(prev => prev.map(t => t.id === taggingProjectTask.id ? { ...t, assignees: clean, assignee: primary?.name } : t));
+      setTaggingProjectTask(null);
+      setProjectTagSelection([]);
+      setProjectTagSearch("");
+    } catch (err) {
+      console.error("Failed updating assignees", err);
+      alert("שגיאה בעדכון האחראים");
+    }
+  };
+
   const submitEditStatus = async (e: FormEvent) => {
     e.preventDefault();
     if (!db || !editingStatusTask) return;
     try {
-      await updateDoc(doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id), {
+      const ref = editingStatusTask.scope === "project"
+        ? doc(db, "projects", projectId, "tasks", editingStatusTask.id)
+        : doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id);
+      await updateDoc(ref, {
         currentStatus: editingStatusTask.currentStatus || "",
         nextStep: editingStatusTask.nextStep || "",
         dueDate: editingStatusTask.dueDate || "",
@@ -383,10 +581,6 @@ export default function ProjectDetailsPage() {
 
   if (loading || loadingProject || !user) {
     return <div className="p-6 text-center">טוען...</div>;
-  }
-
-  if (!isAllowed) {
-    return <div className="p-6 text-center text-gray-700">המסך זמין רק לחשבון המורשה.</div>;
   }
 
   if (!project) {
@@ -413,12 +607,168 @@ export default function ProjectDetailsPage() {
             <span className="hidden sm:inline">חזרה לרשימת הפרוייקטים</span>
             <span className="sm:hidden">חזרה</span>
           </Link>
+          {isProjectOwner(project, user) && (
+            <button
+              type="button"
+              onClick={handleDeleteProject}
+              className="px-3 sm:px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition flex items-center justify-center gap-2 text-sm"
+              title="מחיקת הפרויקט"
+            >
+              <Trash2 size={16} />
+              <span className="hidden sm:inline">מחק פרויקט</span>
+            </button>
+          )}
         </div>
       </header>
 
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+      {showNewTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <PlusCircle className="text-indigo-600" size={20} />
+                <h3 className="text-lg font-bold">משימה חדשה לפרויקט</h3>
+              </div>
+              <button onClick={() => setShowNewTask(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateProjectTask} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">כותרת</label>
+                <input
+                  type="text"
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  value={newTask.title}
+                  onChange={e => setNewTask(prev => ({ ...prev, title: e.target.value }))}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">תיאור</label>
+                <textarea
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  rows={3}
+                  value={newTask.description}
+                  onChange={e => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="פרטי המשימה, צעד הבא, קבצים רלוונטיים וכו'"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                  <input
+                    type="date"
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    value={newTask.dueDate}
+                    onChange={e => setNewTask(prev => ({ ...prev, dueDate: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">עדיפות</label>
+                  <select
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    value={newTask.priority}
+                    onChange={e => setNewTask(prev => ({ ...prev, priority: e.target.value as any }))}
+                  >
+                    <option value="NORMAL">רגילה</option>
+                    <option value="HIGH">גבוהה</option>
+                    <option value="CRITICAL">קריטית</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium text-gray-700">תיוג/הקצאה</label>
+                  <span className="text-xs text-gray-500">{newTask.assignees.length} נבחרו</span>
+                </div>
+                <input
+                  type="text"
+                  value={newTaskSearch}
+                  onChange={(e) => setNewTaskSearch(e.target.value)}
+                  placeholder="חיפוש לפי שם"
+                  className="w-full p-2 border rounded-lg text-xs mb-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+                <div className="max-h-48 overflow-auto border rounded-lg divide-y">
+                  {usersList
+                    .filter(u => (u.fullName || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase()))
+                    .map(u => {
+                    const checked = newTask.assignees.some(a => getAssigneeKey(a) === getAssigneeKey({ userId: u.id, email: u.email, name: u.fullName }));
+                    return (
+                      <label key={u.id} className="flex items-center gap-2 p-2 text-sm cursor-pointer hover:bg-gray-50">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleNewTaskAssignee(u.id, u.fullName, u.email)}
+                        />
+                        <div className="flex flex-col">
+                          <span className="font-medium text-gray-900">{u.fullName || "ללא שם"}</span>
+                          <span className="text-xs text-gray-600">{u.email}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                  {usersList.filter(u => (u.fullName || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase())).length === 0 && (
+                    <div className="p-2 text-xs text-gray-500">אין משתמשים זמינים לתיוג.</div>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="projectTaskVolunteer"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    checked={newTask.isVolunteerTask}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, isVolunteerTask: e.target.checked }))}
+                  />
+                  <label htmlFor="projectTaskVolunteer" className="text-sm font-medium text-gray-700">
+                    משימה למאגר מתנדבים
+                  </label>
+                </div>
+                {newTask.isVolunteerTask && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">שעות התנדבות (אופציונלי)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        className="w-full p-2 border rounded-lg text-sm"
+                        value={newTask.volunteerHours ?? ""}
+                        onChange={(e) => setNewTask(prev => ({ ...prev, volunteerHours: e.target.value ? parseFloat(e.target.value) : null }))}
+                        placeholder="לדוגמה 2"
+                      />
+                    </div>
+                    <div className="p-2 bg-indigo-50 border border-indigo-100 rounded-lg text-xs text-indigo-800">
+                      המשימה תופיע גם בלוח המשימות של המתנדבים
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowNewTask(false); setNewTask({ title: "", description: "", dueDate: "", priority: "NORMAL", assignees: [], isVolunteerTask: false, volunteerHours: null }); setNewTaskSearch(""); }}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingNewTask}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {savingNewTask ? "שומר..." : "צור משימה"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -690,9 +1040,26 @@ export default function ProjectDetailsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-4">
         <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
-          <div className="flex items-center gap-2 mb-4">
-            <Calendar style={{ color: "var(--patifon-orange)" }} size={20} />
-            <h2 className="text-base sm:text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>משימות קשורות לפרויקט</h2>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CheckSquare style={{ color: "var(--patifon-orange)" }} size={20} />
+              <h2 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
+                משימות הקשורות לפרויקט
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowNewTask(true)}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-white text-sm font-semibold hover:bg-indigo-700 transition"
+              >
+                <PlusCircle size={16} />
+                משימה חדשה
+              </button>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
+                {projectTasks.length}
+              </span>
+            </div>
           </div>
           {loadingProjectTasks ? (
             <div className="flex items-center gap-2 text-gray-600 py-4">
@@ -700,44 +1067,51 @@ export default function ProjectDetailsPage() {
               טוען משימות...
             </div>
           ) : projectTasks.length === 0 ? (
-            <div className="text-gray-600 text-sm">אין משימות קשורות לפרויקט.</div>
+            <div className="text-gray-600 text-sm">אין משימות לאירועים המשויכים לפרויקט.</div>
           ) : (
-            <div className="space-y-2 max-h-72 overflow-auto pr-1">
-              {projectTasks.map((t) => (
-                <div key={t.id} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-gray-900 truncate">{t.title}</p>
-                    <p className="text-xs text-gray-600 truncate">אירוע: {t.eventTitle || t.eventId}</p>
-                  </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">{t.status}</span>
-                </div>
+            <div className="space-y-3">
+                {projectTasks.map((t) => (
+                  <TaskCard
+                    key={t.id}
+                  id={t.id}
+                  title={t.title}
+                  description={t.description}
+                  assignee={t.assignee || "לא משויך"}
+                  assignees={t.assignees}
+                  status={t.status}
+                  dueDate={t.dueDate || ""}
+                  priority={t.priority || "NORMAL"}
+                  currentStatus={t.currentStatus}
+                  nextStep={t.nextStep}
+                  eventId={t.eventId}
+                  eventTitle={t.eventTitle}
+                  scope={t.scope}
+                  previewImage={t.previewImage}
+                onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
+                onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
+                onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
+                onManageAssignees={t.scope === "event"
+                  ? () => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)
+                  : undefined}
+                  onDelete={() => {
+                    if (!db) return;
+                    if (confirm("למחוק משימה זו?")) {
+                      const ref = t.scope === "project"
+                        ? doc(db, "projects", projectId, "tasks", t.id)
+                        : doc(db, "events", t.eventId, "tasks", t.id);
+                      deleteDoc(ref).then(() => {
+                        setProjectTasks(prev => prev.filter(pt => pt.id !== t.id));
+                      }).catch(err => {
+                        console.error("Failed deleting task", err);
+                        alert("שגיאה במחיקת משימה");
+                      });
+                    }
+                  }}
+                  onChat={() => router.push(`/tasks/${t.id}?eventId=${t.eventId}`)}
+                />
               ))}
             </div>
           )}
-        </div>
-        <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
-          <div className="flex items-center gap-2 mb-4">
-            <Calendar style={{ color: "var(--patifon-orange)" }} size={20} />
-            <h2 className="text-base sm:text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>מידע נוסף</h2>
-          </div>
-          <div className="space-y-2 text-xs sm:text-sm text-gray-700">
-            <div className="flex items-center gap-2">
-              <Users size={16} className="text-gray-500" />
-              <span>בעלים: {project.ownerEmail || "—"}</span>
-            </div>
-            {project.createdAt?.seconds && (
-              <div className="flex items-center gap-2">
-                <Calendar size={16} className="text-gray-500" />
-                <span>נוצר ב- {new Date(project.createdAt.seconds * 1000).toLocaleString("he-IL")}</span>
-              </div>
-            )}
-            {project.updatedAt?.seconds && (
-              <div className="flex items-center gap-2">
-                <Calendar size={16} className="text-gray-500" />
-                <span>עודכן לאחרונה: {new Date(project.updatedAt.seconds * 1000).toLocaleString("he-IL")}</span>
-              </div>
-            )}
-          </div>
         </div>
         <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
           <div className="flex items-center gap-2 mb-4">
@@ -865,6 +1239,72 @@ export default function ProjectDetailsPage() {
         )}
       </div>
 
+      {/* Project Task Tagging Modal */}
+      {taggingProjectTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">תיוג אחראים למשימה</h3>
+              <button onClick={() => { setTaggingProjectTask(null); setProjectTagSelection([]); setProjectTagSearch(""); }} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-2">בחרו את אנשי הצוות למשימה "{taggingProjectTask.title}". ניתן לבחור יותר מאחד.</p>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-gray-700">תיוג/הקצאה</label>
+              <span className="text-xs text-gray-500">{projectTagSelection.length} נבחרו</span>
+            </div>
+            <div className="mb-3">
+              <input
+                type="text"
+                value={projectTagSearch}
+                onChange={(e) => setProjectTagSearch(e.target.value)}
+                placeholder="חיפוש לפי שם"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 mb-4 max-h-56 overflow-auto">
+              {usersList
+                .filter(u => (u.fullName || "").toLowerCase().includes(projectTagSearch.trim().toLowerCase()))
+                .map((u) => {
+                  const key = getAssigneeKey({ userId: u.id, email: u.email, name: u.fullName });
+                  const checked = projectTagSelection.some(a => getAssigneeKey(a) === key);
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        const exists = projectTagSelection.some(a => getAssigneeKey(a) === key);
+                        setProjectTagSelection(prev => exists ? prev.filter(a => getAssigneeKey(a) !== key) : [...prev, { name: u.fullName || u.email || "משתמש", userId: u.id, email: u.email }]);
+                      }}
+                      className={`px-3 py-1 rounded-full text-sm border transition ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                    >
+                      {u.fullName || u.email || "משתמש"}
+                    </button>
+                  );
+                })}
+              {usersList.filter(u => (u.fullName || "").toLowerCase().includes(projectTagSearch.trim().toLowerCase())).length === 0 && (
+                <span className="text-sm text-gray-500">אין חברי צוות זמינים</span>
+              )}
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setTaggingProjectTask(null); setProjectTagSelection([]); setProjectTagSearch(""); }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={handleSaveProjectTagging}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+              >
+                שמור
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Status Modal */}
       {editingStatusTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -915,7 +1355,10 @@ export default function ProjectDetailsPage() {
               e.preventDefault();
               if (!db || !editingDateTask) return;
               try {
-                await updateDoc(doc(db, "events", editingDateTask.eventId, "tasks", editingDateTask.id), {
+                const ref = editingDateTask.scope === "project"
+                  ? doc(db, "projects", projectId, "tasks", editingDateTask.id)
+                  : doc(db, "events", editingDateTask.eventId, "tasks", editingDateTask.id);
+                await updateDoc(ref, {
                   dueDate: editingDateTask.dueDate,
                 });
                 setProjectTasks(prev => prev.map(t => t.id === editingDateTask.id ? { ...t, dueDate: editingDateTask.dueDate } : t));
@@ -943,64 +1386,6 @@ export default function ProjectDetailsPage() {
           </div>
         </div>
       )}
-      <div className="mt-4 sm:mt-6 bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <CheckSquare style={{ color: "var(--patifon-orange)" }} size={20} />
-            <h2 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
-              משימות הקשורות לפרויקט
-            </h2>
-          </div>
-          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
-            {projectTasks.length}
-          </span>
-        </div>
-        {loadingProjectTasks ? (
-          <div className="flex items-center gap-2 text-gray-600 py-4">
-            <Loader2 size={16} className="animate-spin" />
-            טוען משימות...
-          </div>
-        ) : projectTasks.length === 0 ? (
-          <div className="text-gray-600 text-sm">אין משימות לאירועים המשויכים לפרויקט.</div>
-        ) : (
-          <div className="space-y-3">
-            {projectTasks.map((t) => (
-              <TaskCard
-                key={t.id}
-                id={t.id}
-                title={t.title}
-                description={t.description}
-                assignee={t.assignee || "לא משויך"}
-                assignees={t.assignees}
-                status={t.status}
-                dueDate={t.dueDate || ""}
-                priority={t.priority || "NORMAL"}
-                currentStatus={t.currentStatus}
-                nextStep={t.nextStep}
-                eventId={t.eventId}
-                eventTitle={t.eventTitle}
-                previewImage={t.previewImage}
-                onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
-                onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
-                onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
-                onManageAssignees={() => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)}
-                onDelete={() => {
-                  if (!db || !isAdmin) return;
-                  if (confirm("למחוק משימה זו?")) {
-                    deleteDoc(doc(db, "events", t.eventId, "tasks", t.id)).then(() => {
-                      setProjectTasks(prev => prev.filter(pt => pt.id !== t.id));
-                    }).catch(err => {
-                      console.error("Failed deleting task", err);
-                      alert("שגיאה במחיקת משימה");
-                    });
-                  }
-                }}
-                onChat={() => router.push(`/tasks/${t.id}?eventId=${t.eventId}`)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
 
       {project.needsScholarshipVolunteers && (
         <div className="mt-4 sm:mt-6 bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>

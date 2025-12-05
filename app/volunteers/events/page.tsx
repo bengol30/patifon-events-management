@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { collection, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc } from "firebase/firestore";
-import { Calendar, MapPin, Users, Handshake, Clock, Target, AlertCircle, ArrowRight, CheckSquare, Square, UserCheck, Lock, Circle, CheckCircle2 } from "lucide-react";
+import { collection, collectionGroup, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc } from "firebase/firestore";
+import { Calendar, MapPin, Users, Handshake, Clock, Target, AlertCircle, ArrowRight, CheckSquare, Square, UserCheck, Lock, Circle, CheckCircle2, MessageCircle } from "lucide-react";
 
 interface Task {
     id: string;
@@ -17,6 +17,13 @@ interface Task {
     isVolunteerTask?: boolean;
     assignees?: { name?: string; email?: string }[];
     volunteerHours?: number | null;
+    scope?: "event" | "project";
+    pendingApproval?: boolean;
+    pendingApprovalRequestId?: string;
+    lastApprovalDecision?: string;
+    createdBy?: string;
+    ownerId?: string;
+    contactPhone?: string;
 }
 interface CompletedLog {
     id: string;
@@ -44,6 +51,9 @@ interface EventData {
     needsVolunteers?: boolean;
     volunteersCount?: number | null;
     tasks?: Task[];
+    scope?: "event" | "project";
+    contactPhone?: string;
+    contactName?: string;
 }
 
 export default function VolunteerEventsPage() {
@@ -69,6 +79,25 @@ export default function VolunteerEventsPage() {
     const [autoAuthInProgress, setAutoAuthInProgress] = useState(false);
     const [showPendingOnly, setShowPendingOnly] = useState(true);
     const [showAllCompleted, setShowAllCompleted] = useState(false);
+    const [userMetaCache, setUserMetaCache] = useState<Record<string, { phone?: string; name?: string }>>({});
+    const handleVolunteerLogout = () => {
+        setSessionMap({});
+        setMatchedEventIds(new Set());
+        setIsAuthed(false);
+        setSelectedTasksByEvent({});
+        setTasksByEvent({});
+        setCompletedLogs([]);
+        setShowAllCompleted(false);
+        setShowPendingOnly(true);
+        setAuthEmail("");
+        setAuthPassword("");
+        if (typeof window !== "undefined") {
+            localStorage.removeItem(LOCAL_AUTH_KEY);
+        }
+        router.push("/volunteers/events");
+    };
+    const [projectsPool, setProjectsPool] = useState<EventData[]>([]);
+    const latestProjects = useRef<EventData[]>([]);
 
     const currentEmail = useMemo(() => {
         const first = Object.values(sessionMap)[0];
@@ -138,35 +167,56 @@ export default function VolunteerEventsPage() {
         return showPendingOnly ? myTasks.filter(({ task }) => task.status !== "DONE") : myTasks;
     }, [showPendingOnly, myTasks]);
 
+    const groupedMyTasks = useMemo(() => {
+        const map = new Map<string, { eventTitle?: string; tasks: { eventId: string; task: Task }[] }>();
+        visibleMyTasks.forEach(({ eventId, eventTitle, task }) => {
+            if (!map.has(eventId)) {
+                map.set(eventId, { eventTitle, tasks: [] });
+            }
+            map.get(eventId)!.tasks.push({ eventId, task });
+        });
+        return Array.from(map.entries()).map(([eventId, val]) => ({
+            eventId,
+            eventTitle: val.eventTitle,
+            tasks: val.tasks,
+        }));
+    }, [visibleMyTasks]);
+
     useEffect(() => {
         if (!db) return;
         setLoading(true);
-        const taskUnsubs = new Map<string, () => void>();
-        const eventsQuery = collection(db!, "events");
+    const taskUnsubs = new Map<string, () => void>();
+    const eventsQuery = collection(db!, "events");
+    const projectsQuery = collection(db!, "projects");
+        const eventsPoolRef = { current: [] as EventData[] };
 
         const unsubEvents = onSnapshot(eventsQuery, (eventsSnap) => {
             const eventsData: EventData[] = [];
             const seen = new Set<string>();
 
             eventsSnap.forEach((eventDoc) => {
-                const eventData = eventDoc.data() as EventData;
-                const evId = eventDoc.id;
-                seen.add(evId);
-                eventsData.push({
-                    ...eventData,
-                    id: evId,
-                });
+                    const eventData = eventDoc.data() as EventData;
+                    const evId = eventDoc.id;
+                    seen.add(evId);
+                        eventsData.push({
+                            ...eventData,
+                            id: evId,
+                            scope: "event",
+                            createdBy: (eventData as any).createdBy,
+                            createdByEmail: (eventData as any).createdByEmail,
+                            contactPhone: (eventData as any)?.contactPerson?.phone || (eventData as any)?.contactPhone || "",
+                            contactName: (eventData as any)?.contactPerson?.name || "",
+                        });
 
                 // attach task listener if not exists
                 if (!taskUnsubs.has(evId)) {
                     const tasksQuery = query(
-                        collection(db!, "events", evId, "tasks"),
-                        where("isVolunteerTask", "==", true)
+                        collection(db!, "events", evId, "tasks")
                     );
                     const unsubTask = onSnapshot(tasksQuery, (tasksSnap) => {
                         const tasks: Task[] = [];
                         tasksSnap.forEach((taskDoc) => {
-                            const taskData = { id: taskDoc.id, ...taskDoc.data() } as Task;
+                            const taskData = { id: taskDoc.id, ...taskDoc.data(), scope: "event" } as Task;
                             tasks.push(taskData);
                         });
                         setTasksByEvent((prev) => ({ ...prev, [evId]: tasks }));
@@ -175,9 +225,10 @@ export default function VolunteerEventsPage() {
                 }
             });
 
-            // cleanup removed events
+            // cleanup removed events (preserve project listeners)
+            const existingProjects = new Set(latestProjects.current.map((e) => e.id));
             Array.from(taskUnsubs.keys()).forEach((evId) => {
-                if (!seen.has(evId)) {
+                if (!seen.has(evId) && !existingProjects.has(evId)) {
                     const unsub = taskUnsubs.get(evId);
                     unsub && unsub();
                     taskUnsubs.delete(evId);
@@ -188,7 +239,8 @@ export default function VolunteerEventsPage() {
                 }
             });
 
-            setEvents(eventsData);
+            eventsPoolRef.current = eventsData;
+            setEvents([...eventsData, ...latestProjects.current]);
             setLoading(false);
         }, (err) => {
             console.error("Error loading events", err);
@@ -196,10 +248,102 @@ export default function VolunteerEventsPage() {
             setLoading(false);
         });
 
+        const unsubProjects = onSnapshot(projectsQuery, (projectsSnap) => {
+            const projectData: EventData[] = [];
+            const seen = new Set<string>();
+                projectsSnap.forEach((projDoc) => {
+                    const data = projDoc.data() as any;
+                    const pid = projDoc.id;
+                    seen.add(pid);
+                    projectData.push({
+                        id: pid,
+                        title: data.name || data.title || "פרויקט ללא שם",
+                        location: data.location || "",
+                        startTime: data.dueDate || data.updatedAt,
+                        description: data.summary || data.description || "",
+                        needsVolunteers: true, // מאפשר הצגת המשימות כמאגר
+                        volunteersCount: null,
+                        scope: "project",
+                        createdBy: data.ownerId,
+                        createdByEmail: data.ownerEmail,
+                    });
+
+                if (!taskUnsubs.has(pid)) {
+                    const tasksQuery = query(
+                        collection(db!, "projects", pid, "tasks")
+                    );
+                    const unsubTask = onSnapshot(tasksQuery, (tasksSnap) => {
+                        const tasks: Task[] = [];
+                        tasksSnap.forEach((taskDoc) => {
+                            const taskData = { id: taskDoc.id, ...taskDoc.data(), scope: "project" } as Task;
+                            tasks.push(taskData);
+                        });
+                        setTasksByEvent((prev) => ({ ...prev, [pid]: tasks }));
+                    });
+                    taskUnsubs.set(pid, unsubTask);
+                }
+            });
+
+            // remove listeners for projects that disappeared
+            Array.from(taskUnsubs.keys()).forEach((id) => {
+                if (!seen.has(id) && !eventsPoolRef.current.some(ev => ev.id === id)) {
+                    const unsub = taskUnsubs.get(id);
+                    unsub && unsub();
+                    taskUnsubs.delete(id);
+                    setTasksByEvent((prev) => {
+                        const { [id]: _, ...rest } = prev;
+                        return rest;
+                    });
+                }
+            });
+
+            // merge projects into existing events list
+            latestProjects.current = projectData;
+            setProjectsPool(projectData);
+            setEvents([...eventsPoolRef.current, ...projectData]);
+        }, (err) => {
+            console.error("Error loading projects for volunteer tasks", err);
+        });
+
         return () => {
             unsubEvents();
+            unsubProjects();
             taskUnsubs.forEach((unsub) => unsub());
         };
+    }, [db]);
+
+    // Fallback: one-time backfill of volunteer tasks (events + projects) in case listeners miss older data
+    useEffect(() => {
+        if (!db) return;
+        (async () => {
+            try {
+                const snap = await getDocs(collectionGroup(db, "tasks"));
+                const grouped: Record<string, Task[]> = {};
+                snap.forEach((docSnap) => {
+                    const data = docSnap.data() as any;
+                    if (data.isVolunteerTask === false) return;
+                    const isVolunteerLike = data.isVolunteerTask === true || data.volunteerHours != null;
+                    if (!isVolunteerLike) return;
+                    const parent = docSnap.ref.parent.parent;
+                    if (!parent) return;
+                    const parentId = parent.id;
+                    const path = parent.path || "";
+                    const isProject = path.startsWith("projects/") || path.includes("/projects/");
+                    const scope: "event" | "project" = isProject ? "project" : "event";
+                    if (!grouped[parentId]) grouped[parentId] = [];
+                    grouped[parentId].push({
+                        id: docSnap.id,
+                        ...data,
+                        scope,
+                    } as Task);
+                });
+                if (Object.keys(grouped).length) {
+                    setTasksByEvent((prev) => ({ ...grouped, ...prev }));
+                }
+            } catch (err) {
+                console.warn("Fallback volunteer tasks load failed", err);
+            }
+        })();
     }, [db]);
 
     // Listen to completed logs for current volunteer
@@ -238,8 +382,9 @@ export default function VolunteerEventsPage() {
 
         for (const ev of events) {
             try {
+                const basePath = ev.scope === "project" ? ["projects", ev.id, "volunteers"] : ["events", ev.id, "volunteers"];
                 const volunteersSnap = await getDocs(
-                    query(collection(db, "events", ev.id, "volunteers"), where("email", "==", emailInput.trim()))
+                    query(collection(db, ...basePath), where("email", "==", emailInput.trim()))
                 );
                 if (!volunteersSnap.empty) {
                     const docSnap = volunteersSnap.docs[0];
@@ -251,7 +396,7 @@ export default function VolunteerEventsPage() {
                         continue;
                     }
                 }
-                const volunteersSnapAll = await getDocs(collection(db, "events", ev.id, "volunteers"));
+                const volunteersSnapAll = await getDocs(collection(db, ...basePath));
                 for (const volDoc of volunteersSnapAll.docs) {
                     const data = volDoc.data() as any;
                     const emailVal = (data.email || "").toLowerCase();
@@ -362,7 +507,57 @@ export default function VolunteerEventsPage() {
         }
     };
 
-    const setTaskSelectionImmediate = async (eventId: string, taskId: string, select: boolean) => {
+    const getTaskRefPath = (scope: "event" | "project" = "event", eventId: string, taskId: string) =>
+        scope === "project" ? ["projects", eventId, "tasks", taskId] : ["events", eventId, "tasks", taskId];
+
+    const buildWhatsappLink = (rawPhone?: any, taskTitle?: string, creatorName?: string) => {
+        if (!rawPhone) return "";
+        const digits = String(rawPhone).replace(/\D/g, "");
+        if (!digits) return "";
+        const normalized = digits.startsWith("0") ? `972${digits.replace(/^0+/, "")}` : digits;
+        const text = encodeURIComponent(`היי ${creatorName || ""}, לגבי המשימה "${taskTitle || "משימה"}"`);
+        return `https://wa.me/${normalized}?text=${text}`;
+    };
+
+    // Prefetch phone numbers of task creators/owners for quick whatsapp links
+    useEffect(() => {
+        if (!db) return;
+        const ids = new Set<string>();
+        Object.values(tasksByEvent).forEach((arr) => {
+            (arr || []).forEach((t) => {
+                if (t.createdBy) ids.add(String(t.createdBy));
+                if ((t as any).ownerId) ids.add(String((t as any).ownerId));
+            });
+        });
+        const missing = Array.from(ids).filter((id) => !userMetaCache[id]);
+        if (!missing.length) return;
+        (async () => {
+            try {
+                const updates: Record<string, { phone?: string; name?: string }> = {};
+                for (const uid of missing) {
+                    try {
+                        const docSnap = await getDoc(doc(db, "users", uid));
+                        if (docSnap.exists()) {
+                            const data = docSnap.data() as any;
+                            updates[uid] = {
+                                phone: data.phone || "",
+                                name: data.fullName || data.name || data.displayName || data.email || "",
+                            };
+                        }
+                    } catch (err) {
+                        console.warn("failed fetch phone for user", uid, err);
+                    }
+                }
+                if (Object.keys(updates).length) {
+                    setUserMetaCache((prev) => ({ ...prev, ...updates }));
+                }
+            } catch {
+                /* ignore */
+            }
+        })();
+    }, [db, tasksByEvent, userMetaCache]);
+
+    const setTaskSelectionImmediate = async (eventId: string, taskId: string, select: boolean, scope: "event" | "project" = "event") => {
         if (!db) return;
         if (!isAuthed) {
             openAuth(eventId);
@@ -371,7 +566,7 @@ export default function VolunteerEventsPage() {
 
         try {
             setSaveStatus((prev) => ({ ...prev, [eventId]: "saving" }));
-            const taskRef = doc(db, "events", eventId, "tasks", taskId);
+            const taskRef = doc(db, ...getTaskRefPath(scope, eventId, taskId));
             const snap = await getDoc(taskRef);
             if (!snap.exists()) {
                 setSaveStatus((prev) => ({ ...prev, [eventId]: "error" }));
@@ -381,9 +576,48 @@ export default function VolunteerEventsPage() {
             const data = snap.data() as any;
             const currentAssignees = Array.isArray(data.assignees) ? data.assignees : [];
             const filtered = currentAssignees.filter((a: any) => (a?.email || "").toLowerCase() !== sessionIdentity.email);
-            const updatedAssignees = select ? [...filtered, { name: sessionIdentity.name, email: sessionIdentity.email }] : filtered;
 
-            await updateDoc(taskRef, { assignees: updatedAssignees });
+            // Try to bind the assignee to an existing user for dashboard visibility
+            let assigneeIdPatch: any = {};
+            let enrichedAssignee: { name: string; email: string; userId?: string } | null = null;
+            if (select) {
+                try {
+                    const usersSnap = await getDocs(
+                        query(collection(db, "users"), where("email", "==", sessionIdentity.email))
+                    );
+                    const matchedUser = usersSnap.docs[0];
+                    if (matchedUser) {
+                        enrichedAssignee = {
+                            name: sessionIdentity.name,
+                            email: sessionIdentity.email.toLowerCase(),
+                            userId: matchedUser.id,
+                        };
+                        assigneeIdPatch = {
+                            assigneeId: matchedUser.id,
+                            assignee: sessionIdentity.name,
+                            assigneeEmail: sessionIdentity.email.toLowerCase(),
+                        };
+                    } else {
+                        enrichedAssignee = {
+                            name: sessionIdentity.name,
+                            email: sessionIdentity.email.toLowerCase(),
+                        };
+                        assigneeIdPatch = { assignee: sessionIdentity.name, assigneeId: "", assigneeEmail: sessionIdentity.email.toLowerCase() };
+                    }
+                } catch (lookupErr) {
+                    console.warn("user lookup failed", lookupErr);
+                    assigneeIdPatch = { assignee: sessionIdentity.name, assigneeEmail: sessionIdentity.email.toLowerCase() };
+                    enrichedAssignee = { name: sessionIdentity.name, email: sessionIdentity.email.toLowerCase() };
+                }
+            } else if (filtered.length === 0) {
+                assigneeIdPatch = { assignee: "", assigneeId: "", assigneeEmail: "" };
+            }
+
+            const updatedAssignees = select
+                ? [...filtered, enrichedAssignee || { name: sessionIdentity.name, email: sessionIdentity.email.toLowerCase() }]
+                : filtered;
+
+            await updateDoc(taskRef, { assignees: updatedAssignees, ...assigneeIdPatch });
 
             // Update local selections
             setSelectedTasksByEvent((prev) => {
@@ -393,6 +627,12 @@ export default function VolunteerEventsPage() {
                 else set.delete(taskId);
                 next[eventId] = set;
                 return next;
+            });
+
+            setTasksByEvent((prev) => {
+                const current = prev[eventId] || [];
+                const updated = current.map((t) => (t.id === taskId ? { ...t, assignees: updatedAssignees } : t));
+                return { ...prev, [eventId]: updated };
             });
 
             // Update local events/tasks for immediate UI sync
@@ -416,59 +656,64 @@ export default function VolunteerEventsPage() {
         }
     };
 
-    const removeTaskSelection = async (eventId: string, taskId: string) => {
-        await setTaskSelectionImmediate(eventId, taskId, false);
+    const removeTaskSelection = async (eventId: string, taskId: string, scope: "event" | "project" = "event") => {
+        // Prevent removing a task that was already completed
+        const currentStatus = (tasksByEvent[eventId] || []).find((t) => t.id === taskId)?.status;
+        if (currentStatus === "DONE") return;
+        await setTaskSelectionImmediate(eventId, taskId, false, scope);
     };
 
-    const toggleTaskDone = async (eventId: string, taskId: string, currentStatus: string) => {
+    const toggleTaskDone = async (eventId: string, taskId: string, currentStatus: string, scope: "event" | "project" = "event") => {
         if (!db) return;
         if (!isAuthed) return;
-        const nextStatus = currentStatus === "DONE" ? "TODO" : "DONE";
+        const isPending = currentStatus === "PENDING_APPROVAL";
         try {
             setSaveStatus((prev) => ({ ...prev, [eventId]: "saving" }));
-            const taskRef = doc(db, "events", eventId, "tasks", taskId);
-            await updateDoc(taskRef, { status: nextStatus });
-            if (nextStatus === "DONE") {
-                // log completion for volunteer history
-                try {
-                    const task = (tasksByEvent[eventId] || []).find((t) => t.id === taskId);
-                    const ev = events.find((e) => e.id === eventId);
-                    await addDoc(collection(db, "volunteer_completions"), {
-                        email: sessionIdentity.email,
-                        name: sessionIdentity.name,
-                        eventId,
-                        eventTitle: ev?.title || "",
-                        taskId,
-                        taskTitle: task?.title || "משימה",
-                        volunteerHours: task?.volunteerHours ?? null,
-                        completedAt: serverTimestamp(),
-                    });
-                } catch (logErr) {
-                    console.warn("Failed logging completion", logErr);
-                }
+            const taskRef = doc(db, ...getTaskRefPath(scope, eventId, taskId));
+
+            if (isPending) {
+                await updateDoc(taskRef, { pendingApproval: false, pendingApprovalRequestId: "", status: "TODO" });
             } else {
-                // remove completion log for this task/email
-                try {
-                    const logsSnap = await getDocs(
-                        query(
-                            collection(db, "volunteer_completions"),
-                            where("email", "==", sessionIdentity.email),
-                            where("taskId", "==", taskId)
-                        )
-                    );
-                    for (const d of logsSnap.docs) {
-                        await deleteDoc(d.ref);
+                const task = (tasksByEvent[eventId] || []).find((t) => t.id === taskId);
+                const ev = events.find((e) => e.id === eventId);
+                let ownerId = (task as any)?.createdBy || (task as any)?.ownerId || (ev as any)?.createdBy || (ev as any)?.ownerId || "";
+                let ownerEmail = ((task as any)?.createdByEmail || (task as any)?.ownerEmail || (ev as any)?.createdByEmail || (ev as any)?.ownerEmail || "") as string;
+                if (!ownerId || !ownerEmail) {
+                    try {
+                        const parentRef = scope === "project" ? doc(db, "projects", eventId) : doc(db, "events", eventId);
+                        const parentSnap = await getDoc(parentRef);
+                        const data = parentSnap.data() as any;
+                        ownerId = ownerId || data?.ownerId || data?.createdBy || "";
+                        ownerEmail = ownerEmail || data?.ownerEmail || data?.createdByEmail || "";
+                    } catch (lookupErr) {
+                        console.warn("Owner lookup failed", lookupErr);
                     }
-                } catch (logErr) {
-                    console.warn("Failed removing completion log", logErr);
                 }
+                ownerEmail = typeof ownerEmail === "string" ? ownerEmail.toLowerCase() : "";
+                const reqRef = await addDoc(collection(db, "task_completion_requests"), {
+                    taskId,
+                    taskTitle: task?.title || "משימה",
+                    eventId,
+                    eventTitle: ev?.title || "",
+                    scope,
+                    volunteerEmail: sessionIdentity.email,
+                    volunteerName: sessionIdentity.name,
+                    volunteerHours: task?.volunteerHours ?? null,
+                    ownerId,
+                    ownerEmail,
+                    status: "PENDING",
+                    createdAt: serverTimestamp(),
+                });
+                await updateDoc(taskRef, { pendingApproval: true, pendingApprovalRequestId: reqRef.id, status: "TODO" });
+                alert("הבקשה לאישור נשלחה ליוצר המשימה. המשימה תסומן כהושלמה רק לאחר אישור.");
             }
+
             setEvents((prev) =>
                 prev.map((ev) =>
                     ev.id === eventId
                         ? {
                             ...ev,
-                            tasks: (ev.tasks || []).map((t) => (t.id === taskId ? { ...t, status: nextStatus } : t)),
+                            tasks: (ev.tasks || []).map((t) => (t.id === taskId ? { ...t, pendingApproval: !isPending, status: isPending ? "TODO" : t.status } : t)),
                         }
                         : ev
                 )
@@ -512,13 +757,20 @@ export default function VolunteerEventsPage() {
                             <h1 className="text-3xl font-bold text-gray-900">אירועים ומשימות פתוחות למתנדבים</h1>
                             <p className="text-gray-600">אחרי הרשמה תוכלו לבחור ולשריין משימות, ולעקוב אחרי מה שבחרתם באזור האישי.</p>
                         </div>
-                        <button
-                            onClick={() => { /* snapshot מבצע רענון אוטומטי; כפתור דמה למניעת ReferenceError */ }}
-                            className="px-3 py-2 text-sm rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                            disabled={loading}
-                        >
-                            {loading ? "מרענן..." : "משימות מתעדכנות אוטומטית"}
-                        </button>
+                        <div className="flex flex-col items-end gap-1">
+                            {isAuthed && (
+                                <div className="text-right text-xs text-indigo-800">
+                                    <div className="font-semibold">{sessionIdentity.name}</div>
+                                    <div className="text-indigo-700">{sessionIdentity.email}</div>
+                                </div>
+                            )}
+                            <button
+                                onClick={handleVolunteerLogout}
+                                className="px-3 py-2 text-sm rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-semibold"
+                            >
+                                התנתק
+                            </button>
+                        </div>
                     </div>
                     
                 {!isAuthed && (
@@ -630,11 +882,17 @@ export default function VolunteerEventsPage() {
                             </div>
                         )}
                         {myTasks.length > 0 && (
-                            <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6">
+                            <div
+                                className="rounded-2xl shadow-xl border p-6"
+                                style={{ background: "#fff9d6", borderColor: "#f3e4a3" }}
+                            >
                                 <div className="flex items-center justify-between mb-3 gap-3">
                                     <div>
                                         <h3 className="text-lg font-bold text-gray-900">המשימות שלי</h3>
                                         <p className="text-sm text-gray-600">משימות שסימנת או הוקצתה אליך באירועים שלך.</p>
+                                        <p className="text-xs text-gray-600 mt-1">
+                                            קודם בחר משימות שתרצה לבצע. אחרי שסיימת, סמן שהמשימה בוצעה כדי לשלוח לאישור ולצבור שעות התנדבות.
+                                        </p>
                                     </div>
                                     <button
                                         onClick={() => setShowPendingOnly((v) => !v)}
@@ -650,199 +908,238 @@ export default function VolunteerEventsPage() {
                                 {showPendingOnly && visibleMyTasks.length === 0 && (
                                     <p className="text-sm text-gray-500 mb-3">אין משימות פתוחות כרגע.</p>
                                 )}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {visibleMyTasks.map(({ eventId, eventTitle, task }) => {
-                                        const taskDate = task.dueDate ? new Date(task.dueDate) : null;
-                                        return (
-                                            <div
-                                                key={`${eventId}-${task.id}`}
-                                                className="border border-gray-200 rounded-lg p-4 bg-white cursor-pointer hover:border-indigo-300 hover:shadow-sm transition"
-                                                onClick={() => router.push(`/tasks/${task.id}?eventId=${eventId}&source=volunteer`)}
-                                                role="button"
-                                                tabIndex={0}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === "Enter" || e.key === " ") {
-                                                        e.preventDefault();
-                                                        router.push(`/tasks/${task.id}?eventId=${eventId}&source=volunteer`);
-                                                    }
-                                                }}
-                                            >
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <h4 className="font-semibold text-sm text-gray-900 truncate">{task.title}</h4>
-                                                    <span className="text-[11px] text-gray-600">{eventTitle || "אירוע"}</span>
+                                <div className="space-y-4">
+                                    {groupedMyTasks.map(group => (
+                                        <div key={group.eventId} className="rounded-lg border border-amber-100 bg-white p-3">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                                                    <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">{group.eventTitle || "אירוע/פרויקט"}</span>
                                                 </div>
-                                                {task.description && <p className="text-xs text-gray-600 mb-2 line-clamp-2">{task.description}</p>}
-                                                {taskDate && (
-                                                    <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
-                                                        <Clock size={12} />
-                                                        <span>דד ליין: {taskDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
-                                                    </div>
-                                                )}
-                                                {task.volunteerHours != null && (
-                                                    <p className="text-xs text-gray-600 mb-1">משך משוער: {task.volunteerHours} שעות</p>
-                                                )}
-                                                <div className="flex items-center justify-between mt-2">
-                                                    <div className="flex items-center gap-3">
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); toggleTaskDone(eventId, task.id, task.status); }}
-                                                            className="flex items-center gap-1 text-sm font-semibold"
-                                                        >
-                                                            {task.status === "DONE" ? (
-                                                                <CheckCircle2 className="text-emerald-600" size={18} />
-                                                            ) : (
-                                                                <Circle className="text-gray-400" size={18} />
-                                                            )}
-                                                            <span className="text-xs text-gray-700">
-                                                                {task.status === "DONE" ? "הושלם" : "סמן כהושלם"}
-                                                            </span>
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); removeTaskSelection(eventId, task.id); }}
-                                                            className="text-xs text-red-600 hover:text-red-700 font-semibold"
-                                                        >
-                                                            שחרר משימה
-                                                        </button>
-                                                    </div>
-                                                </div>
+                                                <span className="text-xs text-gray-500">{group.tasks.length} משימות</span>
                                             </div>
-                                        );
-                                    })}
+                                            <div className="divide-y divide-gray-100">
+                                                {group.tasks.map(({ eventId, task }) => {
+                                                    const taskDate = task.dueDate ? new Date(task.dueDate) : null;
+                                                    return (
+                                                        <div
+                                                            key={`${eventId}-${task.id}`}
+                                                            className="py-2 flex items-center gap-3"
+                                                        >
+                                                            <button
+                                                                onClick={() => toggleTaskDone(eventId, task.id, task.pendingApproval ? "PENDING_APPROVAL" : task.status, task.scope || "event")}
+                                                                className="flex items-center gap-1 text-sm font-semibold shrink-0"
+                                                            >
+                                                                {task.pendingApproval ? (
+                                                                    <Circle className="text-amber-500" size={18} />
+                                                                ) : task.status === "DONE" ? (
+                                                                    <CheckCircle2 className="text-emerald-600" size={18} />
+                                                                ) : (
+                                                                    <Circle className="text-gray-400" size={18} />
+                                                                )}
+                                                                <span className="text-xs text-gray-700">
+                                                                    {task.pendingApproval ? "ממתין לאישור" : task.status === "DONE" ? "הושלם" : "סמן כהושלם"}
+                                                                </span>
+                                                            </button>
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-sm font-semibold text-gray-900 truncate">{task.title}</p>
+                                                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+                                                                    {taskDate && (
+                                                                        <span className="flex items-center gap-1">
+                                                                            <Clock size={11} />
+                                                                            דד ליין: {taskDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                                                        </span>
+                                                                    )}
+                                                                    {task.volunteerHours != null && (
+                                                                        <span>משך: {task.volunteerHours} ש&apos;ע</span>
+                                                                    )}
+                                                                    {task.pendingApproval && <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700">נשלח לאישור</span>}
+                                                                    {task.lastApprovalDecision === "REJECTED" && <span className="px-2 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-700">הבקשה נדחתה</span>}
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    onClick={() => router.push(`/tasks/${task.id}?eventId=${eventId}&source=volunteer`)}
+                                                                    className="text-xs text-indigo-700 hover:underline"
+                                                                >
+                                                                    פרטים נוספים
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (task.status === "DONE") return;
+                                                                        removeTaskSelection(eventId, task.id, task.scope || "event");
+                                                                    }}
+                                                                    disabled={task.status === "DONE"}
+                                                                    className={`text-xs font-semibold ${task.status === "DONE" ? "text-gray-400 cursor-not-allowed" : "text-red-600 hover:text-red-700"}`}
+                                                                >
+                                                                    שחרר
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         )}
                         {isAuthed && (
-                            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4 text-sm text-indigo-900">
-                                זהו האזור לבחירת משימות פתוחות. בחירה וסימון השלמה יצברו שעות התנדבות בפרופיל האישי שלך.
+                            <div
+                                className="border rounded-xl p-4 mb-4 text-sm"
+                                style={{ background: "#fff9d6", borderColor: "#f5e7a8", color: "#5c3c1f" }}
+                            >
+                                בכל משימה יש כפתור "פרטים נוספים" לקבלת כל המידע על המשימה, וכפתור וואטסאפ ליצירת קשר עם יוצר המשימה במקרה של שאלות.
                             </div>
                         )}
                         {events.map((event) => {
-                            const eventTasks = tasksByEvent[event.id] || [];
-                            const eventDate = event.startTime?.seconds ? new Date(event.startTime.seconds * 1000) : null;
-                            const currentEmailLower = sessionIdentity.email;
-                            const eventTasksAvailable = eventTasks.filter((t) => {
-                                const assignedTo = (t.assignees || []).map((a) => (a.email || "").toLowerCase());
-                                // If assigned to someone else (not me), hide from available list
-                                return !assignedTo.length || assignedTo.includes(currentEmailLower);
+                            const eventTasks = (tasksByEvent[event.id] || []).filter((t) => t.isVolunteerTask === true || (t.isVolunteerTask === undefined && t.volunteerHours != null));
+                            const eventDate = event.startTime?.seconds ? new Date(event.startTime.seconds * 1000) : (event.startTime ? new Date(event.startTime) : null);
+                            const eventTasksAvailable = eventTasks.filter((task) => {
+                                if (task.status === "DONE") return false;
+                                const assignees = (task.assignees || []).map(a => (a.email || "").toLowerCase()).filter(Boolean);
+                                const assignedToMe = assignees.includes(sessionIdentity.email);
+                                const assignedToOthers = assignees.length > 0 && !assignedToMe;
+                                return !assignedToOthers || assignedToMe;
                             });
                             const hasTasks = eventTasksAvailable.length > 0;
                             
                             if (!hasTasks) return null;
                             return (
                                 <div key={event.id} className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
-                                    {/* Event Header */}
-                                    <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 p-6 text-white">
-                                        <h2 className="text-2xl font-bold mb-3">{event.title}</h2>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                            {event.location && (
-                                                <div className="flex items-center gap-2">
-                                                    <MapPin size={16} />
-                                                    <span>{event.location}</span>
+                                    <div
+                                        className="p-5 flex flex-col gap-1 border-b"
+                                        style={{ background: "#ffe6bf", borderColor: "#f4c98f", color: "#5c2f00" }}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <h2 className="text-xl font-bold" style={{ color: "#5c2f00" }}>{event.title}</h2>
+                                            {isAuthed ? (
+                                                <div className="flex items-center gap-2 text-sm text-gray-700">
+                                                    <UserCheck size={16} className="text-emerald-600" />
+                                                    <span>מחובר/ת</span>
                                                 </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => openAuth()}
+                                                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                >
+                                                    <Lock size={14} />
+                                                    התחבר/י לבחור משימות
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap gap-3 text-xs" style={{ color: "#5c2f00" }}>
+                                            {event.location && (
+                                                <span className="flex items-center gap-1"><MapPin size={14} />{event.location}</span>
                                             )}
                                             {eventDate && (
-                                                <div className="flex items-center gap-2">
-                                                    <Calendar size={16} />
-                                                    <span>
-                                                        {eventDate.toLocaleDateString("he-IL", { 
-                                                            weekday: "long", 
-                                                            day: "2-digit", 
-                                                            month: "long",
-                                                            year: "numeric"
-                                                        })} • {eventDate.toLocaleTimeString("he-IL", { 
-                                                            hour: "2-digit", 
-                                                            minute: "2-digit" 
-                                                        })}
-                                                    </span>
-                                                </div>
+                                                <span className="flex items-center gap-1">
+                                                    <Calendar size={14} />
+                                                    {eventDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })} •{" "}
+                                                    {eventDate.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}
+                                                </span>
                                             )}
                                             {event.volunteersCount && (
-                                                <div className="flex items-center gap-2">
-                                                    <Users size={16} />
-                                                    <span>מקומות למתנדבים: {event.volunteersCount}</span>
-                                                </div>
+                                                <span className="flex items-center gap-1"><Users size={14} />מקומות: {event.volunteersCount}</span>
                                             )}
                                         </div>
                                         {event.description && (
-                                            <p className="text-sm text-indigo-100 mt-3 leading-relaxed">{event.description}</p>
+                                            <p className="text-xs text-amber-900 mt-1 leading-relaxed line-clamp-2">{event.description}</p>
                                         )}
                                     </div>
-
-                                    {/* Tasks Section */}
-                                    <div className="p-6 space-y-4">
-                                        {hasTasks ? (
-                                            <>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <Target size={20} className="text-indigo-600" />
-                                                        <h3 className="text-lg font-bold text-gray-900">משימות זמינות</h3>
-                                                    </div>
-                                                    {isAuthed ? (
-                                                        <div className="flex items-center gap-2 text-sm text-gray-700">
-                                                            <UserCheck size={16} className="text-emerald-600" />
-                                                            <span>מחובר/ת</span>
-                                                        </div>
-                                                    ) : (
+                                    <div className="p-5">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Target size={18} className="text-indigo-600" />
+                                            <h3 className="text-sm font-bold text-gray-900">משימות זמינות</h3>
+                                        </div>
+                                        <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+                                            {eventTasksAvailable.map((task) => {
+                                                const taskDate = task.dueDate ? new Date(task.dueDate) : null;
+                                                const selectedSet = getSelectedForEvent(event.id);
+                                                const isSelected = selectedSet.has(task.id);
+                                                const assignedEmails = (task.assignees || []).map((a) => (a.email || "").toLowerCase()).filter(Boolean);
+                                                const assignedToMe = assignedEmails.includes(sessionIdentity.email);
+                                                const assignedToOthers = assignedEmails.length > 0 && !assignedToMe;
+                                                const creatorId = (task as any).createdBy || (task as any).ownerId || "";
+                                                const cachedMeta = creatorId ? userMetaCache[creatorId] : undefined;
+                                                const creatorName =
+                                                    cachedMeta?.name ||
+                                                    (task as any)?.createdByName ||
+                                                    (event as any)?.contactPerson?.name ||
+                                                    (event as any)?.contactName ||
+                                                    "";
+                                                const whatsappLink = buildWhatsappLink(
+                                                    (task as any).createdByPhone ||
+                                                    (task as any).creatorPhone ||
+                                                    (task as any).ownerPhone ||
+                                                    (task as any).contactPhone ||
+                                                    (cachedMeta?.phone) ||
+                                                    (event as any)?.contactPhone ||
+                                                    (event as any)?.contactPerson?.phone,
+                                                    task.title,
+                                                    creatorName
+                                                );
+                                                return (
+                                                    <div key={task.id} className="flex items-center gap-3 px-3 py-2 bg-white">
                                                         <button
-                                                            onClick={() => openAuth()}
-                                                            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                            onClick={() => setTaskSelectionImmediate(event.id, task.id, !isSelected, event.scope || "event")}
+                                                            className="shrink-0"
                                                         >
-                                                            <Lock size={14} />
-                                                            התחבר/י לבחור משימות
+                                                            {isSelected ? <CheckSquare className="text-indigo-600" size={18} /> : <Square className="text-gray-400" size={18} />}
                                                         </button>
-                                                    )}
-                                                </div>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-2">
-                                                    {eventTasksAvailable.map((task) => {
-                                                        const taskDate = task.dueDate ? new Date(task.dueDate) : null;
-                                                        const selectedSet = getSelectedForEvent(event.id);
-                                                        const isSelected = selectedSet.has(task.id);
-                                                        const alreadyAssigned = task.assignees?.some((a) => (a.email || "").toLowerCase() === sessionIdentity.email);
-                                                        return (
-                                                            <div
-                                                                key={task.id}
-                                                                className={`border rounded-lg p-4 transition ${isSelected ? "border-indigo-500 bg-indigo-50" : "border-gray-200 bg-white hover:border-indigo-200"}`}
-                                                            >
-                                                                <div className="flex items-start gap-2">
-                                                                    <button
-                                                                        onClick={() => setTaskSelectionImmediate(event.id, task.id, !isSelected)}
-                                                                        className="mt-0.5 cursor-pointer"
-                                                                    >
-                                                                        {isSelected ? <CheckSquare className="text-indigo-600" size={18} /> : <Square className="text-gray-400" size={18} />}
-                                                                    </button>
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <h4 className="font-semibold text-sm text-gray-900 mb-1">{task.title}</h4>
-                                                                        {task.description && (
-                                                                            <p className="text-xs text-gray-600 mb-2 line-clamp-2">{task.description}</p>
-                                                                        )}
-                                                                        {taskDate && (
-                                                                            <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
-                                                                                <Clock size={12} />
-                                                                                <span>דד ליין: {taskDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
-                                                                            </div>
-                                                                        )}
-                                                                        {task.volunteerHours != null && task.volunteerHours !== undefined && (
-                                                                            <div className="text-xs text-gray-600 mb-1">
-                                                                                משך משוער: {task.volunteerHours} שעות
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className={`text-xs px-2 py-0.5 rounded ${task.priority === "CRITICAL" ? "bg-red-100 text-red-700" : task.priority === "HIGH" ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-700"}`}>
-                                                                                {task.priority === "CRITICAL" ? "קריטי" : task.priority === "HIGH" ? "גבוה" : "רגיל"}
-                                                                            </span>
-                                                                            {alreadyAssigned && <span className="text-xs text-emerald-600">כבר מסומן עבורך</span>}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <p className="font-semibold text-sm text-gray-900 truncate">{task.title}</p>
+                                                                <span className={`text-[11px] px-2 py-0.5 rounded ${task.priority === "CRITICAL" ? "bg-red-100 text-red-700" : task.priority === "HIGH" ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-700"}`}>
+                                                                    {task.priority === "CRITICAL" ? "קריטי" : task.priority === "HIGH" ? "גבוה" : "רגיל"}
+                                                                </span>
                                                             </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                                </>
-                                            ) : (
-                                                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center text-gray-500 text-sm mb-6">
-                                                    אין משימות זמינות כרגע לאירוע זה
-                                            </div>
-                                        )}
+                                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+                                                                {taskDate && (
+                                                                    <span className="flex items-center gap-1">
+                                                                        <Clock size={11} />
+                                                                        דד ליין: {taskDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                                                    </span>
+                                                                )}
+                                                                {task.volunteerHours != null && (
+                                                                    <span>משך: {task.volunteerHours} ש&apos;ע</span>
+                                                                )}
+                                                                {task.pendingApproval && (
+                                                                    <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700">נשלח לאישור</span>
+                                                                )}
+                                                                {task.lastApprovalDecision === "REJECTED" && (
+                                                                    <span className="px-2 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-700">נדחה</span>
+                                                                )}
+                                                                {assignedToMe && <span className="text-emerald-700">שמור עבורך</span>}
+                                                                {assignedToOthers && <span className="text-amber-700">שמור למתנדב אחר</span>}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 text-xs">
+                                                            {whatsappLink ? (
+                                                                <a
+                                                                    href={whatsappLink}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="p-2 rounded-full border border-green-500 bg-green-50 text-green-700 hover:bg-green-100 transition shadow-sm"
+                                                                    title="שליחת הודעת וואטסאפ ליוצר המשימה"
+                                                                >
+                                                                    <MessageCircle size={16} />
+                                                                </a>
+                                                            ) : (
+                                                                <span className="p-2 rounded-full border border-gray-200 bg-gray-50 text-gray-300 cursor-not-allowed" title="אין מספר וואטסאפ זמין">
+                                                                    <MessageCircle size={16} />
+                                                                </span>
+                                                            )}
+                                                            <button
+                                                                onClick={() => router.push(`/tasks/${task.id}?eventId=${event.id}&source=volunteer`)}
+                                                                className="text-indigo-700 hover:underline"
+                                                            >
+                                                                פרטים נוספים
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 </div>
                             );

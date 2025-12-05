@@ -61,6 +61,7 @@ export default function TaskDetailPage() {
     const taskId = params?.id as string;
     const searchParams = useSearchParams();
     const viewSource = searchParams?.get("source") || "";
+    const isVolunteerView = viewSource === "volunteer";
     const hintedEventId = searchParams?.get("eventId") || null;
     const focusSection = searchParams?.get("focus");
     const assigneeSectionRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +76,8 @@ export default function TaskDetailPage() {
     const [attachments, setAttachments] = useState<any[]>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+    const [eventCreatorName, setEventCreatorName] = useState<string>("");
+    const [creatorDisplayName, setCreatorDisplayName] = useState<string>("");
 
     // Backfill creator contact details from the user profile (registration info)
     useEffect(() => {
@@ -125,10 +128,33 @@ export default function TaskDetailPage() {
     // SOLUTION: We will use a Collection Group Query to find the task by ID.
 
     useEffect(() => {
-        if (!loading && !user) {
+        // אם הגיע מהאיזור האישי של מתנדבים, מאפשרים תצוגה גם ללא התחברות מנהל
+        if (!loading && !user && !isVolunteerView) {
             router.push("/login");
         }
-    }, [user, loading, router]);
+    }, [user, loading, router, isVolunteerView]);
+
+    useEffect(() => {
+        const fetchCreatorName = async () => {
+            if (!db || !task) return;
+            const creatorId = (task as any).createdBy || (task as any).ownerId;
+            if (!creatorId) return;
+            try {
+                const snap = await getDoc(doc(db, "users", creatorId));
+                if (snap.exists()) {
+                    const d = snap.data() as any;
+                    const name = d.fullName || d.name || d.displayName || d.email || "";
+                    if (name) {
+                        setCreatorDisplayName(name);
+                        setEventCreatorName(name);
+                    }
+                }
+            } catch (err) {
+                console.warn("failed to load creator name", err);
+            }
+        };
+        fetchCreatorName();
+    }, [db, task]);
 
     useEffect(() => {
         const fetchTask = async () => {
@@ -166,12 +192,50 @@ export default function TaskDetailPage() {
                         eventTitle: (eventData as any).title,
                         eventTeam: ((eventData as any).team as EventTeamMember[]) || [],
                         eventNeedsVolunteers: !!(eventData as any).needsVolunteers,
+                        creatorName:
+                            (eventData as any).createdByName ||
+                            (eventData as any).ownerName ||
+                            (eventData as any).creatorName ||
+                            (eventData as any).createdByEmail ||
+                            "",
+                    };
+                };
+
+                const fetchByProjectId = async (projectId: string) => {
+                    if (!db) return null;
+                    const taskRef = doc(db, "projects", projectId, "tasks", taskId);
+                    const taskSnap = await getDoc(taskRef);
+                    if (!taskSnap.exists()) return null;
+                    const projectDoc = await getDoc(doc(db, "projects", projectId));
+                    if (!projectDoc.exists()) return null;
+                    const projectData = projectDoc.data();
+                    const taskData = taskSnap.data();
+                    return {
+                        task: {
+                            id: taskSnap.id,
+                            ...taskData,
+                            assignee: taskData.assignee || normalizeAssignees(taskData)[0]?.name || "",
+                            assignees: normalizeAssignees(taskData),
+                            createdByName: (taskData as any).createdByName || (taskData as any).createdBy || "",
+                            createdByPhone: (taskData as any).createdByPhone || (taskData as any).creatorPhone || "",
+                            createdBy: (taskData as any).createdBy || null,
+                            eventId: projectId
+                        } as Task,
+                        eventTitle: (projectData as any).name || (projectData as any).title || "פרויקט",
+                        eventTeam: ((projectData as any).teamMembers as EventTeamMember[]) || [],
+                        eventNeedsVolunteers: false,
+                        creatorName:
+                            (projectData as any).ownerName ||
+                            (projectData as any).createdByName ||
+                            (projectData as any).ownerEmail ||
+                            "",
                     };
                 };
 
                 let foundTask: Task | null = null;
                 let foundEventId = "";
                 let foundEventTitle = "";
+                let foundCreatorName = "";
                 let foundEventTeam: EventTeamMember[] = [];
                 let foundEventNeedsVolunteers = false;
 
@@ -183,6 +247,7 @@ export default function TaskDetailPage() {
                         foundEventId = hintedEventId;
                         foundEventTitle = res.eventTitle;
                         foundEventTeam = res.eventTeam;
+                        foundCreatorName = (res as any).creatorName || "";
                         foundEventNeedsVolunteers = res.eventNeedsVolunteers;
                     }
                 }
@@ -201,6 +266,26 @@ export default function TaskDetailPage() {
                             foundEventId = eventDoc.id;
                             foundEventTitle = res.eventTitle;
                             foundEventTeam = res.eventTeam;
+                            foundCreatorName = (res as any).creatorName || "";
+                            foundEventNeedsVolunteers = res.eventNeedsVolunteers;
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback: iterate projects (for project-level tasks)
+                if (!foundTask) {
+                    const { collection, getDocs } = await import("firebase/firestore");
+                    const projectsRef = collection(db, "projects");
+                    const projectsSnap = await getDocs(projectsRef);
+                    for (const projDoc of projectsSnap.docs) {
+                        const res = await fetchByProjectId(projDoc.id);
+                        if (res) {
+                            foundTask = res.task;
+                            foundEventId = projDoc.id;
+                            foundEventTitle = res.eventTitle;
+                            foundEventTeam = res.eventTeam;
+                            foundCreatorName = (res as any).creatorName || "";
                             foundEventNeedsVolunteers = res.eventNeedsVolunteers;
                             break;
                         }
@@ -210,6 +295,8 @@ export default function TaskDetailPage() {
                 if (foundTask) {
                     setTask({ ...foundTask, eventTitle: foundEventTitle });
                     setEventTeam(foundEventTeam);
+                    setEventCreatorName(foundCreatorName || foundTask.createdByName || "");
+                    setCreatorDisplayName(foundCreatorName || foundTask.createdByName || "");
                     setEventNeedsVolunteers(foundEventNeedsVolunteers);
 
                     // Subscribe to chat
@@ -259,6 +346,13 @@ export default function TaskDetailPage() {
                         if (docSnap.exists()) {
                             const data = docSnap.data();
                             setEventTeam((data.team as EventTeamMember[]) || []);
+                            const creatorName =
+                                (data as any).createdByName ||
+                                (data as any).ownerName ||
+                                (data as any).creatorName ||
+                                (data as any).createdByEmail ||
+                                "";
+                            setEventCreatorName(creatorName || "");
                             setEventNeedsVolunteers(!!data.needsVolunteers);
                         }
                     });
@@ -458,7 +552,7 @@ export default function TaskDetailPage() {
         return digits;
     };
     const creatorPhoneDigits = normalizeForWhatsapp(rawCreatorPhoneDigits);
-    const whatsappMessage = encodeURIComponent(`היי ${task.createdByName || ""}, יש לי שאלה לגבי המשימה "${task.title}"`);
+    const whatsappMessage = encodeURIComponent(`היי ${creatorDisplayName || eventCreatorName || task.createdByName || ""}, יש לי שאלה לגבי המשימה "${task.title}"`);
     const whatsappLink = creatorPhoneDigits && creatorPhoneDigits.length >= 8 ? `https://wa.me/${creatorPhoneDigits}?text=${whatsappMessage}` : null;
 
     return (
@@ -478,7 +572,7 @@ export default function TaskDetailPage() {
                             className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition w-fit"
                         >
                             <ArrowRight size={20} />
-                            חזרה למשימות
+                            חזרה לאזור האישי של המתנדב
                         </button>
                     ) : (
                         <Link
@@ -546,7 +640,7 @@ export default function TaskDetailPage() {
                                     />
                                 </div>
                             </div>
-                            {eventNeedsVolunteers && (
+                            {!isVolunteerView && eventNeedsVolunteers && (
                                 <div className="flex flex-col gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg mb-4">
                                     <div className="flex items-center gap-2">
                                         <input
@@ -587,53 +681,55 @@ export default function TaskDetailPage() {
                         </div>
 
                         {/* Chat Section */}
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[500px] flex flex-col">
-                            <div className="flex items-center gap-2 mb-4 pb-4 border-b border-gray-100">
-                                <MessageCircle className="text-indigo-600" />
-                                <h2 className="text-lg font-semibold">צ'אט ועדכונים</h2>
-                            </div>
+                        {!isVolunteerView && (
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[500px] flex flex-col">
+                                <div className="flex items-center gap-2 mb-4 pb-4 border-b border-gray-100">
+                                    <MessageCircle className="text-indigo-600" />
+                                    <h2 className="text-lg font-semibold">צ'אט ועדכונים</h2>
+                                </div>
 
-                            <div className="flex-1 overflow-y-auto space-y-4 mb-4 p-2">
-                                {messages.length === 0 ? (
-                                    <div className="text-center text-gray-400 py-8">
-                                        אין הודעות עדיין. התחל את השיחה!
-                                    </div>
-                                ) : (
-                                    messages.map((msg) => (
-                                        <div key={msg.id} className={`flex flex-col ${msg.senderId === user?.uid ? 'items-end' : 'items-start'}`}>
-                                            <div className={`max-w-[80%] p-3 rounded-lg ${msg.senderId === user?.uid
-                                                ? 'bg-indigo-600 text-white rounded-tl-none'
-                                                : 'bg-gray-100 text-gray-800 rounded-tr-none'
-                                                }`}>
-                                                <p className="text-sm">{msg.text}</p>
-                                            </div>
-                                            <span className="text-xs text-gray-400 mt-1 px-1">
-                                                {msg.senderName} • {(msg.createdAt?.seconds || msg.timestamp?.seconds)
-                                                    ? new Date((msg.createdAt?.seconds || msg.timestamp?.seconds) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                                    : '...'}
-                                            </span>
+                                <div className="flex-1 overflow-y-auto space-y-4 mb-4 p-2">
+                                    {messages.length === 0 ? (
+                                        <div className="text-center text-gray-400 py-8">
+                                            אין הודעות עדיין. התחל את השיחה!
                                         </div>
-                                    ))
-                                )}
-                            </div>
+                                    ) : (
+                                        messages.map((msg) => (
+                                            <div key={msg.id} className={`flex flex-col ${msg.senderId === user?.uid ? 'items-end' : 'items-start'}`}>
+                                                <div className={`max-w-[80%] p-3 rounded-lg ${msg.senderId === user?.uid
+                                                    ? 'bg-indigo-600 text-white rounded-tl-none'
+                                                    : 'bg-gray-100 text-gray-800 rounded-tr-none'
+                                                    }`}>
+                                                    <p className="text-sm">{msg.text}</p>
+                                                </div>
+                                                <span className="text-xs text-gray-400 mt-1 px-1">
+                                                    {msg.senderName} • {(msg.createdAt?.seconds || msg.timestamp?.seconds)
+                                                        ? new Date((msg.createdAt?.seconds || msg.timestamp?.seconds) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                                        : '...'}
+                                                </span>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
 
-                            <form onSubmit={handleSendMessage} className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={newMessage}
-                                    onChange={(e) => setNewMessage(e.target.value)}
-                                    placeholder="כתוב הודעה..."
-                                    className="flex-1 p-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                />
-                                <button
-                                    type="submit"
-                                    disabled={!newMessage.trim()}
-                                    className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                                >
-                                    <Send size={20} />
-                                </button>
-                            </form>
-                        </div>
+                                <form onSubmit={handleSendMessage} className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={newMessage}
+                                        onChange={(e) => setNewMessage(e.target.value)}
+                                        placeholder="כתוב הודעה..."
+                                        className="flex-1 p-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                    <button
+                                        type="submit"
+                                        disabled={!newMessage.trim()}
+                                        className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                    >
+                                        <Send size={20} />
+                                    </button>
+                                </form>
+                            </div>
+                        )}
 
                         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                             <h3 className="font-semibold text-gray-900 mb-3">קבצים מצורפים</h3>
@@ -675,121 +771,152 @@ export default function TaskDetailPage() {
 
                     {/* Sidebar Details */}
                     <div className="space-y-6">
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                            <h3 className="font-semibold text-gray-900 mb-4">פרטים נוספים</h3>
-
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                                        נוצר ע"י
-                                    </label>
-                                    <div className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800 flex items-center justify-between gap-2">
-                                        <span>{task.createdByName || "לא צויין"}</span>
-                                        {whatsappLink ? (
-                                            <a
-                                                href={whatsappLink}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
-                                                title="שליחת הודעת וואטסאפ ליוצר המשימה"
-                                            >
-                                                <MessageCircle size={14} />
-                                                וואטסאפ
-                                            </a>
-                                        ) : (
-                                            <span className="text-xs text-gray-400">אין מספר וואטסאפ שמור</span>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                                        <Calendar size={16} />
-                                        תאריך יעד
-                                    </label>
-                                    <input
-                                        type="date"
-                                        className="w-full p-2 border border-gray-200 rounded-lg text-sm"
-                                        value={task.dueDate}
-                                        onChange={(e) => handleUpdateField('dueDate', e.target.value)}
-                                    />
-                                </div>
-
-                                <div ref={assigneeSectionRef}>
-                                    <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                                        <User size={16} />
-                                        אחראים
-                                    </label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {eventTeam.map((member, idx) => {
-                                            const memberKey = getAssigneeKey(member);
-                                            const checked = task.assignees?.some(a => getAssigneeKey(a) === memberKey);
-                                            return (
-                                                <label
-                                                    key={`${member.name}-${idx}`}
-                                                    className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
-                                                    style={{ minWidth: '120px' }}
+                        {isVolunteerView ? (
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                <h3 className="font-semibold text-gray-900 mb-4">פרטים נוספים</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                            נוצר ע"י
+                                        </label>
+                                        <div className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800 flex items-center justify-between gap-2">
+                                            <span>{eventCreatorName || task.createdByName || "לא צויין"}</span>
+                                            {whatsappLink ? (
+                                                <a
+                                                    href={whatsappLink}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                                                    title="שליחת הודעת וואטסאפ ליוצר המשימה"
                                                 >
-                                                    <input
-                                                        type="checkbox"
-                                                        className="accent-white w-4 h-4"
-                                                        checked={checked}
-                                                        onChange={() => handleToggleAssignee(member)}
-                                                    />
-                                                    {member.name}
-                                                </label>
-                                            );
-                                        })}
-                                        {!eventTeam.length && (
-                                            <p className="text-xs text-gray-500">עדיין לא הוגדר צוות לאירוע זה.</p>
-                                        )}
+                                                    <MessageCircle size={14} />
+                                                    וואטסאפ
+                                                </a>
+                                            ) : (
+                                                <span className="text-xs text-gray-400">אין מספר וואטסאפ שמור</span>
+                                            )}
+                                        </div>
                                     </div>
-                                    {(!task.assignees || task.assignees.length === 0) && (
-                                        <p className="text-xs text-gray-500 mt-1">אין אחראים משויכים למשימה זו.</p>
-                                    )}
-                                </div>
-
-                                <div>
-                                    <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                                        <AlertTriangle size={16} />
-                                        עדיפות
-                                    </label>
-                                    <select
-                                        className="w-full p-2 border border-gray-200 rounded-lg text-sm"
-                                        value={task.priority}
-                                        onChange={(e) => handleUpdateField('priority', e.target.value)}
-                                    >
-                                        <option value="NORMAL">רגיל</option>
-                                        <option value="HIGH">גבוה</option>
-                                        <option value="CRITICAL">דחוף</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                                        סטטוס
-                                    </label>
-                                    <select
-                                        className="w-full p-2 border border-gray-200 rounded-lg text-sm"
-                                        value={task.status}
-                                        onChange={(e) => handleUpdateStatus(e.target.value)}
-                                    >
-                                        <option value="TODO">לביצוע</option>
-                                        <option value="IN_PROGRESS">בתהליך</option>
-                                        <option value="STUCK">תקוע</option>
-                                        <option value="DONE">בוצע</option>
-                                    </select>
                                 </div>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="space-y-6">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                    <h3 className="font-semibold text-gray-900 mb-4">פרטים נוספים</h3>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                                נוצר ע"י
+                                            </label>
+                                            <div className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800 flex items-center justify-between gap-2">
+                                                <span>{eventCreatorName || task.createdByName || "לא צויין"}</span>
+                                                {whatsappLink ? (
+                                                    <a
+                                                        href={whatsappLink}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                                                        title="שליחת הודעת וואטסאפ ליוצר המשימה"
+                                                    >
+                                                        <MessageCircle size={14} />
+                                                        וואטסאפ
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">אין מספר וואטסאפ שמור</span>
+                                                )}
+                                            </div>
+                                        </div>
 
-                        {task.eventTitle && (
-                            <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                                <p className="text-sm text-indigo-800 mb-2">שייך לאירוע:</p>
-                                <Link href={`/events/${task.eventId}`} className="font-bold text-indigo-900 hover:underline flex items-center gap-2">
-                                    {task.eventTitle}
-                                    <ArrowRight size={16} />
-                                </Link>
+                                        <div>
+                                            <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                                <Calendar size={16} />
+                                                תאריך יעד
+                                            </label>
+                                            <input
+                                                type="date"
+                                                className="w-full p-2 border border-gray-200 rounded-lg text-sm"
+                                                value={task.dueDate}
+                                                onChange={(e) => handleUpdateField('dueDate', e.target.value)}
+                                            />
+                                        </div>
+
+                                        <div ref={assigneeSectionRef}>
+                                            <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                                <User size={16} />
+                                                אחראים
+                                            </label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {eventTeam.map((member, idx) => {
+                                                    const memberKey = getAssigneeKey(member);
+                                                    const checked = task.assignees?.some(a => getAssigneeKey(a) === memberKey);
+                                                    return (
+                                                        <label
+                                                            key={`${member.name}-${idx}`}
+                                                            className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                                            style={{ minWidth: '120px' }}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                className="accent-white w-4 h-4"
+                                                                checked={checked}
+                                                                onChange={() => handleToggleAssignee(member)}
+                                                            />
+                                                            {member.name}
+                                                        </label>
+                                                    );
+                                                })}
+                                                {!eventTeam.length && (
+                                                    <p className="text-xs text-gray-500">עדיין לא הוגדר צוות לאירוע זה.</p>
+                                                )}
+                                            </div>
+                                            {(!task.assignees || task.assignees.length === 0) && (
+                                                <p className="text-xs text-gray-500 mt-1">אין אחראים משויכים למשימה זו.</p>
+                                            )}
+                                        </div>
+
+                                        <div>
+                                            <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                                <AlertTriangle size={16} />
+                                                עדיפות
+                                            </label>
+                                            <select
+                                                className="w-full p-2 border border-gray-200 rounded-lg text-sm"
+                                                value={task.priority}
+                                                onChange={(e) => handleUpdateField('priority', e.target.value)}
+                                            >
+                                                <option value="NORMAL">רגיל</option>
+                                                <option value="HIGH">גבוה</option>
+                                                <option value="CRITICAL">דחוף</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                                סטטוס
+                                            </label>
+                                            <select
+                                                className="w-full p-2 border border-gray-200 rounded-lg text-sm"
+                                                value={task.status}
+                                                onChange={(e) => handleUpdateStatus(e.target.value)}
+                                            >
+                                                <option value="TODO">לביצוע</option>
+                                                <option value="IN_PROGRESS">בתהליך</option>
+                                                <option value="STUCK">תקוע</option>
+                                                <option value="DONE">בוצע</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {task.eventTitle && (
+                                    <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                                        <p className="text-sm text-indigo-800 mb-2">שייך לאירוע:</p>
+                                        <Link href={`/events/${task.eventId}`} className="font-bold text-indigo-900 hover:underline flex items-center gap-2">
+                                            {task.eventTitle}
+                                            <ArrowRight size={16} />
+                                        </Link>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

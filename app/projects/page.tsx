@@ -3,7 +3,7 @@
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { addDoc, collection, doc, getDocs, serverTimestamp, updateDoc, where, query } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Calendar, CheckCircle2, ClipboardList, FolderKanban, Loader2, Plus, RefreshCcw, Users } from "lucide-react";
@@ -24,20 +24,19 @@ interface Project {
   teamMembers?: { userId: string; fullName?: string; email?: string }[];
 }
 
-const ALLOWED_EMAIL = "bengo0469@gmail.com";
 const STATUS_OPTIONS = ["בתכנון", "בביצוע", "בהקפאה", "הושלם"];
-
-const normalizeEmail = (val?: string | null) => (val || "").toLowerCase();
 
 export default function ProjectsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [saving, setSaving] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const openFormFromQuery = searchParams.get("openForm") === "1" || searchParams.get("mode") === "new";
+  const [showForm, setShowForm] = useState(!!openFormFromQuery);
   const [copiedProjectId, setCopiedProjectId] = useState<string | null>(null);
   const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -56,8 +55,6 @@ export default function ProjectsPage() {
   };
 
   const [form, setForm] = useState(emptyForm);
-
-  const isAllowed = useMemo(() => normalizeEmail(user?.email) === ALLOWED_EMAIL, [user?.email]);
 
   const fetchProjects = useCallback(async () => {
     if (!db || !user) return;
@@ -113,6 +110,9 @@ export default function ProjectsPage() {
   }, [user]);
 
   useEffect(() => {
+    if (openFormFromQuery) {
+      setShowForm(true);
+    }
     const loadUsers = async () => {
       if (!db || !showForm) return;
       setLoadingUsers(true);
@@ -157,16 +157,12 @@ export default function ProjectsPage() {
       router.push("/login");
       return;
     }
-    if (!isAllowed) {
-      router.push("/");
-      return;
-    }
     fetchProjects();
-  }, [user, loading, isAllowed, fetchProjects, router]);
+  }, [user, loading, fetchProjects, router]);
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
-    if (!db || !user || !isAllowed) return;
+    if (!db || !user) return;
     if (!form.name.trim()) {
       setError("חייבים לתת שם לפרויקט.");
       return;
@@ -220,7 +216,7 @@ export default function ProjectsPage() {
   };
 
   const handleStatusChange = async (projectId: string, newStatus: string) => {
-    if (!db || !isAllowed) return;
+    if (!db) return;
     setStatusUpdating(projectId);
     try {
       await updateDoc(doc(db, "projects", projectId), {
@@ -240,18 +236,10 @@ export default function ProjectsPage() {
     return <div className="p-6 text-center">טוען...</div>;
   }
 
-  if (!isAllowed) {
-    return <div className="p-6 text-center text-gray-700">המסך זמין רק לחשבון המורשה.</div>;
-  }
-
   return (
     <div className="min-h-screen p-6" style={{ background: "var(--patifon-cream)" }}>
       <header className="flex items-start justify-between mb-8">
         <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-xs text-indigo-800 font-semibold bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full w-fit">
-          <SparklesDot />
-          גישה זמינה רק ל- {ALLOWED_EMAIL}
-          </div>
           <div>
             <h1 className="text-3xl font-bold leading-tight" style={{ color: "var(--patifon-burgundy)" }}>
               ניהול פרוייקטים

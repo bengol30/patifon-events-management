@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, addDoc, collection, serverTimestamp, getDocs, query, where, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection, serverTimestamp, getDocs, query, where, updateDoc, arrayUnion, collectionGroup } from "firebase/firestore";
 import { ArrowRight, Calendar, MapPin, Users, Send, CheckCircle, AlertTriangle, Handshake, Target, CheckSquare, Square, Clock, ExternalLink } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -116,6 +116,26 @@ export default function VolunteerRegistrationPage() {
         setError("");
 
         try {
+            const normalizePhone = (value: string) => value.replace(/\D/g, "");
+            const normalizedPhone = normalizePhone(form.phone);
+
+            // Try to find an existing project volunteer with the same phone
+            let matchedProjectVolunteer: { id: string; projectId: string; data: any } | null = null;
+            try {
+                const allProjectVols = await getDocs(collectionGroup(db, "volunteers"));
+                allProjectVols.forEach((docSnap) => {
+                    const parent = docSnap.ref.parent.parent;
+                    if (!parent || !parent.path.startsWith("projects/")) return;
+                    const data = docSnap.data() as any;
+                    const storedNormalized = normalizePhone(data.phone || "");
+                    if (storedNormalized && storedNormalized === normalizedPhone && !matchedProjectVolunteer) {
+                        matchedProjectVolunteer = { id: docSnap.id, projectId: parent.id, data };
+                    }
+                });
+            } catch (lookupErr) {
+                console.warn("Project volunteer lookup failed", lookupErr);
+            }
+
             // Check again for limit (race condition protection)
             const volunteersQuery = query(collection(db, "events", id, "volunteers"));
             const volunteersSnap = await getDocs(volunteersQuery);
@@ -127,15 +147,41 @@ export default function VolunteerRegistrationPage() {
 
             // Add volunteer
             const passwordHash = await hashPassword(form.password.trim());
+            const existing: any = matchedProjectVolunteer ? (matchedProjectVolunteer as { data: any }).data : null;
+            const mergedName = existing?.name || `${existing?.firstName || ""} ${existing?.lastName || ""}`.trim() || form.name.trim();
+            const mergedEmail = existing?.email || form.email.trim();
+            const mergedPasswordHash = existing?.passwordHash || passwordHash;
+
             await addDoc(collection(db, "events", id, "volunteers"), {
-                name: form.name.trim(),
+                name: mergedName,
                 phone: form.phone.trim(),
-                email: form.email.trim(),
+                phoneNormalized: normalizedPhone,
+                email: mergedEmail,
                 selectedTasks: [],
-                passwordHash,
+                passwordHash: mergedPasswordHash,
                 passwordSetAt: serverTimestamp(),
                 createdAt: serverTimestamp(),
+                mergedFromProject: matchedProjectVolunteer
+                    ? {
+                        projectId: (matchedProjectVolunteer as any).projectId,
+                        volunteerId: (matchedProjectVolunteer as any).id,
+                        sourceEmail: existing?.email || null,
+                    }
+                    : null,
             });
+
+            // Backfill normalization and link on the project volunteer record
+            if (matchedProjectVolunteer) {
+                const projectVolunteerRef = doc(db, "projects", (matchedProjectVolunteer as any).projectId, "volunteers", (matchedProjectVolunteer as any).id);
+                await updateDoc(projectVolunteerRef, {
+                    phoneNormalized: normalizedPhone,
+                    relatedEvents: arrayUnion({
+                        eventId: id,
+                        eventTitle: event?.title || "",
+                        linkedAt: serverTimestamp(),
+                    }),
+                });
+            }
 
             setSubmitted(true);
             setTimeout(() => {
