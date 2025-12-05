@@ -237,7 +237,7 @@ export default function Dashboard() {
       const parent = scope === "event" ? eventLookup.get(id) : projectLookup.get(id);
       if (!parent) return;
       try {
-        const snap = await getDocs(collection(db, scope === "event" ? "events" : "projects", id, "tasks"));
+        const snap = await getDocs(collection(db!, scope === "event" ? "events" : "projects", id, "tasks"));
         snap.forEach(docSnap => {
           const data = docSnap.data();
           const match = matchAssignee({
