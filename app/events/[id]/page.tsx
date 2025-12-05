@@ -100,6 +100,8 @@ interface EventData {
     team: { name: string; role: string; email?: string; userId?: string }[];
     members?: string[];
     createdBy?: string;
+    createdByEmail?: string;
+    creatorName?: string;
     participantsCount?: string;
     partners?: string | string[];
     goal?: string;
