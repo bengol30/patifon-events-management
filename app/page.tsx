@@ -44,7 +44,7 @@ interface Task {
   description?: string;
   assignee: string;
   assigneeId?: string;
-  assignees?: { name: string; userId?: string; email?: string }[];
+  assignees?: { name?: string; userId?: string; email?: string }[];
   status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
   dueDate: string;
   priority: "NORMAL" | "HIGH" | "CRITICAL";
