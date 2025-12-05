@@ -871,24 +871,24 @@ export default function EventDetailsPage() {
             }
             const taskRef = doc(db, "events", id, "tasks", editingTask.id);
             const cleanAssignees = sanitizeAssigneesForWrite(editingTask.assignees || []);
-            const updateData: any = {
-                title: editingTask.title,
-                description: editingTask.description || "",
-                assignee: cleanAssignees[0]?.name || editingTask.assignee || "",
-                assigneeId: cleanAssignees[0]?.userId || editingTask.assigneeId || null,
-                assignees: cleanAssignees,
-                dueDate: editingTask.dueDate,
-                priority: editingTask.priority,
-                status: editingTask.status,
-                currentStatus: editingTask.currentStatus || "",
-                nextStep: editingTask.nextStep || "",
-                isVolunteerTask: editingTask.isVolunteerTask || false,
-                volunteerHours: editingTask.isVolunteerTask
-                    ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
-                    : null,
-                createdByEmail: editingTask.createdByEmail || user?.email || "",
-                createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
-            };
+                const updateData: any = {
+                    title: editingTask.title,
+                    description: editingTask.description || "",
+                    assignee: cleanAssignees[0]?.name || editingTask.assignee || "",
+                    assigneeId: cleanAssignees[0]?.userId || editingTask.assigneeId || null,
+                    assignees: cleanAssignees,
+                    dueDate: editingTask.dueDate,
+                    priority: editingTask.priority,
+                    status: editingTask.status,
+                    currentStatus: editingTask.currentStatus || "",
+                    nextStep: editingTask.nextStep || "",
+                    isVolunteerTask: editingTask.isVolunteerTask || false,
+                    volunteerHours: editingTask.isVolunteerTask
+                        ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
+                        : null,
+                    createdByEmail: (editingTask as any).createdByEmail || user?.email || "",
+                    createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
+                };
             await updateDoc(taskRef, updateData);
             setEditingTask(null);
         } catch (err) {
