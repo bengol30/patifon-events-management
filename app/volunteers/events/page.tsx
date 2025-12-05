@@ -54,6 +54,10 @@ interface EventData {
     scope?: "event" | "project";
     contactPhone?: string;
     contactName?: string;
+    createdBy?: string;
+    createdByEmail?: string;
+    ownerId?: string;
+    ownerEmail?: string;
 }
 
 export default function VolunteerEventsPage() {
@@ -383,9 +387,11 @@ export default function VolunteerEventsPage() {
 
         for (const ev of events) {
             try {
-                const basePath = ev.scope === "project" ? ["projects", ev.id, "volunteers"] : ["events", ev.id, "volunteers"];
+                const volunteersCollection = ev.scope === "project"
+                    ? collection(db, "projects", ev.id, "volunteers")
+                    : collection(db, "events", ev.id, "volunteers");
                 const volunteersSnap = await getDocs(
-                    query(collection(db, ...basePath), where("email", "==", emailInput.trim()))
+                    query(volunteersCollection, where("email", "==", emailInput.trim()))
                 );
                 if (!volunteersSnap.empty) {
                     const docSnap = volunteersSnap.docs[0];
@@ -397,7 +403,7 @@ export default function VolunteerEventsPage() {
                         continue;
                     }
                 }
-                const volunteersSnapAll = await getDocs(collection(db, ...basePath));
+                const volunteersSnapAll = await getDocs(volunteersCollection);
                 for (const volDoc of volunteersSnapAll.docs) {
                     const data = volDoc.data() as any;
                     const emailVal = (data.email || "").toLowerCase();
@@ -525,7 +531,8 @@ export default function VolunteerEventsPage() {
         }
     };
 
-    const getTaskRefPath = (scope: "event" | "project" = "event", eventId: string, taskId: string) =>
+    type TaskRefPath = ["projects" | "events", string, "tasks", string];
+    const getTaskRefPath = (scope: "event" | "project" = "event", eventId: string, taskId: string): TaskRefPath =>
         scope === "project" ? ["projects", eventId, "tasks", taskId] : ["events", eventId, "tasks", taskId];
 
     const buildWhatsappLink = (rawPhone?: any, taskTitle?: string, creatorName?: string) => {

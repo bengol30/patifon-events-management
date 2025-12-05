@@ -8,7 +8,7 @@ interface TaskProps {
     title: string;
     description?: string;
     assignee: string;
-    assignees?: { name: string; userId?: string; email?: string }[];
+    assignees?: { name?: string; userId?: string; email?: string }[];
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";

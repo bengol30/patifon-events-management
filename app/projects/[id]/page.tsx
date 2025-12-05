@@ -484,6 +484,10 @@ export default function ProjectDetailsPage() {
       alert("יש להזין כותרת למשימה");
       return;
     }
+    if (!user) {
+      alert("יש להתחבר כדי ליצור משימה חדשה");
+      return;
+    }
     const cleanAssignees = sanitizeAssignees(newTask.assignees);
     const primary = cleanAssignees[0];
     setSavingNewTask(true);
