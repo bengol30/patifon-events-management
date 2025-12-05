@@ -379,6 +379,7 @@ export default function VolunteerEventsPage() {
         if (!db) return { matched: {} as Record<string, { volunteerId: string; name: string; email: string }>, matchedIds: [] as string[] };
         const emailLower = emailInput.trim().toLowerCase();
         const matched: Record<string, { volunteerId: string; name: string; email: string }> = {};
+        let hasGeneral = false;
 
         for (const ev of events) {
             try {
@@ -413,13 +414,30 @@ export default function VolunteerEventsPage() {
             }
         }
 
+        // General volunteers collection (not tied to event/project)
+        try {
+            const generalSnap = await getDocs(query(collection(db, "general_volunteers"), where("email", "==", emailInput.trim())));
+            const docSnap = generalSnap.docs[0];
+            if (docSnap) {
+                const data = docSnap.data() as any;
+                const storedHash = data.passwordHash;
+                if (storedHash && storedHash === passwordHash) {
+                    const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || emailInput.trim();
+                    matched["general"] = { volunteerId: docSnap.id, name, email: emailInput.trim() };
+                    hasGeneral = true;
+                }
+            }
+        } catch (err) {
+            console.warn("General volunteer lookup failed", err);
+        }
+
         const matchedIds = Object.keys(matched);
         return { matched, matchedIds };
     };
 
     const applyAuthResult = (matched: Record<string, { volunteerId: string; name: string; email: string }>, matchedIds: string[], emailLower: string) => {
         setSessionMap(matched);
-        setMatchedEventIds(new Set(matchedIds));
+        setMatchedEventIds(new Set(matchedIds.length ? matchedIds : ["general"]));
         setIsAuthed(true);
         setSelectedTasksByEvent(() => {
             const next: Record<string, Set<string>> = {};
@@ -454,27 +472,27 @@ export default function VolunteerEventsPage() {
                 setAutoAuthTried(true);
                 return;
             }
-            setAutoAuthInProgress(true);
-            // Optimistically mark as authed to avoid jump to login while we verify
-            setIsAuthed(true);
-            (async () => {
-                const { matched, matchedIds } = await performAuthWithHash(parsed.email!, parsed.passwordHash!);
-                if (matchedIds.length > 0) {
-                    const emailLower = parsed.email!.trim().toLowerCase();
-                    applyAuthResult(matched, matchedIds, emailLower);
-                } else {
-                    // fallback: clear optimistic auth if no match
-                    setIsAuthed(false);
-                    localStorage.removeItem(LOCAL_AUTH_KEY);
-                }
+                setAutoAuthInProgress(true);
+                // Optimistically mark as authed to avoid jump to login while we verify
+                setIsAuthed(true);
+                (async () => {
+                    const { matched, matchedIds } = await performAuthWithHash(parsed.email!, parsed.passwordHash!);
+                    if (matchedIds.length > 0) {
+                        const emailLower = parsed.email!.trim().toLowerCase();
+                        applyAuthResult(matched, matchedIds, emailLower);
+                    } else {
+                        // fallback: clear optimistic auth if no match
+                        setIsAuthed(false);
+                        localStorage.removeItem(LOCAL_AUTH_KEY);
+                    }
+                    setAutoAuthTried(true);
+                    setAutoAuthInProgress(false);
+                })();
+            } catch (err) {
+                console.warn("Auto auth parse failed", err);
                 setAutoAuthTried(true);
                 setAutoAuthInProgress(false);
-            })();
-        } catch (err) {
-            console.warn("Auto auth parse failed", err);
-            setAutoAuthTried(true);
-            setAutoAuthInProgress(false);
-        }
+            }
     }, [db, events.length, isAuthed, autoAuthTried]);
 
     const handleAuth = async () => {

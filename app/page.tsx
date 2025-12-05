@@ -796,6 +796,29 @@ export default function Dashboard() {
             console.error("Error loading volunteers from events:", eventsVolunteersError);
           }
 
+          // General volunteers (global sign-up)
+          try {
+            const generalSnap = await getDocs(collection(db, "general_volunteers"));
+            generalSnap.forEach((volDoc) => {
+              const volData = volDoc.data();
+              // Build name
+              let volunteerName = "";
+              if (volData.name && typeof volData.name === "string" && volData.name.trim()) {
+                volunteerName = volData.name.trim();
+              } else if (volData.firstName || volData.lastName) {
+                volunteerName = `${volData.firstName || ""} ${volData.lastName || ""}`.trim();
+              } else if (volData.email) {
+                volunteerName = volData.email.split("@")[0];
+              } else {
+                volunteerName = "מתנדב ללא שם";
+              }
+              const fakeDoc = { id: volDoc.id };
+              addVolunteer(fakeDoc, "general", { ...volData, name: volunteerName }, "הרשמה כללית", "event");
+            });
+          } catch (err) {
+            console.error("Error loading general volunteers", err);
+          }
+
           // Always also fetch per-event to include legacy/missing docs
           console.log("Loading volunteers from events individually (merge + dedup)...");
           for (const event of allEventsData) {
@@ -2299,6 +2322,25 @@ export default function Dashboard() {
             <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
               {volunteersList.length}
             </span>
+          </div>
+          <div className="flex flex-wrap gap-3 mb-4">
+            <button
+              onClick={() => {
+                const url = typeof window !== "undefined" ? `${window.location.origin}/volunteers/register` : "/volunteers/register";
+                if (navigator?.clipboard?.writeText) {
+                  navigator.clipboard.writeText(url).then(() => {
+                    alert("קישור הרשמה כללי הועתק");
+                  }).catch(() => {
+                    alert(url);
+                  });
+                } else {
+                  alert(url);
+                }
+              }}
+              className="px-3 py-2 rounded-lg border border-indigo-200 text-indigo-800 bg-indigo-50 hover:bg-indigo-100 text-xs font-semibold"
+            >
+              העתק קישור הרשמת מתנדב כללי
+            </button>
           </div>
           {completionRequests.length > 0 && (
             <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4">
