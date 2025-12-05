@@ -730,7 +730,7 @@ export default function Dashboard() {
 
         // Fetch volunteers from all events
         try {
-          const volunteersData: { id: string; name?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project"; program?: string; year?: string; idNumber?: string }[] = [];
+          const volunteersData: { id: string; name?: string; firstName?: string; lastName?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project"; program?: string; year?: string; idNumber?: string }[] = [];
           const eventTitleMap = new Map(allEventsData.map(e => [e.id, e.title || "אירוע ללא שם"]));
           const projectTitleMap = new Map(allProjectsData.map(p => [p.id, (p as any).name || (p as any).title || "פרויקט ללא שם"]));
           const seenVolunteers = new Set<string>();
