@@ -37,6 +37,7 @@ interface Task {
     isVolunteerTask?: boolean;
     volunteerHours?: number | null;
     createdByName?: string;
+    scope?: "event" | "project";
 }
 
 interface BudgetItem {
