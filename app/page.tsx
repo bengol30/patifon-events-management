@@ -59,6 +59,7 @@ interface Task {
   lastMessageText?: string;
   lastMessageMentions?: { name?: string; userId?: string; email?: string }[];
   pendingApproval?: boolean;
+  volunteerHours?: number | null;
 }
 
 interface TeamNote {
