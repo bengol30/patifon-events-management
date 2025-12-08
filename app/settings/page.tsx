@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { auth, db } from "@/lib/firebase";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
-import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy } from "lucide-react";
+import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc, getDoc, setDoc, getDocs, where, collectionGroup, limit } from "firebase/firestore";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell } from "lucide-react";
 import Link from "next/link";
 import ImportantDocuments from "@/components/ImportantDocuments";
 const ADMIN_EMAIL = "bengo0469@gmail.com";
@@ -18,6 +18,8 @@ interface DefaultTask {
     priority: "NORMAL" | "HIGH" | "CRITICAL";
     daysOffset?: number; // Days relative to event start (negative = before)
     assigneeRole?: string; // e.g., "Producer", "Designer"
+    template?: any;
+    files?: { name?: string; url?: string; storagePath?: string; originalName?: string }[];
 }
 
 interface DocumentCategory {
@@ -35,6 +37,13 @@ interface Document {
     fileUrl?: string;
     fileName?: string;
     createdAt: any;
+}
+
+interface UserDirectory {
+    id: string;
+    fullName?: string;
+    email?: string;
+    phone?: string;
 }
 
 const PREDEFINED_TASKS = [
@@ -107,9 +116,11 @@ export default function SettingsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user, loading: authLoading } = useAuth();
-    const validTabs = ["defaultTasks", "documents", "account"] as const;
+    const validTabs = ["defaultTasks", "documents", "account", "whatsapp"] as const;
     const getInitialTab = () => {
         const tabParam = searchParams.get("tab");
+        // Start on WhatsApp tab only after auth check; default to main tab on first render
+        if ((tabParam || "") === "whatsapp") return "defaultTasks";
         return validTabs.includes((tabParam || "") as (typeof validTabs)[number]) ? (tabParam as (typeof validTabs)[number]) : "defaultTasks";
     };
     const [activeTab, setActiveTab] = useState<(typeof validTabs)[number]>(getInitialTab);
@@ -122,6 +133,16 @@ export default function SettingsPage() {
     const [confirmPassword, setConfirmPassword] = useState("");
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingPassword, setSavingPassword] = useState(false);
+    const [whatsappConfig, setWhatsappConfig] = useState<{ idInstance: string; apiTokenInstance: string; senderPhone?: string; baseUrl?: string }>({
+        idInstance: "",
+        apiTokenInstance: "",
+        senderPhone: "",
+        baseUrl: ""
+    });
+    const [waRules, setWaRules] = useState<{ notifyOnMention: boolean; notifyOnVolunteerDone: boolean }>({ notifyOnMention: false, notifyOnVolunteerDone: false });
+    const [savingWaRules, setSavingWaRules] = useState(false);
+    const [loadingWhatsapp, setLoadingWhatsapp] = useState(true);
+    const [savingWhatsapp, setSavingWhatsapp] = useState(false);
 
     // UI State
     const [showSeedModal, setShowSeedModal] = useState(false);
@@ -129,6 +150,48 @@ export default function SettingsPage() {
     const [bulkDeleteModal, setBulkDeleteModal] = useState(false);
     const [deleteAllModal, setDeleteAllModal] = useState(false);
     const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+    const isAdmin = (user?.email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const [usersDirectory, setUsersDirectory] = useState<UserDirectory[]>([]);
+    const [loadingUsersDirectory, setLoadingUsersDirectory] = useState(false);
+    const [waSelectedUserId, setWaSelectedUserId] = useState("");
+    const [waPhoneInput, setWaPhoneInput] = useState("");
+    const [waMessageText, setWaMessageText] = useState("היי, רצינו לעדכן אותך :)");
+    const [waSearch, setWaSearch] = useState("");
+    const [waSending, setWaSending] = useState(false);
+    const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+    const [bulkTemplate, setBulkTemplate] = useState<"openTasks" | "upcomingEvents">("openTasks");
+    const [bulkSending, setBulkSending] = useState(false);
+    const [groups, setGroups] = useState<{ id: string; name: string; chatId: string }[]>([]);
+    const [loadingGroups, setLoadingGroups] = useState(false);
+    const [groupSearch, setGroupSearch] = useState("");
+    const [groupSearchResults, setGroupSearchResults] = useState<{ name: string; chatId: string }[]>([]);
+    const [searchingGroups, setSearchingGroups] = useState(false);
+    const [savingGroup, setSavingGroup] = useState(false);
+    const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+    const [groupSendMode, setGroupSendMode] = useState<"custom" | "event">("custom");
+    const [groupMessage, setGroupMessage] = useState("");
+    const [groupEventId, setGroupEventId] = useState("");
+    const [sendingGroupsMsg, setSendingGroupsMsg] = useState(false);
+    const [eventsOptions, setEventsOptions] = useState<{ id: string; title?: string; startTime?: any; location?: string }[]>([]);
+    const resolveEventDate = (raw: any): Date | null => {
+        if (!raw) return null;
+        if (raw.toDate) {
+            try {
+                const d = raw.toDate();
+                return isNaN(d.getTime()) ? null : d;
+            } catch {
+                return null;
+            }
+        }
+        if (raw instanceof Date) {
+            return isNaN(raw.getTime()) ? null : raw;
+        }
+        if (typeof raw === "string") {
+            const parsed = new Date(raw);
+            return isNaN(parsed.getTime()) ? null : parsed;
+        }
+        return null;
+    };
 
     // Selection State
     const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
@@ -146,12 +209,21 @@ export default function SettingsPage() {
     useEffect(() => {
         const tabParam = searchParams.get("tab");
         const normalized = validTabs.includes((tabParam || "") as (typeof validTabs)[number]) ? (tabParam as (typeof validTabs)[number]) : null;
-        if (normalized && normalized !== activeTab) {
+        if (!normalized) return;
+        if (normalized === "whatsapp" && !isAdmin) {
+            handleTabChange("defaultTasks");
+            return;
+        }
+        if (normalized !== activeTab) {
             setActiveTab(normalized);
         }
-    }, [searchParams, activeTab]);
+    }, [searchParams, activeTab, isAdmin]);
 
     const handleTabChange = (tab: (typeof validTabs)[number]) => {
+        if (tab === "whatsapp" && !isAdmin) {
+            setMessage({ text: "גישה ללשונית וואטסאפ מותרת רק לאדמין", type: "error" });
+            return;
+        }
         setActiveTab(tab);
         const params = new URLSearchParams(Array.from(searchParams.entries()));
         params.set("tab", tab);
@@ -185,6 +257,107 @@ export default function SettingsPage() {
 
         return () => unsubscribe();
     }, [user, authLoading, router]);
+
+    useEffect(() => {
+        if (!db || !user || !isAdmin) {
+            setLoadingWhatsapp(false);
+            return;
+        }
+
+        const ref = doc(db, "integrations", "whatsapp");
+        getDoc(ref)
+            .then((snap) => {
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    setWhatsappConfig({
+                        idInstance: data.idInstance || "",
+                        apiTokenInstance: data.apiTokenInstance || "",
+                        senderPhone: data.senderPhone || "",
+                        baseUrl: data.baseUrl || "",
+                    });
+                    setWaRules({
+                        notifyOnMention: !!data.rules?.notifyOnMention,
+                        notifyOnVolunteerDone: !!data.rules?.notifyOnVolunteerDone,
+                    });
+                }
+            })
+            .catch((err) => {
+                console.error("Failed loading WhatsApp config", err);
+                setMessage({ text: "שגיאה בטעינת הגדרות וואטסאפ", type: "error" });
+            })
+            .finally(() => setLoadingWhatsapp(false));
+    }, [db, user, isAdmin]);
+
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "whatsapp") {
+            setLoadingUsersDirectory(false);
+            return;
+        }
+        setLoadingUsersDirectory(true);
+        getDocs(collection(db, "users"))
+            .then((snap) => {
+                const users = snap.docs.map((d) => {
+                    const data = d.data() as any;
+                    return {
+                        id: d.id,
+                        fullName: data.fullName || data.displayName || "",
+                        email: data.email || "",
+                        phone: data.phone || "",
+                    } as UserDirectory;
+                });
+                setUsersDirectory(users);
+            })
+            .catch((err) => {
+                console.error("Failed loading users directory", err);
+                setMessage({ text: "שגיאה בטעינת משתמשים", type: "error" });
+            })
+            .finally(() => setLoadingUsersDirectory(false));
+    }, [db, isAdmin, activeTab]);
+
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "whatsapp") {
+            setLoadingGroups(false);
+            return;
+        }
+        setLoadingGroups(true);
+        const ref = collection(db, "whatsapp_groups");
+        const unsub = onSnapshot(ref, (snap) => {
+            const arr = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as { id: string; name: string; chatId: string }[];
+            setGroups(arr);
+            setLoadingGroups(false);
+        }, (err) => {
+            console.error("Failed loading groups", err);
+            setLoadingGroups(false);
+        });
+        return () => unsub();
+    }, [db, isAdmin, activeTab]);
+
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "whatsapp") return;
+        const loadEvents = async () => {
+            try {
+                const snap = await getDocs(collection(db!, "events"));
+                const arr = snap.docs.map(d => {
+                    const data = d.data() as any;
+                    return {
+                        id: d.id,
+                        title: data.title || "אירוע",
+                        startTime: data.startTime,
+                        location: data.location || "",
+                    };
+                });
+                arr.sort((a, b) => {
+                    const ta = a.startTime?.toDate ? a.startTime.toDate().getTime() : new Date(a.startTime || 0).getTime();
+                    const tb = b.startTime?.toDate ? b.startTime.toDate().getTime() : new Date(b.startTime || 0).getTime();
+                    return (ta || 0) - (tb || 0);
+                });
+                setEventsOptions(arr);
+            } catch (err) {
+                console.error("Failed loading events list", err);
+            }
+        };
+        loadEvents();
+    }, [db, isAdmin, activeTab]);
 
     useEffect(() => {
         if (user) {
@@ -337,6 +510,610 @@ export default function SettingsPage() {
         } catch (err) {
             console.error("Error sending verification:", err);
             setMessage({ text: "שגיאה בשליחת מייל אימות", type: "error" });
+        }
+    };
+
+    const saveRulesOnly = async (nextRules: { notifyOnMention: boolean; notifyOnVolunteerDone: boolean }) => {
+        if (!db || !user) return;
+        setSavingWaRules(true);
+        try {
+            await setDoc(
+                doc(db, "integrations", "whatsapp"),
+                {
+                    rules: nextRules,
+                    updatedAt: serverTimestamp(),
+                    updatedBy: user.uid,
+                    updatedByEmail: user.email || ""
+                },
+                { merge: true }
+            );
+            setMessage({ text: "ההגדרות נשמרו", type: "success" });
+        } catch (err) {
+            console.error("Failed saving WhatsApp rules", err);
+            setMessage({ text: "שגיאה בשמירת חוקי ההתראות", type: "error" });
+        } finally {
+            setSavingWaRules(false);
+        }
+    };
+
+    const handleSaveWhatsapp = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !user) return;
+        setSavingWhatsapp(true);
+        try {
+            await setDoc(
+                doc(db, "integrations", "whatsapp"),
+                {
+                    idInstance: whatsappConfig.idInstance.trim(),
+                    apiTokenInstance: whatsappConfig.apiTokenInstance.trim(),
+                    senderPhone: (whatsappConfig.senderPhone || "").trim(),
+                    baseUrl: (whatsappConfig.baseUrl || "").trim(),
+                    rules: {
+                        notifyOnMention: waRules.notifyOnMention,
+                        notifyOnVolunteerDone: waRules.notifyOnVolunteerDone,
+                    },
+                    updatedAt: serverTimestamp(),
+                    updatedBy: user.uid,
+                    updatedByEmail: user.email || ""
+                },
+                { merge: true }
+            );
+            setMessage({ text: "ההגדרות נשמרו בהצלחה", type: "success" });
+        } catch (err) {
+            console.error("Failed saving WhatsApp config", err);
+            setMessage({ text: "שגיאה בשמירת הגדרות וואטסאפ", type: "error" });
+        } finally {
+            setSavingWhatsapp(false);
+        }
+    };
+
+    const normalizePhone = (value: string) => {
+        const digits = (value || "").replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("972")) return digits;
+        if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+        return digits;
+    };
+
+    const getPublicBaseUrl = (preferred?: string) => {
+        const cleanPreferred = (preferred || "").trim().replace(/\/$/, "");
+        if (cleanPreferred) return cleanPreferred;
+        const fromEnv = (process.env.NEXT_PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+        if (fromEnv) return fromEnv;
+        if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+        return "";
+    };
+
+    const MIN_SEND_INTERVAL_MS = 5000;
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    const normalizeLower = (val?: string | null) => (val || "").toString().trim().toLowerCase();
+
+    const ensureGlobalRateLimit = async () => {
+        if (!db) return;
+        const ref = doc(db!, "rate_limits", "whatsapp_mentions");
+        while (true) {
+            const snap = await getDoc(ref);
+            const last = snap.exists() ? (snap.data() as any).lastSendAt?.toMillis?.() || 0 : 0;
+            const now = Date.now();
+            const waitMs = last ? Math.max(0, MIN_SEND_INTERVAL_MS - (now - last)) : 0;
+            if (waitMs > 0) {
+                await sleep(waitMs);
+            }
+            try {
+                await setDoc(ref, { lastSendAt: serverTimestamp() }, { merge: true });
+                return;
+            } catch {
+                await sleep(200);
+            }
+        }
+    };
+
+    const isProjectTaskRef = (ref?: any) => {
+        if (!ref?.path) return false;
+        const path = ref.path.toString();
+        const marker = "/documents/";
+        const idx = path.indexOf(marker);
+        if (idx !== -1) {
+            const sub = path.slice(idx + marker.length);
+            if (sub.startsWith("projects/")) return true;
+        }
+        return path.startsWith("projects/") || path.includes("/projects/");
+    };
+
+    const isEventDeletedFlag = (eventObj: any) => {
+        const statusLower = (eventObj?.status || "").toString().toLowerCase();
+        return eventObj?.deleted === true || ["deleted", "cancelled", "canceled", "archive", "archived"].includes(statusLower);
+    };
+
+    const isProjectActive = (project: any) => {
+        const statusLower = (project?.status || "").toString().toLowerCase();
+        return !["הושלם", "done", "completed", "סגור", "cancelled", "canceled"].includes(statusLower);
+    };
+
+    const handleSelectWaUser = (uid: string) => {
+        setWaSelectedUserId(uid);
+        const match = usersDirectory.find((u) => u.id === uid);
+        if (match?.phone) {
+            setWaPhoneInput(match.phone);
+        }
+        if (match?.fullName && (!waMessageText || waMessageText.trim() === "היי, רצינו לעדכן אותך :)")) {
+            setWaMessageText(`היי ${match.fullName}, רצינו לעדכן אותך :)`);
+        }
+    };
+
+    const handleSendWhatsapp = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !user || !isAdmin) return;
+
+        if (!whatsappConfig.idInstance.trim() || !whatsappConfig.apiTokenInstance.trim()) {
+            setMessage({ text: "חסר מזהה אינסטנס או טוקן. שמור הגדרות קודם.", type: "error" });
+            return;
+        }
+        const phoneNormalized = normalizePhone(waPhoneInput);
+        if (!phoneNormalized || phoneNormalized.length < 9) {
+            setMessage({ text: "מספר וואטסאפ לא תקין", type: "error" });
+            return;
+        }
+        if (!waMessageText.trim()) {
+            setMessage({ text: "הודעה ריקה לא נשלחת", type: "error" });
+            return;
+        }
+
+        const chatId = `${phoneNormalized}@c.us`;
+        setWaSending(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
+            const res = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatId, message: waMessageText.trim() }),
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || `Status ${res.status}`);
+            }
+            setMessage({ text: "ההודעה נשלחה לוואטסאפ", type: "success" });
+        } catch (err) {
+            console.error("Failed sending WhatsApp", err);
+            setMessage({ text: "שגיאה בשליחת ההודעה. בדוק את הפרטים ונסה שוב.", type: "error" });
+        } finally {
+            setWaSending(false);
+        }
+    };
+
+    const handleSearchGroups = async () => {
+        if (!whatsappConfig.idInstance.trim() || !whatsappConfig.apiTokenInstance.trim()) {
+            setMessage({ text: "חסר ID/Token כדי לחפש קבוצות", type: "error" });
+            return;
+        }
+        const term = groupSearch.trim().toLowerCase();
+        if (!term) {
+            setMessage({ text: "הקלד שם קבוצה לחיפוש", type: "error" });
+            return;
+        }
+        setSearchingGroups(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${whatsappConfig.idInstance.trim()}/GetChats/${whatsappConfig.apiTokenInstance.trim()}`;
+            const res = await fetch(endpoint);
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error(txt || `Status ${res.status}`);
+            }
+            const data = await res.json();
+            const matches = (Array.isArray(data) ? data : []).filter((c: any) =>
+                (c?.id || "").toLowerCase().endsWith("@g.us") &&
+                ((c.name || c.chatName || "").toLowerCase().includes(term))
+            ).map((c: any) => ({
+                name: c.name || c.chatName || c.id,
+                chatId: c.id,
+            }));
+            setGroupSearchResults(matches);
+            if (!matches.length) {
+                setMessage({ text: "לא נמצאו קבוצות תואמות", type: "error" });
+            }
+        } catch (err) {
+            console.error("Failed searching groups", err);
+            setMessage({ text: "שגיאה בחיפוש קבוצות", type: "error" });
+        } finally {
+            setSearchingGroups(false);
+        }
+    };
+
+    const handleAddGroup = async (group: { name: string; chatId: string }) => {
+        if (!db || !user) return;
+        if (!group.name || !group.chatId) {
+            setMessage({ text: "חסר שם/קוד קבוצה", type: "error" });
+            return;
+        }
+        setSavingGroup(true);
+        try {
+            await addDoc(collection(db, "whatsapp_groups"), {
+                name: group.name,
+                chatId: group.chatId,
+                createdAt: serverTimestamp(),
+                createdBy: user.uid,
+                createdByEmail: user.email || "",
+            });
+            setMessage({ text: "הקבוצה נוספה למאגר", type: "success" });
+        } catch (err) {
+            console.error("Failed adding group", err);
+            setMessage({ text: "שגיאה בהוספת קבוצה", type: "error" });
+        } finally {
+            setSavingGroup(false);
+        }
+    };
+
+    const handleDeleteGroup = async (id: string) => {
+        if (!db) return;
+        try {
+            await deleteDoc(doc(db, "whatsapp_groups", id));
+        } catch (err) {
+            console.error("Failed deleting group", err);
+            setMessage({ text: "שגיאה במחיקת קבוצה", type: "error" });
+        }
+    };
+
+    const buildEventInviteText = (ev?: { id: string; title?: string; startTime?: any; location?: string }, dateTextOverride?: string) => {
+        if (!ev) return "";
+        const origin = getPublicBaseUrl(whatsappConfig.baseUrl);
+        const resolvedDate = resolveEventDate(ev.startTime);
+        const date = dateTextOverride || (resolvedDate ? resolvedDate.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "");
+        const link = origin ? `${origin}/events/${ev.id}/register` : "";
+        return [
+            ev.title ? `הצטרפו אלינו לאירוע: ${ev.title}` : "הצטרפו אלינו לאירוע!",
+            date ? `📅 תאריך: ${date}` : "",
+            ev.location ? `📍 מיקום: ${ev.location}` : "",
+            link ? `🔗 הרשמה: ${link}` : "",
+        ].filter(Boolean).join("\n");
+    };
+
+    const handleSendGroupsMessage = async () => {
+        if (!db || !user || !isAdmin) return;
+        if (!whatsappConfig.idInstance.trim() || !whatsappConfig.apiTokenInstance.trim()) {
+            setMessage({ text: "חסר ID/Token כדי לשלוח לקבוצות", type: "error" });
+            return;
+        }
+        const selected = groups.filter((g) => selectedGroups.has(g.id));
+        if (!selected.length) {
+            setMessage({ text: "בחר קבוצות לשליחה", type: "error" });
+            return;
+        }
+        let textToSend = groupMessage.trim();
+        if (groupSendMode === "event") {
+            const ev = eventsOptions.find((e) => e.id === groupEventId);
+            if (!ev) {
+                setMessage({ text: "בחר אירוע להזמנה", type: "error" });
+                setSendingGroupsMsg(false);
+                return;
+            }
+            const hasDate = !!resolveEventDate(ev.startTime);
+            let dateText: string | undefined;
+            if (!hasDate) {
+                const manualDate = typeof window !== "undefined" ? window.prompt("לא הוגדר תאריך לאירוע. הזן תאריך/שעה שיופיע בהודעה (לדוגמה: 12.03.25 20:00):") : "";
+                if (!manualDate) {
+                    setMessage({ text: "לא הוזן תאריך, ההודעה לא נשלחה", type: "error" });
+                    setSendingGroupsMsg(false);
+                    return;
+                }
+                dateText = manualDate;
+            }
+            textToSend = buildEventInviteText(ev, dateText);
+        }
+        if (!textToSend) {
+            setMessage({ text: "אין תוכן לשלוח", type: "error" });
+            return;
+        }
+        setSendingGroupsMsg(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
+            for (const g of selected) {
+                await ensureGlobalRateLimit();
+                const res = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chatId: g.chatId, message: textToSend }),
+                });
+                if (!res.ok) {
+                    console.warn("Failed sending to group", g, await res.text());
+                }
+            }
+            setMessage({ text: "ההודעה נשלחה לקבוצות שנבחרו", type: "success" });
+        } catch (err) {
+            console.error("Failed sending to groups", err);
+            setMessage({ text: "שגיאה בשליחת ההודעה לקבוצות", type: "error" });
+        } finally {
+            setSendingGroupsMsg(false);
+        }
+    };
+
+    const getUserPhone = async (uid: string, email?: string) => {
+        if (!db) return "";
+        try {
+            const snap = await getDoc(doc(db, "users", uid));
+            if (snap.exists()) {
+                const data = snap.data() as any;
+                if (data?.phone) return data.phone;
+            }
+        } catch { /* ignore */ }
+        if (email) {
+            try {
+                const q = query(collection(db, "users"), where("email", "==", email.toLowerCase()));
+                const res = await getDocs(q);
+                const data = res.docs[0]?.data() as any;
+                if (data?.phone) return data.phone;
+            } catch { /* ignore */ }
+        }
+        return "";
+    };
+
+    const fetchOpenTasksForUser = async (
+        uid: string,
+        email: string | undefined,
+        fullName: string | undefined,
+        phone: string | undefined,
+        parents: { events: Map<string, any>; projects: Map<string, any> },
+    ) => {
+        if (!db) return [];
+        const statusesOpen = ["TODO", "IN_PROGRESS", "STUCK", "PENDING_APPROVAL"];
+        const tasks: { title: string; dueDate?: any; status?: string; path: string; eventTitle?: string; scope?: "event" | "project" }[] = [];
+        const seen = new Set<string>();
+        const emailLower = normalizeLower(email);
+        const nameLower = normalizeLower(fullName);
+        const phoneNorm = normalizePhone(phone || "");
+        const emailPrefix = emailLower ? emailLower.split("@")[0] : "";
+
+        const matchesAssignee = (data: any) => {
+            const assigneeStr = (data.assignee || "").toLowerCase().trim();
+            const assigneeEmail = (data.assigneeEmail || "").toLowerCase().trim();
+            const assigneeId = data.assigneeId || "";
+            const assigneesArr = Array.isArray(data.assignees) ? data.assignees : [];
+
+            if (assigneeId && uid && assigneeId === uid) return true;
+            if (assigneeEmail && emailLower && assigneeEmail === emailLower) return true;
+            if (assigneeStr) {
+                if (nameLower && assigneeStr === nameLower) return true;
+                if (emailPrefix && assigneeStr === emailPrefix) return true;
+            }
+            return assigneesArr.some((a: any) => {
+                const aEmail = (a.email || "").toLowerCase().trim();
+                const aName = (a.name || "").toLowerCase().trim();
+                const aPhone = normalizePhone(a.phone || "");
+                return (a.userId && uid && a.userId === uid) ||
+                    (aEmail && emailLower && aEmail === emailLower) ||
+                    (aName && nameLower && aName === nameLower) ||
+                    (aPhone && phoneNorm && aPhone === phoneNorm);
+            });
+        };
+
+        const pushTask = (snap: any) => {
+            const data = snap.data() as any;
+            if (data?.status === "DONE" || !statusesOpen.includes(data?.status || "TODO")) return;
+            if (!matchesAssignee(data)) return;
+            const key = snap.ref.path;
+            if (seen.has(key)) return;
+            // Check parent entity validity
+            const parent = snap.ref.parent?.parent;
+            const parentId = parent?.id || "";
+            const isProj = isProjectTaskRef(snap.ref);
+            if (isProj) {
+                const proj = parents.projects.get(parentId);
+                if (!proj || !isProjectActive(proj)) return;
+                const projTitle = proj?.title || proj?.name || data.eventTitle || "פרויקט";
+                tasks.push({ title: data.title || "משימה", dueDate: data.dueDate, status: data.status, path: key, eventTitle: projTitle, scope: "project" });
+                seen.add(key);
+                return;
+            } else {
+                const ev = parents.events.get(parentId);
+                if (!ev || isEventDeletedFlag(ev)) return;
+                const evTitle = ev?.title || data.eventTitle || "אירוע";
+                tasks.push({ title: data.title || "משימה", dueDate: data.dueDate, status: data.status, path: key, eventTitle: evTitle, scope: "event" });
+                seen.add(key);
+                return;
+            }
+        };
+
+        // Queries by direct fields
+        // By assigneeId
+        if (uid) {
+            try {
+                const q1 = query(collectionGroup(db, "tasks"), where("assigneeId", "==", uid), limit(400));
+                (await getDocs(q1)).forEach(pushTask);
+            } catch (err) {
+                console.warn("Query assigneeId failed", err);
+            }
+        }
+
+        // By assigneeEmail
+        if (emailLower) {
+            try {
+                const q2 = query(collectionGroup(db, "tasks"), where("assigneeEmail", "==", emailLower), limit(400));
+                (await getDocs(q2)).forEach(pushTask);
+            } catch (err) {
+                console.warn("Query assigneeEmail failed", err);
+            }
+        }
+
+        // By assignee name
+        if (fullName) {
+            try {
+                const q3 = query(collectionGroup(db, "tasks"), where("assignee", "==", fullName), limit(400));
+                (await getDocs(q3)).forEach(pushTask);
+            } catch (err) {
+                console.warn("Query assignee(name) failed", err);
+            }
+        }
+
+        // Scan per status to catch matches in assignees array/name/email prefix/phone
+        for (const st of statusesOpen) {
+            try {
+                const qs = query(collectionGroup(db, "tasks"), where("status", "==", st), limit(500));
+                (await getDocs(qs)).forEach(pushTask);
+            } catch (err) {
+                console.warn("Query status scan failed", st, err);
+            }
+        }
+
+        // Final fallback: broad limited scan
+        if (!tasks.length) {
+            try {
+                const qAny = query(collectionGroup(db, "tasks"), limit(500));
+                (await getDocs(qAny)).forEach(pushTask);
+            } catch (err) {
+                console.warn("Broad scan tasks failed", err);
+            }
+        }
+
+        return tasks.slice(0, 40).map(t => ({ title: t.title, dueDate: t.dueDate, status: t.status, eventTitle: t.eventTitle, scope: t.scope }));
+    };
+
+    const fetchUpcomingEvents = async () => {
+        if (!db) return [];
+        const now = new Date();
+        try {
+            const qEvents = query(collection(db, "events"), where("startTime", ">=", now), orderBy("startTime", "asc"), limit(3));
+            const snap = await getDocs(qEvents);
+            return snap.docs.map((d) => {
+                const data = d.data() as any;
+                return { title: data.title || "אירוע", startTime: data.startTime, location: data.location || "" };
+            });
+        } catch {
+            return [];
+        }
+    };
+
+    const loadParentsIndex = async () => {
+        const events = new Map<string, any>();
+        const projects = new Map<string, any>();
+        try {
+            const evSnap = await getDocs(collection(db!, "events"));
+            evSnap.forEach(d => events.set(d.id, { id: d.id, ...d.data() }));
+        } catch (err) {
+            console.warn("Failed loading events map", err);
+        }
+        try {
+            const projSnap = await getDocs(collection(db!, "projects"));
+            projSnap.forEach(d => projects.set(d.id, { id: d.id, ...d.data() }));
+        } catch (err) {
+            console.warn("Failed loading projects map", err);
+        }
+        return { events, projects };
+    };
+
+    const fetchUpcomingEventsForUser = async (
+        uid: string,
+        email: string | undefined,
+        fullName: string | undefined,
+        phone: string | undefined,
+        parents: { events: Map<string, any> },
+    ) => {
+        const emailLower = normalizeLower(email);
+        const nameLower = normalizeLower(fullName);
+        const phoneNorm = normalizePhone(phone || "");
+        const now = Date.now();
+        const matchesUser = (ev: any) => {
+            if (!ev) return false;
+            const ownerId = ev.ownerId || ev.createdBy || "";
+            const ownerEmail = normalizeLower(ev.ownerEmail || ev.createdByEmail);
+            if (ownerId && uid && ownerId === uid) return true;
+            if (ownerEmail && emailLower && ownerEmail === emailLower) return true;
+            const membersArr = Array.isArray(ev.members) ? ev.members : [];
+            if (membersArr.includes(uid)) return true;
+            const teamArr = Array.isArray(ev.team) ? ev.team : [];
+            return teamArr.some((m: any) => {
+                const mEmail = normalizeLower(m.email);
+                const mName = normalizeLower(m.name);
+                const mPhone = normalizePhone(m.phone || "");
+                return (m.userId && m.userId === uid) ||
+                    (mEmail && emailLower && mEmail === emailLower) ||
+                    (mName && nameLower && mName === nameLower) ||
+                    (mPhone && phoneNorm && mPhone === phoneNorm);
+            });
+        };
+
+        const upcoming: { title: string; startTime?: any; location?: string }[] = [];
+        parents.events.forEach((ev) => {
+            if (!ev || isEventDeletedFlag(ev)) return;
+            const start = ev.startTime?.toDate ? ev.startTime.toDate() : ev.startTime instanceof Date ? ev.startTime : null;
+            if (!start || start.getTime() < now) return;
+            if (!matchesUser(ev)) return;
+            upcoming.push({ title: ev.title || "אירוע", startTime: start, location: ev.location || "" });
+        });
+        upcoming.sort((a, b) => {
+            const ta = a.startTime ? new Date(a.startTime).getTime() : 0;
+            const tb = b.startTime ? new Date(b.startTime).getTime() : 0;
+            return ta - tb;
+        });
+        return upcoming.slice(0, 3);
+    };
+
+    const handleSendBulk = async () => {
+        if (!db || !user || !isAdmin) return;
+        if (!whatsappConfig.idInstance.trim() || !whatsappConfig.apiTokenInstance.trim()) {
+            setMessage({ text: "חסר ID/Token כדי לשלוח הודעות", type: "error" });
+            return;
+        }
+        const selectedUsers = usersDirectory.filter(u => bulkSelected.has(u.id));
+        if (!selectedUsers.length) {
+            setMessage({ text: "בחר משתמשים לשליחה", type: "error" });
+            return;
+        }
+        setBulkSending(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
+            const origin = getPublicBaseUrl(whatsappConfig.baseUrl);
+            const parentsIndex = await loadParentsIndex();
+            setEventsOptions(Array.from(parentsIndex.events.values()) as any);
+            for (const target of selectedUsers) {
+                await ensureGlobalRateLimit();
+                const phone = normalizePhone(await getUserPhone(target.id, target.email));
+                if (!phone) {
+                    console.warn("No phone for user", target);
+                    continue;
+                }
+                let messageLines: string[] = [];
+                if (bulkTemplate === "openTasks") {
+                    const tasks = await fetchOpenTasksForUser(target.id, target.email, target.fullName, target.phone, parentsIndex);
+                    const list = tasks.slice(0, 5).map((t) => {
+                        const due = t.dueDate ? new Date(t.dueDate).toLocaleDateString("he-IL") : "";
+                        const ev = t.eventTitle ? ` | אירוע: ${t.eventTitle}` : "";
+                        return `- ${t.title}${ev}${due ? ` (דדליין: ${due})` : ""}`;
+                    });
+                    messageLines = [
+                        `היי ${target.fullName || target.email || "מתנדב/ת"},`,
+                        "תזכורת למשימות פתוחות שלך:",
+                        ...(list.length ? list : ["לא נמצאו משימות פתוחות."]),
+                        origin ? `כניסה למערכת: ${origin}` : "",
+                    ].filter(Boolean);
+                } else {
+                    const events = await fetchUpcomingEventsForUser(target.id, target.email, target.fullName, target.phone, parentsIndex);
+                    const list = events.map((ev) => {
+                        const date = ev.startTime ? new Date(ev.startTime).toLocaleDateString("he-IL") : "";
+                        return `- ${ev.title}${date ? ` (${date})` : ""}${ev.location ? ` @ ${ev.location}` : ""}`;
+                    });
+                    messageLines = [
+                        `היי ${target.fullName || target.email || "משתמש"},`,
+                        "הנה 3 האירועים הקרובים:",
+                        ...(list.length ? list : ["לא נמצאו אירועים קרובים."]),
+                        origin ? `כניסה למערכת: ${origin}` : "",
+                    ].filter(Boolean);
+                }
+
+                const res = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chatId: `${phone}@c.us`, message: messageLines.join("\n") }),
+                });
+                if (!res.ok) {
+                    console.warn("Bulk WhatsApp failed", target, await res.text());
+                }
+            }
+            setMessage({ text: "ההודעות נשלחו (או דולגו למי שחסר לו מספר)", type: "success" });
+        } catch (err) {
+            console.error("Failed bulk WhatsApp", err);
+            setMessage({ text: "שגיאה בשליחת ההודעות", type: "error" });
+        } finally {
+            setBulkSending(false);
         }
     };
 
@@ -795,6 +1572,18 @@ export default function SettingsPage() {
                                 <FileText size={18} />
                                 מסמכים חשובים
                             </button>
+                            {isAdmin && (
+                                <button
+                                    onClick={() => handleTabChange("whatsapp")}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "whatsapp"
+                                        ? "bg-indigo-50 text-indigo-700"
+                                        : "text-gray-600 hover:bg-gray-50"
+                                        }`}
+                                >
+                                    <MessageCircle size={18} />
+                                    וואטסאפ (Green API)
+                                </button>
+                            )}
                             <button
                                 onClick={() => handleTabChange("account")}
                                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "account"
@@ -956,6 +1745,470 @@ export default function SettingsPage() {
 
                         {activeTab === "documents" && (
                             <ImportantDocuments focusDocumentId={documentIdFromQuery} />
+                        )}
+
+                        {activeTab === "whatsapp" && isAdmin && (
+                            <div className="space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <PlugZap size={20} className="text-indigo-500" />
+                                                <h2 className="text-xl font-bold text-gray-900">חיבור וואטסאפ (Green API)</h2>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mt-1">
+                                                הזן את מזהה האינסטנס והאסימון מ-Green API כדי לשלוח הודעות וואטסאפ מהמערכת.
+                                            </p>
+                                        </div>
+                                        <a
+                                            href="https://green-api.com/en/docs/"
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-sm text-indigo-600 hover:text-indigo-800 underline"
+                                        >
+                                            מדריך Green API
+                                        </a>
+                                    </div>
+
+                                    {loadingWhatsapp ? (
+                                        <div className="mt-4 text-gray-500 text-sm">טוען הגדרות...</div>
+                                    ) : (
+                                        <form className="space-y-4 mt-6" onSubmit={handleSaveWhatsapp}>
+                                            <div className="grid sm:grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="text-sm text-gray-600">ID אינסטנס</label>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        value={whatsappConfig.idInstance}
+                                                        onChange={(e) => setWhatsappConfig(prev => ({ ...prev, idInstance: e.target.value }))}
+                                                        placeholder="לדוגמה: 1100123456"
+                                                        required
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-sm text-gray-600">API Token</label>
+                                                    <input
+                                                        type="password"
+                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        value={whatsappConfig.apiTokenInstance}
+                                                        onChange={(e) => setWhatsappConfig(prev => ({ ...prev, apiTokenInstance: e.target.value }))}
+                                                        placeholder="token מ-Green API"
+                                                        required
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-sm text-gray-600">מספר שולח (אופציונלי)</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={whatsappConfig.senderPhone || ""}
+                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, senderPhone: e.target.value }))}
+                                                    placeholder="לדוגמה: 972501234567"
+                                                />
+                                                <p className="text-xs text-gray-500">שמור כאן את המספר שמחובר לאינסטנס כדי להציגו במסכים אחרים.</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-sm text-gray-600">כתובת בסיס לקישורים (חובה לוואטסאפ)</label>
+                                                <input
+                                                    type="url"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={whatsappConfig.baseUrl || ""}
+                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                                    placeholder="https://app.domain.com"
+                                                    required
+                                                />
+                                                <p className="text-xs text-gray-500">הקישורים בהודעות ייבנו מהכתובת הזו (לא localhost).</p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    type="submit"
+                                                    disabled={savingWhatsapp}
+                                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
+                                                >
+                                                    {savingWhatsapp ? "שומר..." : "שמור הגדרות"}
+                                                </button>
+                                                <span className="text-xs text-gray-500">השמירה מתבצעת ב-Firestore ותהיה זמינה לכלי שליחה.</span>
+                                            </div>
+                        </form>
+                                    )}
+                                </div>
+
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-start justify-between gap-3 mb-4">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <MessageCircle size={20} className="text-green-600" />
+                                                <h3 className="text-lg font-bold text-gray-900">שליחת הודעת וואטסאפ למשתמשים</h3>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mt-1">
+                                                בחר משתמש מהמערכת או הזן מספר באופן ידני ושלח הודעה ישירה דרך Green API.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <form className="space-y-4" onSubmit={handleSendWhatsapp}>
+                                        <div className="grid sm:grid-cols-2 gap-4">
+                                            <div className="space-y-2">
+                                                <label className="text-sm text-gray-600">חיפוש משתמש</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={waSearch}
+                                                    onChange={(e) => setWaSearch(e.target.value)}
+                                                    placeholder="חפש לפי שם, אימייל או טלפון"
+                                                />
+                                                <div className="relative">
+                                                    <select
+                                                        value={waSelectedUserId}
+                                                        onChange={(e) => handleSelectWaUser(e.target.value)}
+                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                                    >
+                                                        <option value="">בחר משתמש</option>
+                                                        {(loadingUsersDirectory ? [] : usersDirectory)
+                                                            .filter((u) => {
+                                                                const search = waSearch.toLowerCase();
+                                                                if (!search) return true;
+                                                                return (u.fullName || "").toLowerCase().includes(search) ||
+                                                                    (u.email || "").toLowerCase().includes(search) ||
+                                                                    (u.phone || "").includes(search);
+                                                            })
+                                                            .slice(0, 30)
+                                                            .map((u) => (
+                                                                <option key={u.id} value={u.id}>
+                                                                    {u.fullName || u.email || "משתמש"} {u.phone ? `(${u.phone})` : ""}
+                                                                </option>
+                                                            ))}
+                                                    </select>
+                                                    {loadingUsersDirectory && (
+                                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">טוען משתמשים...</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-sm text-gray-600">מספר וואטסאפ</label>
+                                                <input
+                                                    type="tel"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={waPhoneInput}
+                                                    onChange={(e) => setWaPhoneInput(e.target.value)}
+                                                    placeholder="לדוגמה: 05x-xxxxxxx או 9725..."
+                                                    required
+                                                />
+                                                <p className="text-xs text-gray-500">המספר מנורמל אוטומטית לפורמט 972 לפני השליחה.</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-gray-600">תוכן ההודעה</label>
+                                            <textarea
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                rows={4}
+                                                value={waMessageText}
+                                                onChange={(e) => setWaMessageText(e.target.value)}
+                                                placeholder="מה תרצה לשלוח?"
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                type="submit"
+                                                disabled={waSending}
+                                                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
+                                            >
+                                                {waSending ? "שולח..." : "שלח הודעה"}
+                                            </button>
+                                            <div className="text-xs text-gray-500">
+                                                יש לוודא שה-ID וה-Token תקפים ושהמספר מאומת ב-Green API.
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-start justify-between gap-3 mb-4">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <PlugZap size={20} className="text-indigo-500" />
+                                                <h3 className="text-lg font-bold text-gray-900">שליחה מרוכזת למשתמשים</h3>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mt-1">
+                                                בחר משתמשים והודעה מוכנה לשליחה בבת אחת.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                                        <div>
+                                            <label className="text-sm text-gray-600">חיפוש משתמשים</label>
+                                            <input
+                                                type="text"
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                value={waSearch}
+                                                onChange={(e) => setWaSearch(e.target.value)}
+                                                placeholder="חפש לפי שם, אימייל או טלפון"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-600">סוג הודעה</label>
+                                            <select
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                                value={bulkTemplate}
+                                                onChange={(e) => setBulkTemplate(e.target.value as any)}
+                                            >
+                                                <option value="openTasks">תזכורת למשימות פתוחות</option>
+                                                <option value="upcomingEvents">עדכון 3 האירועים הקרובים</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="max-h-52 overflow-y-auto border rounded-lg p-3 mb-4">
+                                        {(loadingUsersDirectory ? [] : usersDirectory)
+                                            .filter((u) => {
+                                                const s = waSearch.toLowerCase();
+                                                if (!s) return true;
+                                                return (u.fullName || "").toLowerCase().includes(s)
+                                                    || (u.email || "").toLowerCase().includes(s)
+                                                    || (u.phone || "").includes(s);
+                                            })
+                                            .slice(0, 100)
+                                            .map((u) => (
+                                                <label key={u.id} className="flex items-center gap-2 py-1 text-sm text-gray-700">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={bulkSelected.has(u.id)}
+                                                        onChange={(e) => {
+                                                            setBulkSelected((prev) => {
+                                                                const next = new Set(prev);
+                                                                if (e.target.checked) next.add(u.id); else next.delete(u.id);
+                                                                return next;
+                                                            });
+                                                        }}
+                                                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                                    />
+                                                    <span className="flex-1 truncate">{u.fullName || u.email || "משתמש"}</span>
+                                                    {u.phone && <span className="text-xs text-gray-400">{u.phone}</span>}
+                                                </label>
+                                            ))}
+                                        {!loadingUsersDirectory && usersDirectory.length === 0 && (
+                                            <div className="text-sm text-gray-500">לא נמצאו משתמשים.</div>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={handleSendBulk}
+                                        disabled={bulkSending}
+                                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
+                                    >
+                                        {bulkSending ? "שולח..." : "שלח למשתמשים שנבחרו"}
+                                    </button>
+                                </div>
+
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-start justify-between gap-3 mb-4">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <MessageCircle size={20} className="text-indigo-500" />
+                                                <h3 className="text-lg font-bold text-gray-900">הודעות לקבוצות</h3>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mt-1">חפש קבוצות וואטסאפ לפי שם, והוסף למאגר לשליחה עתידית.</p>
+                                        </div>
+                                    </div>
+                                    <div className="mb-3">
+                                        <label className="text-sm text-gray-600">חפש לפי שם קבוצה</label>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                value={groupSearch}
+                                                onChange={(e) => setGroupSearch(e.target.value)}
+                                                placeholder="לדוגמה: צוות הפקה"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleSearchGroups}
+                                                disabled={searchingGroups}
+                                                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
+                                            >
+                                                {searchingGroups ? "מחפש..." : "חפש"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="max-h-48 overflow-y-auto border rounded-lg p-3 space-y-2 mb-4">
+                                        {searchingGroups && <div className="text-sm text-gray-500">מחפש קבוצות...</div>}
+                                        {!searchingGroups && groupSearchResults.map((g, idx) => (
+                                            <div key={`${g.chatId}-${idx}`} className="flex items-center justify-between p-2 border rounded-lg">
+                                                <div>
+                                                    <p className="font-medium text-sm text-gray-800">{g.name}</p>
+                                                    <p className="text-xs text-gray-500 break-all">{g.chatId}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleAddGroup(g)}
+                                                    className="text-xs text-indigo-600 hover:text-indigo-800"
+                                                    type="button"
+                                                    disabled={savingGroup}
+                                                >
+                                                    הוסף למאגר
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {!searchingGroups && !groupSearchResults.length && (
+                                            <div className="text-sm text-gray-500">אין תוצאות לחיפוש.</div>
+                                        )}
+                                    </div>
+                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">קבוצות במאגר</h4>
+                                    <div className="max-h-48 overflow-y-auto border rounded-lg p-3 space-y-2">
+                                        {loadingGroups && <div className="text-sm text-gray-500">טוען קבוצות...</div>}
+                                        {!loadingGroups && groups.map((g) => (
+                                            <div key={g.id} className="flex items-center justify-between p-2 border rounded-lg gap-2">
+                                                <label className="flex items-center gap-2 flex-1">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedGroups.has(g.id)}
+                                                        onChange={(e) => {
+                                                            setSelectedGroups((prev) => {
+                                                                const next = new Set(prev);
+                                                                if (e.target.checked) next.add(g.id); else next.delete(g.id);
+                                                                return next;
+                                                            });
+                                                        }}
+                                                    />
+                                                    <div className="min-w-0">
+                                                        <p className="font-medium text-sm text-gray-800 truncate">{g.name}</p>
+                                                        <p className="text-xs text-gray-500 break-all">{g.chatId}</p>
+                                                    </div>
+                                                </label>
+                                                <button
+                                                    onClick={() => handleDeleteGroup(g.id)}
+                                                    className="text-xs text-red-600 hover:text-red-800"
+                                                    type="button"
+                                                >
+                                                    מחק
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {!loadingGroups && groups.length === 0 && (
+                                            <div className="text-sm text-gray-500">עדיין לא נוספו קבוצות למאגר.</div>
+                                        )}
+                                    </div>
+
+                                    <div className="mt-4 space-y-2">
+                                        <h4 className="text-sm font-semibold text-gray-800">תוכן ההודעה</h4>
+                                        <div className="flex items-center gap-4 text-sm">
+                                            <label className="flex items-center gap-1">
+                                                <input
+                                                    type="radio"
+                                                    name="groupSendMode"
+                                                    checked={groupSendMode === "custom"}
+                                                    onChange={() => setGroupSendMode("custom")}
+                                                />
+                                                הודעה חופשית
+                                            </label>
+                                            <label className="flex items-center gap-1">
+                                                <input
+                                                    type="radio"
+                                                    name="groupSendMode"
+                                                    checked={groupSendMode === "event"}
+                                                    onChange={() => setGroupSendMode("event")}
+                                                />
+                                                הזמנה לאירוע
+                                            </label>
+                                        </div>
+
+                                        {groupSendMode === "custom" && (
+                                            <textarea
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                rows={3}
+                                                value={groupMessage}
+                                                onChange={(e) => setGroupMessage(e.target.value)}
+                                                placeholder="מה תרצה לשלוח לקבוצות?"
+                                            />
+                                        )}
+
+                                        {groupSendMode === "event" && (
+                                            <div className="grid sm:grid-cols-2 gap-2">
+                                                <select
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                                    value={groupEventId}
+                                                    onChange={(e) => setGroupEventId(e.target.value)}
+                                                >
+                                                    <option value="">בחר אירוע</option>
+                                                    {eventsOptions.map((ev) => (
+                                                        <option key={ev.id} value={ev.id}>
+                                                            {ev.title || "אירוע"} {ev.startTime ? `(${new Date(ev.startTime).toLocaleDateString("he-IL")})` : ""}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <p className="text-xs text-gray-500">ייווצר מלל הזמנה עם פרטי האירוע וקישור להרשמה.</p>
+                                            </div>
+                                        )}
+
+                                        <button
+                                            type="button"
+                                            onClick={handleSendGroupsMessage}
+                                            disabled={sendingGroupsMsg}
+                                            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
+                                        >
+                                            {sendingGroupsMsg ? "שולח..." : "שלח לקבוצות שנבחרו"}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Bell size={18} className="text-indigo-500" />
+                                        <h3 className="text-lg font-bold text-gray-900">חוקי התראות אוטומטיות</h3>
+                                    </div>
+                                    <p className="text-gray-500 text-sm mb-4">בחר מתי לשלוח התרעה אוטומטית בוואטסאפ. החוק פועל רק אם הוגדר אינסטנס פעיל.</p>
+                                    <div className="flex items-center gap-3">
+                                        <input
+                                            id="notifyOnMention"
+                                            type="checkbox"
+                                            checked={waRules.notifyOnMention}
+                                            onChange={(e) => {
+                                                const next = { notifyOnMention: e.target.checked, notifyOnVolunteerDone: waRules.notifyOnVolunteerDone };
+                                                setWaRules(next);
+                                                saveRulesOnly(next);
+                                            }}
+                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                        />
+                                        <label htmlFor="notifyOnMention" className="text-sm text-gray-700 cursor-pointer">
+                                            שלח הודעה אוטומטית כשמתייגים משתמש במשימה
+                                        </label>
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-3">
+                                        <input
+                                            id="notifyOnVolunteerDone"
+                                            type="checkbox"
+                                            checked={waRules.notifyOnVolunteerDone}
+                                            onChange={(e) => {
+                                                const next = { notifyOnMention: waRules.notifyOnMention, notifyOnVolunteerDone: e.target.checked };
+                                                setWaRules(next);
+                                                saveRulesOnly(next);
+                                            }}
+                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                        />
+                                        <label htmlFor="notifyOnVolunteerDone" className="text-sm text-gray-700 cursor-pointer">
+                                            שלח הודעה ליוצר המשימה כשמתנדב מסמן ביצוע
+                                        </label>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        נשתמש במספר שמוגדר למשתמש, ואם אין – לא תישלח הודעה. השמירה מתבצעת מידית.
+                                        {savingWaRules && " שומר..."}
+                                    </p>
+                                </div>
+
+                                <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900 flex items-start gap-2">
+                                    <AlertTriangle size={18} className="mt-0.5" />
+                                    <div>
+                                        <p className="font-semibold">טיפ אבטחה</p>
+                                        <p>האסימון נשמר ב-Firestore ונגיש רק למנהלי מערכת. אם שינית את האסימון ב-Green API, עדכן אותו כאן.</p>
+                                    </div>
+                                </div>
+                            </div>
                         )}
 
                         {activeTab === "account" && (

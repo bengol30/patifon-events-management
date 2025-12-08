@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { collection, collectionGroup, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc } from "firebase/firestore";
+import { collection, collectionGroup, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc, setDoc } from "firebase/firestore";
 import { Calendar, MapPin, Users, Handshake, Clock, Target, AlertCircle, ArrowRight, CheckSquare, Square, UserCheck, Lock, Circle, CheckCircle2, MessageCircle } from "lucide-react";
 
 interface Task {
@@ -78,6 +78,7 @@ export default function VolunteerEventsPage() {
     const [matchedEventIds, setMatchedEventIds] = useState<Set<string>>(new Set());
     const [saveStatus, setSaveStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
     const [tasksByEvent, setTasksByEvent] = useState<Record<string, Task[]>>({});
+    const [tasksReady, setTasksReady] = useState(false);
     const [completedLogs, setCompletedLogs] = useState<CompletedLog[]>([]);
     const [autoAuthTried, setAutoAuthTried] = useState(false);
     const [autoAuthInProgress, setAutoAuthInProgress] = useState(false);
@@ -90,6 +91,7 @@ export default function VolunteerEventsPage() {
         setIsAuthed(false);
         setSelectedTasksByEvent({});
         setTasksByEvent({});
+        setTasksReady(false);
         setCompletedLogs([]);
         setShowAllCompleted(false);
         setShowPendingOnly(true);
@@ -119,6 +121,15 @@ export default function VolunteerEventsPage() {
     const getSelectedForEvent = useMemo(() => {
         return (eventId: string): Set<string> => selectedTasksByEvent[eventId] || new Set<string>();
     }, [selectedTasksByEvent]);
+
+    // Mark tasks as ready once we have any snapshot (even ריק) after login
+    useEffect(() => {
+        if (tasksReady) return;
+        // Consider ready once any tasks array was populated OR listeners ran (tasksByEvent has any key)
+        if (Object.keys(tasksByEvent).length > 0) {
+            setTasksReady(true);
+        }
+    }, [tasksByEvent, tasksReady]);
 
     const myTasks = useMemo(() => {
         if (!currentEmail || !isAuthed) return [] as { eventId: string; eventTitle?: string; task: Task }[];
@@ -163,9 +174,9 @@ export default function VolunteerEventsPage() {
         }, 0);
     }, [completedTasks]);
 
-    const totalAvailableVolunteerTasks = useMemo(() => {
-        return Object.values(tasksByEvent).reduce((acc, arr) => acc + (arr?.length || 0), 0);
-    }, [tasksByEvent]);
+const totalAvailableVolunteerTasks = useMemo(() => {
+    return Object.values(tasksByEvent).reduce((acc, arr) => acc + (arr?.length || 0), 0);
+}, [tasksByEvent]);
 
     const visibleMyTasks = useMemo(() => {
         return showPendingOnly ? myTasks.filter(({ task }) => task.status !== "DONE") : myTasks;
@@ -224,6 +235,7 @@ export default function VolunteerEventsPage() {
                             tasks.push(taskData);
                         });
                         setTasksByEvent((prev) => ({ ...prev, [evId]: tasks }));
+                        setTasksReady(true);
                     });
                     taskUnsubs.set(evId, unsubTask);
                 }
@@ -283,6 +295,7 @@ export default function VolunteerEventsPage() {
                             tasks.push(taskData);
                         });
                         setTasksByEvent((prev) => ({ ...prev, [pid]: tasks }));
+                        setTasksReady(true);
                     });
                     taskUnsubs.set(pid, unsubTask);
                 }
@@ -343,6 +356,7 @@ export default function VolunteerEventsPage() {
                 });
                 if (Object.keys(grouped).length) {
                     setTasksByEvent((prev) => ({ ...grouped, ...prev }));
+                    setTasksReady(true);
                 }
             } catch (err) {
                 console.warn("Fallback volunteer tasks load failed", err);
@@ -361,6 +375,114 @@ export default function VolunteerEventsPage() {
         });
         return () => unsub();
     }, [db, sessionIdentity.email]);
+
+    const normalizePhone = (value: string) => {
+        const digits = (value || "").replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("972")) return digits;
+        if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+        return digits;
+    };
+
+    const getPublicBaseUrl = (preferred?: string) => {
+        const cleanPreferred = (preferred || "").trim().replace(/\/$/, "");
+        if (cleanPreferred) return cleanPreferred;
+        const fromEnv = (process.env.NEXT_PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+        if (fromEnv) return fromEnv;
+        if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+        return "";
+    };
+
+    const MIN_SEND_INTERVAL_MS = 5000;
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const ensureGlobalRateLimit = async () => {
+        if (!db) return;
+        const ref = doc(db!, "rate_limits", "whatsapp_mentions");
+        while (true) {
+            const snap = await getDoc(ref);
+            const last = snap.exists() ? (snap.data() as any).lastSendAt?.toMillis?.() || 0 : 0;
+            const now = Date.now();
+            const waitMs = last ? Math.max(0, MIN_SEND_INTERVAL_MS - (now - last)) : 0;
+            if (waitMs > 0) {
+                await sleep(waitMs);
+            }
+            try {
+                await setDoc(ref, { lastSendAt: serverTimestamp() }, { merge: true });
+                return;
+            } catch {
+                await sleep(200);
+            }
+        }
+    };
+
+    const fetchWhatsappConfig = async () => {
+        try {
+            const ref = doc(db!, "integrations", "whatsapp");
+            const snap = await getDoc(ref);
+            if (!snap.exists()) return null;
+            const data = snap.data() as any;
+            if (!data.idInstance || !data.apiTokenInstance) return null;
+            return {
+                idInstance: data.idInstance as string,
+                apiTokenInstance: data.apiTokenInstance as string,
+                baseUrl: data.baseUrl as string | undefined,
+                rules: data.rules || {},
+            };
+        } catch (err) {
+            console.warn("Failed reading whatsapp config", err);
+            return null;
+        }
+    };
+
+    const getUserPhone = async (uid?: string, email?: string) => {
+        if (!db) return "";
+        if (uid) {
+            try {
+                const snap = await getDoc(doc(db!, "users", uid));
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    if (data?.phone) return data.phone;
+                }
+            } catch { /* ignore */ }
+        }
+        if (email) {
+            try {
+                const q = query(collection(db!, "users"), where("email", "==", email.toLowerCase()));
+                const res = await getDocs(q);
+                const data = res.docs[0]?.data() as any;
+                if (data?.phone) return data.phone;
+            } catch { /* ignore */ }
+        }
+        return "";
+    };
+
+    const notifyOwnerTaskCompletion = async (opts: { ownerId?: string; ownerEmail?: string; taskTitle: string; volunteerName: string; eventId: string }) => {
+        const cfg = await fetchWhatsappConfig();
+        if (!cfg || !cfg.rules?.notifyOnVolunteerDone) return;
+        await ensureGlobalRateLimit();
+        const phone = normalizePhone(await getUserPhone(opts.ownerId, opts.ownerEmail));
+        if (!phone) return;
+        const origin = getPublicBaseUrl(cfg.baseUrl);
+        const messageLines = [
+            `שלום,`,
+            `${opts.volunteerName} סימן/ה שהמשימה "${opts.taskTitle}" הושלמה.`,
+            `יש לאשר את הביצוע באזור האישי.`,
+            origin ? `קישור: ${origin}` : ""
+        ].filter(Boolean);
+        const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+        try {
+            const res = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatId: `${phone}@c.us`, message: messageLines.join("\n") }),
+            });
+            if (!res.ok) {
+                console.warn("Failed sending completion WhatsApp", await res.text());
+            }
+        } catch (err) {
+            console.warn("Error sending completion WhatsApp", err);
+        }
+    };
 
     const hashPassword = async (password: string) => {
         const encoder = new TextEncoder();
@@ -445,6 +567,7 @@ export default function VolunteerEventsPage() {
         setSessionMap(matched);
         setMatchedEventIds(new Set(matchedIds.length ? matchedIds : ["general"]));
         setIsAuthed(true);
+        setTasksReady(false);
         setSelectedTasksByEvent(() => {
             const next: Record<string, Set<string>> = {};
             events.forEach((ev) => {
@@ -730,6 +853,15 @@ export default function VolunteerEventsPage() {
                     createdAt: serverTimestamp(),
                 });
                 await updateDoc(taskRef, { pendingApproval: true, pendingApprovalRequestId: reqRef.id, status: "TODO" });
+                if (ownerEmail || ownerId) {
+                    notifyOwnerTaskCompletion({
+                        ownerEmail,
+                        ownerId,
+                        taskTitle: task?.title || "משימה",
+                        volunteerName: sessionIdentity.name || sessionIdentity.email || "מתנדב/ת",
+                        eventId,
+                    });
+                }
                 alert("הבקשה לאישור נשלחה ליוצר המשימה. המשימה תסומן כהושלמה רק לאחר אישור.");
             }
 
@@ -750,7 +882,9 @@ export default function VolunteerEventsPage() {
         }
     };
 
-    if (loading || autoAuthInProgress) {
+    const shouldBlockForTasks = isAuthed && !tasksReady;
+
+    if (loading || autoAuthInProgress || shouldBlockForTasks) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>

@@ -29,6 +29,22 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // חיבורי אינטגרציה (כמו Green API) - אדמין כותב, כל משתמש מחובר קורא כדי לאפשר שליחה אוטומטית
+    match /integrations/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // מגבלת קצב שליחת וואטסאפ - כל משתמש מחובר יכול לעדכן חותמת זמן
+    match /rate_limits/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // מאגר קבוצות וואטסאפ - רק אדמין
+    match /whatsapp_groups/{docId} {
+      allow read, write: if isAdmin();
+    }
+
     // סטטיסטיקות משימות חוזרות
     match /repeat_tasks/{docId} {
       allow read: if isAdmin();

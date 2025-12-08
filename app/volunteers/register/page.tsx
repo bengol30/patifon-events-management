@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { addDoc, collection, serverTimestamp, getDocs, query, where } from "firebase/firestore";
-import { Handshake, CheckCircle, Send } from "lucide-react";
+import { Handshake, CheckCircle, Send, ExternalLink } from "lucide-react";
 
 export default function GeneralVolunteerRegister() {
   const router = useRouter();
@@ -92,17 +92,26 @@ export default function GeneralVolunteerRegister() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#fff7ed] via-white to-[#f5f3ff] p-6">
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl border border-orange-100 p-6 md:p-8">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-3 bg-indigo-50 rounded-full">
-            <Handshake className="text-indigo-600" size={24} />
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-indigo-50 rounded-full">
+              <Handshake className="text-indigo-600" size={24} />
+            </div>
+            <div>
+              <p className="text-sm text-indigo-700 font-semibold">הרשמת מתנדב כללי</p>
+              <h1 className="text-2xl font-bold text-gray-900">פתיחת חשבון מתנדב</h1>
+              <p className="text-gray-600 text-sm mt-1">
+                אחרי ההרשמה תוכל/י לבחור משימות למתנדבים, לשריין אותן ולסמן ביצוע. משימות שסומנו כמבוצעות יישלחו לאישור יוצר המשימה.
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-indigo-700 font-semibold">הרשמת מתנדב כללי</p>
-            <h1 className="text-2xl font-bold text-gray-900">פתיחת חשבון מתנדב</h1>
-            <p className="text-gray-600 text-sm mt-1">
-              אחרי ההרשמה תוכל/י לבחור משימות למתנדבים, לשריין אותן ולסמן ביצוע. משימות שסומנו כמבוצעות יישלחו לאישור יוצר המשימה.
-            </p>
-          </div>
+          <Link
+            href="/volunteers/events"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-semibold transition self-start md:self-auto"
+          >
+            לאזור האישי של המתנדב
+            <ExternalLink size={16} />
+          </Link>
         </div>
 
         {submitted ? (

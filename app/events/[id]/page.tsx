@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, Lightbulb, RefreshCw, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 import { db, storage } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc, where } from "firebase/firestore";
@@ -11,6 +11,38 @@ import { useAuth } from "@/context/AuthContext";
 import TaskChat from "@/components/TaskChat";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import PartnersInput from "@/components/PartnersInput";
+
+const computeNextOccurrence = (
+    baseDate: Date,
+    recurrence: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+    recurrenceEnd?: Date | null
+) => {
+    if (!(baseDate instanceof Date) || isNaN(baseDate.getTime())) return baseDate;
+    if (recurrence === "NONE") return baseDate;
+    const now = Date.now();
+    let candidate = new Date(baseDate);
+    let guard = 0;
+    const addInterval = () => {
+        if (recurrence === "WEEKLY") candidate = new Date(candidate.getTime() + 7 * 24 * 60 * 60 * 1000);
+        else if (recurrence === "BIWEEKLY") candidate = new Date(candidate.getTime() + 14 * 24 * 60 * 60 * 1000);
+        else if (recurrence === "MONTHLY") {
+            const next = new Date(candidate);
+            next.setMonth(next.getMonth() + 1);
+            candidate = next;
+        }
+    };
+    while (candidate.getTime() < now && guard < 200) {
+        addInterval();
+        guard += 1;
+    }
+    if (recurrenceEnd && recurrenceEnd.getTime && recurrenceEnd.getTime() > 0) {
+        const endTs = recurrenceEnd.getTime();
+        if (candidate.getTime() > endTs) {
+            if (endTs >= now) candidate = new Date(endTs);
+        }
+    }
+    return candidate;
+};
 
 interface Assignee {
     name: string;
@@ -155,8 +187,15 @@ export default function EventDetailsPage() {
 
     // Suggestions State
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [suggestedTasks, setSuggestedTasks] = useState<{ title: string; description: string; priority: "NORMAL" | "HIGH" | "CRITICAL" }[]>([]);
-    const [isGenerating, setIsGenerating] = useState(false);
+    const [libraryTasks, setLibraryTasks] = useState<{ id: string; title: string; description?: string; priority?: "NORMAL" | "HIGH" | "CRITICAL"; template?: any }[]>([]);
+    const [loadingLibraryTasks, setLoadingLibraryTasks] = useState(false);
+    const [libraryForm, setLibraryForm] = useState<{ id?: string; title: string; description: string; priority: "NORMAL" | "HIGH" | "CRITICAL" }>({
+        id: "",
+        title: "",
+        description: "",
+        priority: "NORMAL"
+    });
+    const [savingLibraryTask, setSavingLibraryTask] = useState(false);
 
     // New Task State
     const [showNewTask, setShowNewTask] = useState(false);
@@ -171,40 +210,106 @@ export default function EventDetailsPage() {
         isVolunteerTask: false,
         volunteerHours: null as number | null,
     });
+    const [saveNewTaskToLibrary, setSaveNewTaskToLibrary] = useState(false);
     const dueDateInputRef = useRef<HTMLInputElement | null>(null);
     const newTaskFileInputRef = useRef<HTMLInputElement | null>(null);
     const [newTaskFiles, setNewTaskFiles] = useState<File[]>([]);
-    const updateRepeatTaskStats = async (title: string) => {
-        if (!db || !title) return;
-        const key = normalizeTaskKey(title);
-        if (!key) return;
-        try {
-            await setDoc(doc(db, "repeat_tasks", key), {
-                key,
-                title: title.trim(),
-                count: increment(1),
-                lastUsedAt: serverTimestamp(),
-            }, { merge: true });
-        } catch (err) {
-            console.error("Failed updating repeat task stats", err);
-        }
-    };
     const normalizeTaskKey = (title: string) =>
         (title || "")
             .toLowerCase()
             .replace(/[^\w\sא-ת]/g, " ")
             .replace(/\s+/g, " ")
             .trim();
+    const loadTaskFilesForLibrary = async (taskId: string): Promise<{ name?: string; url?: string; storagePath?: string; originalName?: string }[]> => {
+        if (!db) return [];
+        try {
+            const snap = await getDocs(collection(db, "events", id, "tasks", taskId, "files"));
+            return snap.docs.map(d => {
+                const data = d.data() as any;
+                return {
+                    name: data.name || data.originalName || "",
+                    originalName: data.originalName || data.name || "",
+                    url: data.url || "",
+                    storagePath: data.storagePath || "",
+                };
+            });
+        } catch (err) {
+            console.warn("Failed loading task files for library", err);
+            return [];
+        }
+    };
+    const saveTaskToRepeatLibrary = async (task: {
+        title: string;
+        description?: string;
+        priority?: string;
+        dueDate?: string;
+        assignees?: Assignee[];
+        isVolunteerTask?: boolean;
+        volunteerHours?: number | null;
+        files?: { name?: string; url?: string; storagePath?: string; originalName?: string }[];
+    }) => {
+        if (!db || !task.title) {
+            alert("צריך שם משימה כדי להוסיף למאגר המשימות החוזרות");
+            return;
+        }
+        const key = normalizeTaskKey(task.title);
+        if (!key) {
+            alert("שם המשימה לא תקין לשמירה במאגר");
+            return;
+        }
+        try {
+        const templateData = {
+            title: task.title.trim(),
+            description: task.description || "",
+            priority: task.priority || "NORMAL",
+            dueDate: task.dueDate || "",
+            assignees: task.assignees || [],
+            isVolunteerTask: !!task.isVolunteerTask,
+            volunteerHours: task.isVolunteerTask ? (task.volunteerHours ?? null) : null,
+            files: task.files || [],
+        };
+            await setDoc(doc(db, "repeat_tasks", key), {
+                key,
+                title: task.title.trim(),
+                description: task.description || "",
+                priority: task.priority || "NORMAL",
+            template: templateData,
+            files: task.files || [],
+            createdBy: user?.uid || "",
+            createdByEmail: user?.email || "",
+            createdByName: user?.displayName || user?.email || "",
+            count: increment(1),
+            lastUsedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+        }, { merge: true });
+        await setDoc(doc(db, "default_tasks", key), {
+            title: task.title.trim(),
+            description: task.description || "",
+            priority: (task.priority as any) || "NORMAL",
+            template: templateData,
+            files: task.files || [],
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+            alert("המשימה נשמרה במאגר המשימות החוזרות");
+        } catch (err) {
+            console.error("Failed saving task to repeat library", err);
+            alert("שגיאה בשמירת המשימה למאגר");
+        }
+    };
 
     // Edit Task State
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [editingStatusTask, setEditingStatusTask] = useState<Task | null>(null);
     const [editingDateTask, setEditingDateTask] = useState<Task | null>(null);
+    const [saveEditTaskToLibrary, setSaveEditTaskToLibrary] = useState(false);
     const [taggingTask, setTaggingTask] = useState<Task | null>(null);
     const [tagSelection, setTagSelection] = useState<Assignee[]>([]);
     const [tagSearch, setTagSearch] = useState("");
     const [newTaskSearch, setNewTaskSearch] = useState("");
     const [editTaskSearch, setEditTaskSearch] = useState("");
+    const [sendingTagAlerts, setSendingTagAlerts] = useState(false);
 
     const getAssigneeKey = (assignee?: Assignee | null) => {
         if (!assignee) return "";
@@ -253,6 +358,134 @@ export default function EventDetailsPage() {
             return raw.split(/[,\n]/).map(p => p.trim()).filter(Boolean);
         }
         return [];
+    };
+
+    const normalizePhone = (value: string) => {
+        const digits = (value || "").replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("972")) return digits;
+        if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+        return digits;
+    };
+
+    const getPublicBaseUrl = (preferred?: string) => {
+        const cleanPreferred = (preferred || "").trim().replace(/\/$/, "");
+        if (cleanPreferred) return cleanPreferred;
+        const fromEnv = (process.env.NEXT_PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+        if (fromEnv) return fromEnv;
+        if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+        return "";
+    };
+
+    const MIN_SEND_INTERVAL_MS = 5000;
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    const ensureGlobalRateLimit = async () => {
+        const ref = doc(db!, "rate_limits", "whatsapp_mentions");
+        while (true) {
+            const snap = await getDoc(ref);
+            const last = snap.exists() ? (snap.data() as any).lastSendAt?.toMillis?.() || 0 : 0;
+            const now = Date.now();
+            const waitMs = last ? Math.max(0, MIN_SEND_INTERVAL_MS - (now - last)) : 0;
+            if (waitMs > 0) {
+                await sleep(waitMs);
+            }
+            try {
+                await setDoc(ref, { lastSendAt: serverTimestamp() }, { merge: true });
+                return;
+            } catch (err) {
+                await sleep(200);
+            }
+        }
+    };
+
+    const fetchWhatsappConfig = async () => {
+        try {
+            const ref = doc(db!, "integrations", "whatsapp");
+            const snap = await getDoc(ref);
+            if (!snap.exists()) return null;
+            const data = snap.data() as any;
+            if (!data.rules?.notifyOnMention) return null;
+            if (!data.idInstance || !data.apiTokenInstance) return null;
+            return {
+                idInstance: data.idInstance as string,
+                apiTokenInstance: data.apiTokenInstance as string,
+                baseUrl: (data.baseUrl as string) || "",
+            };
+        } catch (err) {
+            console.warn("שגיאה בקריאת הגדרות וואטסאפ", err);
+            return null;
+        }
+    };
+
+    const getUserPhone = async (assignee: Assignee) => {
+        // 1) userId
+        if (assignee.userId) {
+            try {
+                const snap = await getDoc(doc(db!, "users", assignee.userId));
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    if (data?.phone) return data.phone;
+                    if (data?.fullName) return data.phone || "";
+                }
+            } catch { /* ignore */ }
+        }
+        // 2) email
+        if (assignee.email) {
+            try {
+                const q = query(collection(db!, "users"), where("email", "==", assignee.email.toLowerCase()));
+                const res = await getDocs(q);
+                const data = res.docs[0]?.data() as any;
+                if (data?.phone) return data.phone;
+            } catch { /* ignore */ }
+        }
+        return "";
+    };
+
+    const sendTagAlerts = async (assignees: Assignee[], task: Task) => {
+        if (!db || !assignees.length) return;
+        if (sendingTagAlerts) return;
+        const cfg = await fetchWhatsappConfig();
+        if (!cfg) return;
+        setSendingTagAlerts(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+            const origin = getPublicBaseUrl(cfg.baseUrl);
+            const taskLink = origin ? `${origin}/tasks/${task.id}?eventId=${id}` : "";
+            const eventLink = origin ? `${origin}/events/${id}` : "";
+            const senderName = user?.displayName || user?.email || "משתמש";
+            const due = task.dueDate ? new Date(task.dueDate).toLocaleDateString("he-IL") : "";
+            for (const assignee of assignees) {
+                await ensureGlobalRateLimit();
+                const phoneRaw = await getUserPhone(assignee);
+                const phone = normalizePhone(phoneRaw);
+                if (!phone) continue;
+                const lines = [
+                    `היי ${assignee.name || ""},`,
+                    `קיבלת משימה חדשה מ${senderName}.`,
+                    `תוייגת במשימה: "${task.title}".`,
+                    event?.title ? `אירוע: ${event.title}` : "",
+                    due ? `דדליין: ${due}` : "",
+                    task.priority ? `עדיפות: ${task.priority}` : "",
+                    task.description ? `תיאור: ${task.description}` : "",
+                    taskLink ? `דף המשימה: ${taskLink}` : "",
+                    eventLink ? `דף האירוע: ${eventLink}` : "",
+                ].filter(Boolean);
+                const message = lines.join("\n");
+                const res = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
+                });
+                if (!res.ok) {
+                    console.warn("שליחת וואטסאפ נכשלה", assignee, await res.text());
+                }
+            }
+        } catch (err) {
+            console.warn("שגיאה בשליחת התראות תיוג", err);
+        } finally {
+            setSendingTagAlerts(false);
+        }
     };
 
 
@@ -373,6 +606,22 @@ export default function EventDetailsPage() {
         }
     }, [taggingTask]);
 
+    // Load recurring/default tasks library for modal
+    useEffect(() => {
+        if (!db) return;
+        setLoadingLibraryTasks(true);
+        const q = query(collection(db, "default_tasks"), orderBy("createdAt", "desc"));
+        const unsub = onSnapshot(q, (snap) => {
+            const data = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+            setLibraryTasks(data as any);
+            setLoadingLibraryTasks(false);
+        }, (err) => {
+            console.error("Failed loading library tasks", err);
+            setLoadingLibraryTasks(false);
+        });
+        return () => unsub();
+    }, [db]);
+
     const handleAddCustomSection = () => {
         setEventForm(prev => ({
             ...prev,
@@ -492,6 +741,7 @@ export default function EventDetailsPage() {
                 assignee: primary?.name || "",
                 assigneeId: primary?.userId || null,
             });
+            sendTagAlerts(cleanAssignees, taggingTask).catch(() => { /* already logged */ });
             setTaggingTask(null);
             setTagSelection([]);
         } catch (err) {
@@ -747,7 +997,7 @@ export default function EventDetailsPage() {
     }, [event]);
 
     const uploadTaskFiles = async (taskId: string, taskTitle: string, files: File[]) => {
-        if (!storage || !db || files.length === 0) return;
+        if (!storage || !db || files.length === 0) return [];
 
         let previewImage: string | null = null;
         const uploadPromises = files.map(async (file) => {
@@ -772,8 +1022,9 @@ export default function EventDetailsPage() {
                 addDoc(collection(db!, "events", id, "tasks", taskId, "files"), fileData),
                 addDoc(collection(db!, "events", id, "files"), fileData),
             ]);
+            return fileData;
         });
-        await Promise.all(uploadPromises);
+        const uploaded = await Promise.all(uploadPromises);
         if (previewImage) {
             try {
                 await updateDoc(doc(db!, "events", id, "tasks", taskId), { previewImage });
@@ -781,6 +1032,7 @@ export default function EventDetailsPage() {
                 console.error("Failed to set preview image on task", err);
             }
         }
+        return uploaded.filter(Boolean);
     };
 
     const handleUploadEventFile = async (e: React.FormEvent) => {
@@ -847,13 +1099,34 @@ export default function EventDetailsPage() {
                 createdByEmail: user.email || "",
                 createdByName: user.displayName || user.email || "משתמש",
             });
-            updateRepeatTaskStats(newTask.title);
+            let uploadedFiles: { name?: string; url?: string; storagePath?: string; originalName?: string }[] = [];
             if (newTaskFiles.length) {
-                await uploadTaskFiles(docRef.id, newTask.title, newTaskFiles);
+                uploadedFiles = await uploadTaskFiles(docRef.id, newTask.title, newTaskFiles);
             }
+            if (saveNewTaskToLibrary) {
+                await saveTaskToRepeatLibrary({
+                    title: newTask.title,
+                    description: newTask.description,
+                    priority: newTask.priority,
+                    dueDate: newTask.dueDate,
+                    assignees: cleanAssignees,
+                    isVolunteerTask: newTask.isVolunteerTask,
+                    volunteerHours: newTask.volunteerHours,
+                    files: uploadedFiles,
+                });
+            }
+            sendTagAlerts(cleanAssignees, {
+                ...newTask,
+                id: docRef.id,
+                title: newTask.title,
+                description: newTask.description,
+                priority: newTask.priority,
+                dueDate: newTask.dueDate,
+            } as Task).catch(() => { /* כבר טופל בלוג */ });
             setShowNewTask(false);
             setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false, volunteerHours: null });
             setNewTaskFiles([]);
+            setSaveNewTaskToLibrary(false);
         } catch (err) {
             console.error("Error adding task:", err);
             alert("שגיאה בהוספת משימה");
@@ -893,7 +1166,21 @@ export default function EventDetailsPage() {
                     createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
                 };
             await updateDoc(taskRef, updateData);
+            if (saveEditTaskToLibrary) {
+                const filesForLibrary = await loadTaskFilesForLibrary(editingTask.id);
+                await saveTaskToRepeatLibrary({
+                    title: editingTask.title,
+                    description: editingTask.description,
+                    priority: editingTask.priority,
+                    dueDate: editingTask.dueDate,
+                    assignees: cleanAssignees,
+                    isVolunteerTask: editingTask.isVolunteerTask,
+                    volunteerHours: editingTask.volunteerHours,
+                    files: filesForLibrary,
+                });
+            }
             setEditingTask(null);
+            setSaveEditTaskToLibrary(false);
         } catch (err) {
             console.error("Error updating task:", err);
             alert("שגיאה בעדכון המשימה");
@@ -974,19 +1261,12 @@ export default function EventDetailsPage() {
         if (!db || !event) return;
 
         try {
-            const startTimeValue = eventForm.startTime ? new Date(eventForm.startTime) : event.startTime;
+            const startBase = eventForm.startTime
+                ? new Date(eventForm.startTime)
+                : (event.startTime?.seconds ? new Date(event.startTime.seconds * 1000) : new Date(event.startTime));
             const duration = eventForm.durationHours ? parseFloat(eventForm.durationHours) : undefined;
 
-            let startDateForDuration: Date | null = null;
-            if (eventForm.startTime) {
-                startDateForDuration = new Date(eventForm.startTime);
-            } else if (event?.startTime?.seconds) {
-                startDateForDuration = new Date(event.startTime.seconds * 1000);
-            }
-
-            const calculatedEnd = duration && startDateForDuration && !isNaN(duration)
-                ? new Date(startDateForDuration.getTime() + duration * 60 * 60 * 1000)
-                : event.endTime;
+            let startDateForDuration: Date | null = startBase ? new Date(startBase) : null;
 
             let recurrenceEnd: Date | null = null;
             if (eventForm.recurrence !== "NONE" && eventForm.recurrenceEndDate) {
@@ -995,6 +1275,15 @@ export default function EventDetailsPage() {
                     recurrenceEnd = parsed;
                 }
             }
+            const normalizedStart = computeNextOccurrence(
+                startDateForDuration || new Date(),
+                eventForm.recurrence || "NONE",
+                recurrenceEnd
+            );
+            startDateForDuration = normalizedStart;
+            const calculatedEnd = duration && startDateForDuration && !isNaN(duration)
+                ? new Date(startDateForDuration.getTime() + duration * 60 * 60 * 1000)
+                : event.endTime;
             const volunteersCountNum = eventForm.volunteersCount ? parseInt(eventForm.volunteersCount, 10) : null;
 
             await updateDoc(doc(db, "events", id), {
@@ -1010,7 +1299,7 @@ export default function EventDetailsPage() {
                 recurrenceEndDate: recurrenceEnd,
                 needsVolunteers: eventForm.needsVolunteers,
                 volunteersCount: eventForm.needsVolunteers && Number.isFinite(volunteersCountNum) ? volunteersCountNum : null,
-                startTime: startTimeValue,
+                startTime: normalizedStart,
                 endTime: calculatedEnd,
                 durationHours: duration && !isNaN(duration) ? duration : null,
                 contactPerson: {
@@ -1398,121 +1687,123 @@ export default function EventDetailsPage() {
         window.open(`https://wa.me/${normalized}`, "_blank");
     };
 
-    const generateSuggestions = (append = false, forceReset = false) => {
-        setIsGenerating(true);
-        if (!append) setShowSuggestions(true);
-
-        // Simulate AI analysis delay
-        setTimeout(() => {
-            const suggestions: { title: string; description: string; priority: "NORMAL" | "HIGH" | "CRITICAL" }[] = [];
-            const textToAnalyze = `${event?.title} ${event?.description} ${event?.location} ${event?.goal}`.toLowerCase();
-            const isOutdoor = textToAnalyze.includes("חוץ") || textToAnalyze.includes("פארק") || textToAnalyze.includes("ים") || textToAnalyze.includes("חצר");
-            const hasVendors = textToAnalyze.includes("ספק") || textToAnalyze.includes("חסות") || textToAnalyze.includes("ספונסר");
-            const hasTech = textToAnalyze.includes("הגברה") || textToAnalyze.includes("תאורה") || textToAnalyze.includes("וידאו");
-
-            // Expanded Keyword-based logic
-            if (textToAnalyze.includes("חתונה") || textToAnalyze.includes("wedding")) {
-                suggestions.push({ title: "תיאום טעימות קייטרינג", description: "בחירת מנות לאירוע ותיאום מול הספק", priority: "HIGH" });
-                suggestions.push({ title: "בחירת שירי חופה", description: "תיאום מול הדיג'יי", priority: "NORMAL" });
-                suggestions.push({ title: "עיצוב חופה", description: "בחירת מעצב וסגירת קונספט", priority: "NORMAL" });
-                suggestions.push({ title: "אישורי הגעה", description: "טלפונים לאורחים שלא אישרו", priority: "CRITICAL" });
-                suggestions.push({ title: "סידורי הושבה", description: "שיבוץ אורחים לשולחנות", priority: "HIGH" });
-            }
-            if (textToAnalyze.includes("מסיבה") || textToAnalyze.includes("party")) {
-                suggestions.push({ title: "הכנת פלייליסט", description: "רשימת שירים לדיג'יי", priority: "NORMAL" });
-                suggestions.push({ title: "קניית אלכוהול", description: "חישוב כמויות ורכישה", priority: "HIGH" });
-                suggestions.push({ title: "קישוט המקום", description: "בלונים, שרשראות תאורה ודגלים", priority: "NORMAL" });
-                suggestions.push({ title: "תיאום צלם מגנטים", description: "סגירת ספק צילום", priority: "NORMAL" });
-            }
-            if (textToAnalyze.includes("כנס") || textToAnalyze.includes("conference")) {
-                suggestions.push({ title: "הדפסת תגים לשמות", description: "הכנת תגי שם לכל המשתתפים", priority: "NORMAL" });
-                suggestions.push({ title: "תיאום ציוד הגברה", description: "מיקרופונים, מקרן ומסך", priority: "CRITICAL" });
-                suggestions.push({ title: "הכנת מצגות", description: "איסוף מצגות מהמרצים", priority: "HIGH" });
-                suggestions.push({ title: "תיאום כיבוד", description: "קפה ומאפה לקבלת פנים", priority: "NORMAL" });
-                suggestions.push({ title: "רישום משתתפים", description: "הקמת עמדת רישום בכניסה", priority: "HIGH" });
-            }
-
-            // Contextual technical/logistics
-            if (isOutdoor) {
-                suggestions.push({ title: "תיאום גנרטורים ורזרבה", description: "הבאת גנרטור נוסף ותאום נקודות חשמל בשטח", priority: "CRITICAL" });
-                suggestions.push({ title: "בדיקת מזג אוויר ופתרונות גשם/צל", description: "אוהלים, מחסות ושילוט חירום", priority: "HIGH" });
-            }
-            if (hasVendors) {
-                suggestions.push({ title: "ניהול ספקים ברשימת טלפונים", description: "איסוף איש קשר לכל ספק ותוכנית התקשרות ביום האירוע", priority: "HIGH" });
-                suggestions.push({ title: "אישורי בטיחות לספקים", description: "בדיקת ביטוחים, רישיונות וחתימות על נהלי בטיחות", priority: "CRITICAL" });
-            }
-            if (hasTech) {
-                suggestions.push({ title: "חזרת טכניון מלאה", description: "בדיקת סאונד, תאורה ומקרנים עם כל הדוברים/האמנים", priority: "CRITICAL" });
-                suggestions.push({ title: "תוכנית גיבוי קבצי מדיה", description: "שמירת קבצי מצגות ומוזיקה על דיסק און קי ודוא\"ל", priority: "HIGH" });
-            }
-
-            // General suggestions based on context
-            if (!event?.budget || event.budget === "0") {
-                suggestions.push({ title: "בניית תקציב מפורט", description: "הערכת עלויות לכל סעיף", priority: "HIGH" });
-                suggestions.push({ title: "חיפוש מקורות מימון", description: "חסויות או תמיכה מהרשות", priority: "NORMAL" });
-            }
-            if (!event?.team || event.team.length < 2) {
-                suggestions.push({ title: "גיוס מתנדבים/צוות", description: "פרסום קול קורא להצטרפות לצוות", priority: "HIGH" });
-                suggestions.push({ title: "חלוקת תפקידים", description: "הגדרת תחומי אחריות לכל איש צוות", priority: "HIGH" });
-            }
-
-            // Always relevant suggestions (Pool of generic tasks)
-            const genericTasks = [
-                { title: "אישור סופי מול ספקים", description: "וידוא הגעה שבוע לפני האירוע", priority: "CRITICAL" },
-                { title: "פרסום ברשתות החברתיות", description: "העלאת פוסט וסטורי לקידום האירוע", priority: "NORMAL" },
-                { title: "הכנת לו\"ז יום האירוע", description: "טבלה מפורטת של מה קורה בכל שעה", priority: "HIGH" },
-                { title: "סיור מקדים בלוקיישן", description: "בדיקת תשתיות, חשמל ודרכי גישה", priority: "NORMAL" },
-                { title: "שליחת תזכורת למשתתפים", description: "הודעת וואטסאפ/מייל יום לפני", priority: "NORMAL" },
-                { title: "הכנת שלטי הכוונה", description: "שילוט למקום האירוע", priority: "NORMAL" },
-                { title: "בדיקת ביטוח", description: "וידוא שיש ביטוח צד ג' בתוקף", priority: "CRITICAL" },
-                { title: "תיאום ניקיון", description: "סגירת חברת ניקיון לפני ואחרי", priority: "NORMAL" },
-                { title: "רכישת ציוד מתכלה", description: "חד פעמי, מפיות, שקיות זבל", priority: "NORMAL" },
-                { title: "הכנת תיק עזרה ראשונה", description: "וידוא ציוד רפואי בסיסי", priority: "HIGH" },
-                { title: "תיאום חניה", description: "בדיקת אפשרויות חניה לאורחים", priority: "NORMAL" },
-                { title: "הכנת פלייליסט רקע", description: "מוזיקה לקבלת פנים", priority: "NORMAL" }
-            ];
-
-            const technicalOps = [
-                { title: "הזמנת צוות אבטחה/סדרנים", description: "סגירת מספר מאבטחים לפי גודל האירוע", priority: "HIGH" },
-                { title: "תוכנית פינוי וחירום", description: "נקודות יציאה, שילוט חירום, מספרי חירום זמינים", priority: "CRITICAL" },
-                { title: "בדיקת חשמל ותשתיות", description: "בדיקת עומסים, שקעים ואורכי כבלים, גיבוי מפצלים", priority: "HIGH" },
-                { title: "תיאום חנייה לציוד וספקים", description: "שמירת מקומות פריקה וטעינה", priority: "NORMAL" },
-                { title: "תיאום צילום/וידאו", description: "תדרוך צלמים, מסלולי תנועה, נקודות צילום מרכזיות", priority: "NORMAL" },
-                { title: "ניהול טפסי אישורים", description: "חתימות ספקים/אומנים על נהלים, GDPR/צילום", priority: "NORMAL" },
-                { title: "תיאום קייטרינג לפי צמחונות/רגישויות", description: "איסוף מידע על אלרגיות ותיאום תפריט חלופי", priority: "HIGH" },
-                { title: "הכנת ערכת קשר/קשרי וואטסאפ", description: "פתיחת קבוצת תפעול וצירוף ספקים מרכזיים", priority: "NORMAL" },
-                { title: "בדיקת מסלולי כניסה ועמדות בידוק", description: "עמדות כרטיסים/רישום ופיקוח על תורים", priority: "HIGH" }
-            ];
-
-            suggestions.push(...genericTasks as any);
-            suggestions.push(...technicalOps as any);
-
-            // Shuffle and pick unique
-            const uniqueSuggestions = Array.from(new Set(suggestions.map(s => JSON.stringify(s))))
-                .map(s => JSON.parse(s))
-                .sort(() => 0.5 - Math.random() + (Date.now() % 7) * 0.0001); // Shuffle with slight seed by time
-
-            if (append) {
-                const currentTitles = new Set(suggestedTasks.map(t => t.title));
-                const newSuggestions = uniqueSuggestions.filter((s: any) => !currentTitles.has(s.title)).slice(0, 7);
-                setSuggestedTasks(prev => [...prev, ...newSuggestions]);
-            } else {
-                setSuggestedTasks(uniqueSuggestions.slice(0, forceReset ? 10 : 7));
-            }
-
-            setIsGenerating(false);
-        }, 1000);
+    const handleLibraryEditStart = (t?: { id?: string; title?: string; description?: string; priority?: any }) => {
+        if (t?.id) {
+            setLibraryForm({
+                id: t.id,
+                title: t.title || "",
+                description: t.description || "",
+                priority: (t.priority as any) || "NORMAL",
+            });
+        } else {
+            setLibraryForm({ id: "", title: "", description: "", priority: "NORMAL" });
+        }
     };
 
-    const handleAcceptSuggestion = (suggestion: { title: string; description: string; priority: any }) => {
-        setNewTask({
-            ...newTask,
-            title: suggestion.title,
-            description: suggestion.description,
-            priority: suggestion.priority
-        });
-        setShowSuggestions(false);
-        setShowNewTask(true);
+    const handleSaveLibraryTask = async () => {
+        if (!db) return;
+        const title = libraryForm.title.trim();
+        if (!title) {
+            alert("יש למלא שם משימה");
+            return;
+        }
+        const payload: any = {
+            title,
+            description: libraryForm.description.trim(),
+            priority: libraryForm.priority || "NORMAL",
+            template: {
+                title,
+                description: libraryForm.description.trim(),
+                priority: libraryForm.priority || "NORMAL",
+            },
+            updatedAt: serverTimestamp(),
+        };
+        setSavingLibraryTask(true);
+        try {
+            if (libraryForm.id) {
+                await setDoc(doc(db, "default_tasks", libraryForm.id), payload, { merge: true });
+            } else {
+                await addDoc(collection(db, "default_tasks"), { ...payload, createdAt: serverTimestamp() });
+            }
+            setLibraryForm({ id: "", title: "", description: "", priority: "NORMAL" });
+        } catch (err) {
+            console.error("Failed saving library task", err);
+            alert("שגיאה בשמירת המשימה למאגר");
+        } finally {
+            setSavingLibraryTask(false);
+        }
+    };
+
+    const handleAddLibraryTaskToEvent = async (t: any) => {
+        if (!db || !user || !id) return;
+        const template = t.template || t;
+        const assignees = sanitizeAssigneesForWrite(template.assignees || []);
+        const primary = assignees[0];
+        const filesFromTemplate: { name?: string; url?: string; storagePath?: string; originalName?: string }[] = Array.isArray(template.files)
+            ? template.files.filter((f: any) => f && f.url)
+            : [];
+        try {
+            const docRef = await addDoc(collection(db, "events", id, "tasks"), {
+                title: template.title || t.title,
+                description: template.description || t.description || "",
+                assignee: primary?.name || "",
+                assigneeId: primary?.userId || null,
+                assignees,
+                dueDate: template.dueDate || "",
+                priority: (template.priority as any) || "NORMAL",
+                status: "TODO",
+                isVolunteerTask: !!template.isVolunteerTask,
+                volunteerHours: template.isVolunteerTask ? (template.volunteerHours ?? null) : null,
+                filesCount: filesFromTemplate.length || 0,
+                createdAt: serverTimestamp(),
+                createdBy: user.uid,
+                createdByEmail: user.email || "",
+                createdByName: user.displayName || user.email || "משתמש",
+            });
+
+            // Attach existing media references from the template
+            if (filesFromTemplate.length) {
+                let previewImage: string | null = null;
+                const fileWrites = filesFromTemplate.map((file: any) => {
+                    const fileData = {
+                        name: file.name || file.originalName || "",
+                        originalName: file.originalName || file.name || "",
+                        url: file.url || "",
+                        storagePath: file.storagePath || "",
+                        taskId: docRef.id,
+                        taskTitle: template.title || t.title,
+                        createdAt: serverTimestamp(),
+                        createdBy: user.uid,
+                        createdByName: user.displayName || user.email || "משתמש",
+                    };
+                    if (!previewImage && (file.url || "").match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
+                        previewImage = file.url;
+                    }
+                    return Promise.all([
+                        addDoc(collection(db!, "events", id, "tasks", docRef.id, "files"), fileData),
+                        addDoc(collection(db!, "events", id, "files"), fileData),
+                    ]);
+                });
+                await Promise.all(fileWrites);
+                if (previewImage) {
+                    await updateDoc(doc(db, "events", id, "tasks", docRef.id), { previewImage });
+                }
+            }
+
+            if (assignees.length) {
+                sendTagAlerts(assignees, {
+                    id: docRef.id,
+                    title: template.title,
+                    description: template.description,
+                    priority: template.priority || "NORMAL",
+                    dueDate: template.dueDate || "",
+                } as Task).catch(() => {});
+            }
+            alert("המשימה נוספה לאירוע");
+        } catch (err) {
+            console.error("Failed adding library task", err);
+            alert("שגיאה בהוספת המשימה מהמאגר");
+        }
     };
 
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
@@ -1888,7 +2179,7 @@ export default function EventDetailsPage() {
                     <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 animate-in fade-in zoom-in-95 duration-200">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold">עריכת משימה</h3>
-                            <button onClick={() => { setEditingTask(null); setEditTaskSearch(""); }} className="text-gray-400 hover:text-gray-600">
+                            <button onClick={() => { setEditingTask(null); setEditTaskSearch(""); setSaveEditTaskToLibrary(false); }} className="text-gray-400 hover:text-gray-600">
                                 <X size={20} />
                             </button>
                         </div>
@@ -2027,10 +2318,24 @@ export default function EventDetailsPage() {
                                     )}
                                 </div>
                             )}
+                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50">
+                                <Repeat size={16} className="text-indigo-600" />
+                                <div className="flex flex-col">
+                                    <span className="text-xs font-semibold text-indigo-800">שמור במאגר המשימות החוזרות</span>
+                                    <span className="text-[11px] text-indigo-700">כדי להוסיף לאזור ההגדרות</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setSaveEditTaskToLibrary(prev => !prev)}
+                                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${saveEditTaskToLibrary ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200"}`}
+                                >
+                                    {saveEditTaskToLibrary ? "נשמר" : "הוסף"}
+                                </button>
+                            </div>
                             <div className="flex justify-end gap-3 pt-4">
                                 <button
                                     type="button"
-                                    onClick={() => setEditingTask(null)}
+                                    onClick={() => { setEditingTask(null); setSaveEditTaskToLibrary(false); }}
                                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
                                 >
                                     ביטול
@@ -2393,67 +2698,114 @@ export default function EventDetailsPage() {
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Suggestions Modal */}
+                {/* Recurring Tasks Modal */}
                 {showSuggestions && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 animate-in fade-in zoom-in-95 duration-200 max-h-[80vh] overflow-y-auto">
-                            <div className="flex justify-between items-center mb-6">
+                        <div className="bg-white rounded-xl shadow-lg max-w-3xl w-full p-6 animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
                                 <div className="flex items-center gap-2">
                                     <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
-                                        <Sparkles size={24} />
+                                        <Repeat size={22} />
                                     </div>
                                     <div>
-                                        <h3 className="text-xl font-bold text-gray-900">משימות מוצעות לאירוע</h3>
-                                        <p className="text-sm text-gray-500">מבוסס על ניתוח פרטי האירוע שלך</p>
+                                        <h3 className="text-xl font-bold text-gray-900">משימות חוזרות</h3>
+                                        <p className="text-sm text-gray-500">כל המשימות הקבועות מהמאגר</p>
                                     </div>
                                 </div>
                                 <button onClick={() => setShowSuggestions(false)} className="text-gray-400 hover:text-gray-600">
-                                    <X size={24} />
+                                    <X size={22} />
                                 </button>
                             </div>
 
-                            {isGenerating ? (
-                                <div className="text-center py-12">
-                                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mx-auto mb-4"></div>
-                                    <p className="text-gray-600 animate-pulse">המערכת מנתחת את האירוע ומחפשת רעיונות...</p>
+                            <div className="mb-4 p-3 border border-indigo-100 rounded-lg bg-indigo-50">
+                                <h4 className="text-sm font-semibold text-indigo-800 mb-2">{libraryForm.id ? "עריכת משימה קבועה" : "הוסף משימה קבועה"}</h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                                    <input
+                                        type="text"
+                                        className="w-full border rounded-lg px-3 py-2 text-sm"
+                                        placeholder="שם המשימה"
+                                        value={libraryForm.title}
+                                        onChange={(e) => setLibraryForm(prev => ({ ...prev, title: e.target.value }))}
+                                    />
+                                    <select
+                                        className="w-full border rounded-lg px-3 py-2 text-sm"
+                                        value={libraryForm.priority}
+                                        onChange={(e) => setLibraryForm(prev => ({ ...prev, priority: e.target.value as any }))}
+                                    >
+                                        <option value="NORMAL">רגיל</option>
+                                        <option value="HIGH">גבוה</option>
+                                        <option value="CRITICAL">דחוף</option>
+                                    </select>
                                 </div>
-                            ) : (
-                                <div className="grid gap-3">
-                                    {suggestedTasks.map((suggestion, idx) => (
-                                        <div key={idx} className="flex items-start justify-between p-4 border border-gray-100 rounded-lg hover:bg-indigo-50 transition group">
-                                            <div>
-                                                <h4 className="font-semibold text-gray-800 flex items-center gap-2">
-                                                    {suggestion.title}
-                                                    {suggestion.priority === "CRITICAL" && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">דחוף</span>}
-                                                </h4>
-                                                <p className="text-sm text-gray-600 mt-1">{suggestion.description}</p>
-                                            </div>
-                                            <button
-                                                onClick={() => handleAcceptSuggestion(suggestion)}
-                                                className="bg-white border border-indigo-200 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-600 hover:text-white transition flex items-center gap-1 shrink-0"
-                                            >
-                                                <Plus size={16} />
-                                                הוסף
-                                            </button>
-                                        </div>
-                                    ))}
+                                <textarea
+                                    className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+                                    rows={2}
+                                    placeholder="תיאור קצר"
+                                    value={libraryForm.description}
+                                    onChange={(e) => setLibraryForm(prev => ({ ...prev, description: e.target.value }))}
+                                />
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveLibraryTask}
+                                        disabled={savingLibraryTask}
+                                        className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                                    >
+                                        {savingLibraryTask ? "שומר..." : libraryForm.id ? "שמור במאגר" : "הוסף למאגר"}
+                                    </button>
+                                    {libraryForm.id && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleLibraryEditStart()}
+                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100"
+                                        >
+                                            בטל עריכה
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
 
-                                    <button
-                                        onClick={() => generateSuggestions(true)}
-                                        className="w-full py-3 mt-2 border border-dashed border-gray-300 rounded-lg text-gray-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition flex items-center justify-center gap-2 text-sm font-medium"
-                                    >
-                                        <RefreshCw size={16} />
-                                        טען עוד רעיונות
-                                    </button>
-                                    <button
-                                        onClick={() => generateSuggestions(false, true)}
-                                        className="w-full py-3 border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50 transition flex items-center justify-center gap-2 text-sm font-semibold"
-                                    >
-                                        <RefreshCw size={16} />
-                                        רענן רשימה
-                                    </button>
-                                </div>
-                            )}
+                            <div className="space-y-3">
+                                {loadingLibraryTasks ? (
+                                    <div className="text-center text-gray-500 py-6">טוען משימות...</div>
+                                ) : libraryTasks.length === 0 ? (
+                                    <div className="text-center text-gray-500 py-6">אין משימות במאגר עדיין.</div>
+                                ) : (
+                                    libraryTasks.map((t) => {
+                                        const priorityLabel = t.priority === "CRITICAL" ? "דחוף" : t.priority === "HIGH" ? "גבוה" : "רגיל";
+                                        const priorityColor = t.priority === "CRITICAL" ? "bg-red-100 text-red-700" : t.priority === "HIGH" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-700";
+                                        return (
+                                            <div key={t.id} className="p-4 border border-gray-100 rounded-lg bg-white flex flex-col gap-2">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <h4 className="font-semibold text-gray-900">{t.title}</h4>
+                                                            <span className={`text-xs px-2 py-0.5 rounded-full ${priorityColor}`}>{priorityLabel}</span>
+                                                        </div>
+                                                        {t.description ? (
+                                                            <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{t.description}</p>
+                                                        ) : null}
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => handleAddLibraryTaskToEvent(t)}
+                                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                        >
+                                                            הוסף לאירוע
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleLibraryEditStart(t)}
+                                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                        >
+                                                            ערוך
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -2469,15 +2821,22 @@ export default function EventDetailsPage() {
                         </div>
                         <div className="flex gap-2">
                             <button
-                                onClick={() => generateSuggestions(false)}
+                                onClick={() => {
+                                    setShowSuggestions(true);
+                                    handleLibraryEditStart();
+                                }}
                                 className="bg-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:opacity-80 transition text-xs md:text-sm font-medium vinyl-shadow"
                                 style={{ border: '2px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
                             >
-                                <Sparkles size={16} />
-                                רעיונות למשימות
+                                <Repeat size={16} />
+                                משימות חוזרות
                             </button>
                             <button
-                                onClick={() => setShowNewTask(!showNewTask)}
+                                onClick={() => {
+                                    const next = !showNewTask;
+                                    setShowNewTask(next);
+                                    if (!next) setSaveNewTaskToLibrary(false);
+                                }}
                                 className="patifon-gradient text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90 transition text-sm font-medium vinyl-shadow"
                             >
                                 <Plus size={18} />
@@ -2660,10 +3019,26 @@ export default function EventDetailsPage() {
                                     )}
                                 </div>
                                 )}
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+                                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 w-full sm:w-auto">
+                                        <Repeat size={16} className="text-indigo-600" />
+                                        <div className="flex flex-col">
+                                            <span className="text-xs font-semibold text-indigo-800">סמן כמשימה שחוזרת על עצמה</span>
+                                            <span className="text-[11px] text-indigo-700">תתווסף למאגר המשימות החשובות</span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSaveNewTaskToLibrary(prev => !prev)}
+                                            className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${saveNewTaskToLibrary ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200"}`}
+                                        >
+                                            {saveNewTaskToLibrary ? "נשמר" : "הוסף"}
+                                        </button>
+                                    </div>
+                                </div>
                                 <div className="flex justify-end gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => setShowNewTask(false)}
+                                        onClick={() => { setShowNewTask(false); setSaveNewTaskToLibrary(false); }}
                                         className="px-3 py-1 text-gray-500 hover:bg-gray-100 rounded-lg text-sm"
                                     >
                                         ביטול
@@ -2679,43 +3054,101 @@ export default function EventDetailsPage() {
                         </div>
                     )}
 
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                         {tasks.length === 0 ? (
                             <p className="text-gray-500 text-center py-8">אין משימות עדיין. צור את המשימה הראשונה!</p>
                         ) : (
-                            tasks.map((task) => {
-                                const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
-                                return (
-                                    <TaskCard
-                                        key={task.id}
-                                        id={task.id}
-                                        title={task.title}
-                                        description={task.description}
-                                        currentStatus={task.currentStatus}
-                                        nextStep={task.nextStep}
-                                        assignee={task.assignee || "לא משויך"}
-                                        assignees={task.assignees}
-                                        status={task.status}
-                                        dueDate={task.dueDate}
-                                        priority={task.priority}
-                                        eventId={id}
-                                        eventTitle={event?.title}
-                                        scope={task.scope}
-                                        createdByName={task.createdByName}
-                                        onEdit={() => setEditingTask(task)}
-                                        onDelete={() => confirmDeleteTask(task.id)}
-                                        onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
-                                        onChat={() => setChatTask(task)}
-                                        hasUnreadMessages={hasUnread}
-                                        onEditStatus={() => setEditingStatusTask(task)}
-                                        onEditDate={() => setEditingDateTask(task)}
-                                        onManageAssignees={() => {
-                                            setTaggingTask(task);
-                                            setTagSelection(task.assignees || []);
-                                        }}
-                                    />
-                                );
-                            })
+                            <>
+                                <div className="space-y-2">
+                                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                        משימות צוות
+                                        <span className="text-xs text-gray-500">({tasks.filter(t => !t.isVolunteerTask).length})</span>
+                                    </h3>
+                                    <div className="space-y-3">
+                                        {tasks.filter(t => !t.isVolunteerTask).map((task) => {
+                                            const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                                            return (
+                                                <TaskCard
+                                                    key={task.id}
+                                                    id={task.id}
+                                                    title={task.title}
+                                                    description={task.description}
+                                                    currentStatus={task.currentStatus}
+                                                    nextStep={task.nextStep}
+                                                    assignee={task.assignee || "לא משויך"}
+                                                    assignees={task.assignees}
+                                                    status={task.status}
+                                                    dueDate={task.dueDate}
+                                                    priority={task.priority}
+                                                    eventId={id}
+                                                    eventTitle={event?.title}
+                                                    scope={task.scope}
+                                                    createdByName={task.createdByName}
+                                                    onEdit={() => { setEditingTask(task); setSaveEditTaskToLibrary(false); }}
+                                                    onDelete={() => confirmDeleteTask(task.id)}
+                                                    onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
+                                                    onChat={() => setChatTask(task)}
+                                                    hasUnreadMessages={hasUnread}
+                                                    onEditStatus={() => setEditingStatusTask(task)}
+                                                    onEditDate={() => setEditingDateTask(task)}
+                                                    onManageAssignees={() => {
+                                                        setTaggingTask(task);
+                                                        setTagSelection(task.assignees || []);
+                                                    }}
+                                                />
+                                            );
+                                        })}
+                                        {tasks.filter(t => !t.isVolunteerTask).length === 0 && (
+                                            <p className="text-xs text-gray-500">אין משימות צוות כרגע.</p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                        משימות למתנדבים
+                                        <span className="text-xs text-gray-500">({tasks.filter(t => t.isVolunteerTask).length})</span>
+                                    </h3>
+                                    <div className="space-y-3">
+                                        {tasks.filter(t => t.isVolunteerTask).map((task) => {
+                                            const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                                            return (
+                                                <TaskCard
+                                                    key={task.id}
+                                                    id={task.id}
+                                                    title={task.title}
+                                                    description={task.description}
+                                                    currentStatus={task.currentStatus}
+                                                    nextStep={task.nextStep}
+                                                    assignee={task.assignee || "לא משויך"}
+                                                    assignees={task.assignees}
+                                                    status={task.status}
+                                                    dueDate={task.dueDate}
+                                                    priority={task.priority}
+                                                    eventId={id}
+                                                    eventTitle={event?.title}
+                                                    scope={task.scope}
+                                                    createdByName={task.createdByName}
+                                                    onEdit={() => { setEditingTask(task); setSaveEditTaskToLibrary(false); }}
+                                                    onDelete={() => confirmDeleteTask(task.id)}
+                                                    onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
+                                                    onChat={() => setChatTask(task)}
+                                                    hasUnreadMessages={hasUnread}
+                                                    onEditStatus={() => setEditingStatusTask(task)}
+                                                    onEditDate={() => setEditingDateTask(task)}
+                                                    onManageAssignees={() => {
+                                                        setTaggingTask(task);
+                                                        setTagSelection(task.assignees || []);
+                                                    }}
+                                                />
+                                            );
+                                        })}
+                                        {tasks.filter(t => t.isVolunteerTask).length === 0 && (
+                                            <p className="text-xs text-gray-500">אין משימות למתנדבים כרגע.</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
                         )}
                     </div>
                 </div>

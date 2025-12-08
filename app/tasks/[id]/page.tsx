@@ -4,9 +4,9 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, type Firestore } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, type Firestore, setDoc, increment, getDocs, where } from "firebase/firestore";
 import Link from "next/link";
-import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake } from "lucide-react";
+import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake, Repeat } from "lucide-react";
 import { storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -78,6 +78,8 @@ export default function TaskDetailPage() {
     const [uploadFiles, setUploadFiles] = useState<File[]>([]);
     const [eventCreatorName, setEventCreatorName] = useState<string>("");
     const [creatorDisplayName, setCreatorDisplayName] = useState<string>("");
+    const [savingTemplate, setSavingTemplate] = useState(false);
+    const [templateSaved, setTemplateSaved] = useState(false);
 
     // Backfill creator contact details from the user profile (registration info)
     useEffect(() => {
@@ -117,6 +119,93 @@ export default function TaskDetailPage() {
         if (assignee.userId) return String(assignee.userId);
         if (assignee.name) return assignee.name.trim().toLowerCase();
         return "";
+    };
+
+    const normalizeTaskKey = (title: string) =>
+        (title || "")
+            .toLowerCase()
+            .replace(/[^\w\sא-ת]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    const fetchTaskFilesForLibrary = async (eventId?: string, taskId?: string): Promise<{ name?: string; url?: string; storagePath?: string; originalName?: string }[]> => {
+        if (!db || !eventId || !taskId) return [];
+        const paths: Array<["events" | "projects", string, "tasks", string, "files"]> = [
+            ["events", eventId, "tasks", taskId, "files"],
+            ["projects", eventId, "tasks", taskId, "files"],
+        ];
+        for (const path of paths) {
+            try {
+                const snap = await getDocs(collection(db, ...path));
+                if (!snap.empty) {
+                    return snap.docs.map(d => {
+                        const data = d.data() as any;
+                        return {
+                            name: data.name || data.originalName || "",
+                            originalName: data.originalName || data.name || "",
+                            url: data.url || "",
+                            storagePath: data.storagePath || "",
+                        };
+                    });
+                }
+            } catch (err) {
+                console.warn("Failed loading task files for library", err);
+            }
+        }
+        return [];
+    };
+
+    const saveTaskTemplate = async () => {
+        if (!db || !task) return;
+        const key = normalizeTaskKey(task.title);
+        if (!key) {
+            alert("שם המשימה לא תקין לשמירה במאגר המשימות החוזרות");
+            return;
+        }
+        const filesForTemplate = await fetchTaskFilesForLibrary(task.eventId, task.id);
+        const templateData = {
+            title: task.title.trim(),
+            description: task.description || "",
+            priority: task.priority || "NORMAL",
+            dueDate: task.dueDate || "",
+            assignees: task.assignees || [],
+            isVolunteerTask: !!task.isVolunteerTask,
+            volunteerHours: task.isVolunteerTask ? (task.volunteerHours ?? null) : null,
+            files: filesForTemplate,
+        };
+        setSavingTemplate(true);
+        try {
+            await Promise.all([
+                setDoc(doc(db, "repeat_tasks", key), {
+                    key,
+                    title: task.title.trim(),
+                    description: task.description || "",
+                    priority: task.priority || "NORMAL",
+                    template: templateData,
+                    createdBy: task.createdBy || user?.uid || "",
+                    createdByEmail: user?.email || "",
+                    createdByName: user?.displayName || user?.email || "",
+                    count: increment(1),
+                    lastUsedAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                    createdAt: serverTimestamp(),
+                }, { merge: true }),
+                setDoc(doc(db, "default_tasks", key), {
+                    title: task.title.trim(),
+                    description: task.description || "",
+                    priority: task.priority || "NORMAL",
+                    template: templateData,
+                    updatedAt: serverTimestamp(),
+                    createdAt: serverTimestamp(),
+                }, { merge: true })
+            ]);
+            setTemplateSaved(true);
+            alert("המשימה נשמרה במאגר המשימות החוזרות והקבועות");
+        } catch (err) {
+            console.error("Failed saving task template", err);
+            alert("שגיאה בשמירת המשימה למאגר");
+        } finally {
+            setSavingTemplate(false);
+        }
     };
 
     // We need to find the eventId for this task since tasks are subcollections of events.
@@ -676,6 +765,25 @@ export default function TaskDetailPage() {
                                             <span className="text-xs text-gray-500">שעות עבודה</span>
                                         </div>
                                     )}
+                                </div>
+                            )}
+                            {!isVolunteerView && (
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <Repeat size={18} className="text-indigo-600" />
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-semibold text-indigo-800">סמן כמשימה שחוזרת על עצמה</span>
+                                            <span className="text-[11px] text-indigo-700">תשמר במאגר המשימות הקבועות והחוזרות</span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={saveTaskTemplate}
+                                        disabled={savingTemplate}
+                                        className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${templateSaved ? "bg-green-600 text-white border-green-600" : "bg-white text-indigo-700 border-indigo-200"} disabled:opacity-60`}
+                                    >
+                                        {savingTemplate ? "שומר..." : templateSaved ? "נשמר" : "הוסף למאגר"}
+                                    </button>
                                 </div>
                             )}
                         </div>

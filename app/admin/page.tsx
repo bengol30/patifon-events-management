@@ -32,6 +32,9 @@ interface EventRow {
 interface RepeatTaskRow {
     key: string;
     title?: string;
+    description?: string;
+    priority?: string;
+    template?: any;
     count?: number;
     lastUsedAt?: any;
 }
@@ -370,7 +373,7 @@ export default function AdminDashboard() {
                         <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
                             {repeatTasks.length === 0 && <EmptyRow text="אין נתונים על משימות חוזרות." />}
                             {repeatTasks.map((t, idx) => (
-                                <div key={t.key} className="p-3 bg-white border border-gray-100 rounded-xl shadow-sm flex items-center gap-3">
+                                <div key={t.key} className="p-3 bg-white border border-gray-100 rounded-xl shadow-sm flex items-start gap-3">
                                     <div className="p-2 rounded-full bg-indigo-50 text-indigo-700">
                                         <Repeat size={16} />
                                     </div>
@@ -389,6 +392,11 @@ export default function AdminDashboard() {
                                                 </button>
                                             </div>
                                         </div>
+                                        {t.description ? (
+                                            <div className="text-xs text-gray-600 mt-1 line-clamp-2">
+                                                {t.description}
+                                            </div>
+                                        ) : null}
                                         {t.lastUsedAt?.seconds && (
                                             <div className="text-xs text-gray-500">
                                                 לאחרונה: {new Date(t.lastUsedAt.seconds * 1000).toLocaleDateString("he-IL", { dateStyle: "short" })}

@@ -9,6 +9,38 @@ import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import PartnersInput from "@/components/PartnersInput";
 
+const computeNextOccurrence = (
+    baseDate: Date,
+    recurrence: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+    recurrenceEnd?: Date | null
+) => {
+    if (!(baseDate instanceof Date) || isNaN(baseDate.getTime())) return baseDate;
+    if (recurrence === "NONE") return baseDate;
+    const now = Date.now();
+    let candidate = new Date(baseDate);
+    let guard = 0;
+    const addInterval = () => {
+        if (recurrence === "WEEKLY") candidate = new Date(candidate.getTime() + 7 * 24 * 60 * 60 * 1000);
+        else if (recurrence === "BIWEEKLY") candidate = new Date(candidate.getTime() + 14 * 24 * 60 * 60 * 1000);
+        else if (recurrence === "MONTHLY") {
+            const next = new Date(candidate);
+            next.setMonth(next.getMonth() + 1);
+            candidate = next;
+        }
+    };
+    while (candidate.getTime() < now && guard < 200) {
+        addInterval();
+        guard += 1;
+    }
+    if (recurrenceEnd && recurrenceEnd.getTime && recurrenceEnd.getTime() > 0) {
+        const endTs = recurrenceEnd.getTime();
+        if (candidate.getTime() > endTs) {
+            if (endTs >= now) candidate = new Date(endTs);
+        }
+    }
+    return candidate;
+};
+
 export default function NewEventPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -87,6 +119,10 @@ export default function NewEventPage() {
                     return;
                 }
                 recurrenceEnd = parsed;
+            }
+            // Adjust start date to הבא על פי החזרתיות
+            if (dateObjects[0]) {
+                dateObjects[0] = computeNextOccurrence(dateObjects[0], formData.recurrence, recurrenceEnd);
             }
             const volunteersCountNum = formData.volunteersCount ? parseInt(formData.volunteersCount, 10) : null;
             // Create event in Firestore

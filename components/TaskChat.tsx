@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Send, MessageCircle, AtSign } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, updateDoc, doc, getDoc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, updateDoc, doc, getDoc, getDocs, where, setDoc } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
 interface Message {
@@ -23,6 +23,9 @@ interface TaskChatProps {
     onClose: () => void;
 }
 
+const MIN_SEND_INTERVAL_MS = 5000;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskChatProps) {
     const { user } = useAuth();
     const [messages, setMessages] = useState<Message[]>([]);
@@ -35,6 +38,9 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
     const [mentionQuery, setMentionQuery] = useState("");
     const [mentionStart, setMentionStart] = useState<number | null>(null);
     const [pendingMentions, setPendingMentions] = useState<{ name: string; userId?: string; email?: string }[]>([]);
+    const [sendingMentions, setSendingMentions] = useState(false);
+    const [eventTitle, setEventTitle] = useState("");
+    const [taskDetails, setTaskDetails] = useState<{ description?: string; dueDate?: any; priority?: string }>({});
 
     useEffect(() => {
         if (!db || !eventId || !taskId) return;
@@ -45,6 +51,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                 if (evSnap.exists()) {
                     const data = evSnap.data() as any;
                     setTeam((data.team as any[]) || []);
+                    setEventTitle(data.title || "");
                 }
             } catch (err) {
                 console.error("Failed loading team for mentions", err);
@@ -83,6 +90,22 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
 
         return () => unsubscribe();
     }, [eventId, taskId, user]);
+
+    useEffect(() => {
+        if (!db || !eventId || !taskId) return;
+        getDoc(doc(db!, "events", eventId, "tasks", taskId))
+            .then((snap) => {
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    setTaskDetails({
+                        description: data.description,
+                        dueDate: data.dueDate,
+                        priority: data.priority,
+                    });
+                }
+            })
+            .catch((err) => console.warn("Failed loading task details for mention alert", err));
+    }, [db, eventId, taskId]);
 
     useEffect(() => {
         // Scroll to bottom when new messages arrive
@@ -127,6 +150,10 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                 lastMessageMentions: pendingMentions,
             });
 
+            if (pendingMentions.length) {
+                sendMentionAlerts(pendingMentions).catch(() => { /* כבר טופל בלוג */ });
+            }
+
             setNewMessage("");
             setPendingMentions([]);
             setMentionActive(false);
@@ -135,6 +162,134 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         } catch (err) {
             console.error("Error sending message:", err);
             alert("שגיאה בשליחת ההודעה");
+        }
+    };
+
+    const normalizePhone = (value: string) => {
+        const digits = (value || "").replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("972")) return digits;
+        if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+        return digits;
+    };
+
+    const getPublicBaseUrl = (preferred?: string) => {
+        const cleanPreferred = (preferred || "").trim().replace(/\/$/, "");
+        if (cleanPreferred) return cleanPreferred;
+        const fromEnv = (process.env.NEXT_PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+        if (fromEnv) return fromEnv;
+        if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+        return "";
+    };
+
+    const ensureGlobalRateLimit = async () => {
+        const ref = doc(db!, "rate_limits", "whatsapp_mentions");
+        while (true) {
+            const snap = await getDoc(ref);
+            const last = snap.exists() ? (snap.data() as any).lastSendAt?.toMillis?.() || 0 : 0;
+            const now = Date.now();
+            const waitMs = last ? Math.max(0, MIN_SEND_INTERVAL_MS - (now - last)) : 0;
+            if (waitMs > 0) {
+                await sleep(waitMs);
+            }
+            try {
+                await setDoc(ref, { lastSendAt: serverTimestamp() }, { merge: true });
+                return;
+            } catch (err) {
+                // Collision – backoff and retry
+                await sleep(200);
+            }
+        }
+    };
+
+    const fetchWhatsappConfig = async () => {
+        try {
+            const ref = doc(db!, "integrations", "whatsapp");
+            const snap = await getDoc(ref);
+            if (!snap.exists()) return null;
+            const data = snap.data() as any;
+            if (!data.rules?.notifyOnMention) return null;
+            if (!data.idInstance || !data.apiTokenInstance) return null;
+            return {
+                idInstance: data.idInstance as string,
+                apiTokenInstance: data.apiTokenInstance as string,
+                baseUrl: (data.baseUrl as string) || "",
+            };
+        } catch (err: any) {
+            if (err?.code === "permission-denied") {
+                console.warn("אין הרשאה לקרוא הגדרות וואטסאפ (רק אדמין)", err);
+            } else {
+                console.warn("שגיאה בקריאת הגדרות וואטסאפ", err);
+            }
+            return null;
+        }
+    };
+
+    const getUserPhone = async (mention: { userId?: string; email?: string }) => {
+        if (mention.userId) {
+            try {
+                const snap = await getDoc(doc(db!, "users", mention.userId));
+                return snap.exists() ? (snap.data() as any).phone || "" : "";
+            } catch {
+                return "";
+            }
+        }
+        if (mention.email) {
+            try {
+                const q = query(collection(db!, "users"), where("email", "==", mention.email.toLowerCase()));
+                const res = await getDocs(q);
+                const data = res.docs[0]?.data() as any;
+                return data?.phone || "";
+            } catch {
+                return "";
+            }
+        }
+        return "";
+    };
+
+    const sendMentionAlerts = async (mentionsList: { name: string; userId?: string; email?: string }[]) => {
+        if (!db || !mentionsList.length) return;
+        if (sendingMentions) return;
+        const cfg = await fetchWhatsappConfig();
+        if (!cfg) return;
+        setSendingMentions(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+            const origin = getPublicBaseUrl(cfg.baseUrl);
+            const taskLink = origin ? `${origin}/tasks/${taskId}?eventId=${eventId}` : "";
+            const eventLink = origin ? `${origin}/events/${eventId}` : "";
+            const senderName = user?.displayName || user?.email || "משתמש";
+            const due = taskDetails.dueDate ? new Date(taskDetails.dueDate).toLocaleDateString("he-IL") : "";
+            for (const mention of mentionsList) {
+                await ensureGlobalRateLimit();
+                const phoneRaw = await getUserPhone(mention);
+                const phone = normalizePhone(phoneRaw);
+                if (!phone) continue;
+                const messageLines = [
+                    `היי ${mention.name || ""},`,
+                    `קיבלת משימה חדשה מ${senderName}.`,
+                    `תוייגת במשימה: "${taskTitle}".`,
+                    eventTitle ? `אירוע: ${eventTitle}` : "",
+                    due ? `דדליין: ${due}` : "",
+                    taskDetails.priority ? `עדיפות: ${taskDetails.priority}` : "",
+                    taskDetails.description ? `תיאור: ${taskDetails.description}` : "",
+                    taskLink ? `דף המשימה: ${taskLink}` : "",
+                    eventLink ? `דף האירוע: ${eventLink}` : "",
+                ].filter(Boolean);
+                const message = messageLines.join("\n");
+                const res = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
+                });
+                if (!res.ok) {
+                    console.warn("שליחת וואטסאפ נכשלה למשתמש", mention, await res.text());
+                }
+            }
+        } catch (err) {
+            console.warn("שגיאה בשליחת התראות וואטסאפ", err);
+        } finally {
+            setSendingMentions(false);
         }
     };
 

@@ -165,6 +165,7 @@ export default function Dashboard() {
   const [notificationTasks, setNotificationTasks] = useState<Task[]>([]);
   const [deleteEventRemoveTasks, setDeleteEventRemoveTasks] = useState(false);
   const [unreadEditRequests, setUnreadEditRequests] = useState(0);
+  const [unassignedTasksCount, setUnassignedTasksCount] = useState(0);
   const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [newNote, setNewNote] = useState("");
@@ -202,17 +203,84 @@ export default function Dashboard() {
     return [];
   };
 
-  const isProjectTaskRef = (ref?: any) => {
-    if (!ref?.path) return false;
-    const path = ref.path.toString();
-    const marker = "/documents/";
-    const idx = path.indexOf(marker);
+const isProjectTaskRef = (ref?: any) => {
+  if (!ref?.path) return false;
+  const path = ref.path.toString();
+  const marker = "/documents/";
+  const idx = path.indexOf(marker);
     if (idx !== -1) {
       const sub = path.slice(idx + marker.length);
       if (sub.startsWith("projects/")) return true;
     }
-    return path.startsWith("projects/") || path.includes("/projects/");
+  return path.startsWith("projects/") || path.includes("/projects/");
+};
+
+const toDateSafe = (val: any): Date | null => {
+  if (!val) return null;
+  if (val.toDate) {
+    try {
+      const d = val.toDate();
+      return isNaN(d.getTime()) ? null : d;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (val.seconds) {
+    const d = new Date(val.seconds * 1000);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (val instanceof Date) {
+    return isNaN(val.getTime()) ? null : val;
+  }
+  if (typeof val === "string") {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+};
+
+const computeNextOccurrence = (
+  baseDate: Date,
+  recurrence: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+  recurrenceEnd?: Date | null
+) => {
+  if (!(baseDate instanceof Date) || isNaN(baseDate.getTime())) return baseDate;
+  if (recurrence === "NONE") return baseDate;
+  const now = Date.now();
+  let candidate = new Date(baseDate);
+  let guard = 0;
+  const addInterval = () => {
+    if (recurrence === "WEEKLY") candidate = new Date(candidate.getTime() + 7 * 24 * 60 * 60 * 1000);
+    else if (recurrence === "BIWEEKLY") candidate = new Date(candidate.getTime() + 14 * 24 * 60 * 60 * 1000);
+    else if (recurrence === "MONTHLY") {
+      const next = new Date(candidate);
+      next.setMonth(next.getMonth() + 1);
+      candidate = next;
+    }
   };
+  while (candidate.getTime() < now && guard < 200) {
+    addInterval();
+    guard += 1;
+  }
+  if (recurrenceEnd && recurrenceEnd.getTime && recurrenceEnd.getTime() > 0) {
+    const endTs = recurrenceEnd.getTime();
+    if (candidate.getTime() > endTs) {
+      if (endTs >= now) candidate = new Date(endTs);
+    }
+  }
+  return candidate;
+};
+
+const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY" => {
+  const raw = (val || "").toString().toUpperCase().trim();
+  if (!raw || raw === "NONE") return "NONE";
+  if (raw.includes("BIWEEK") || raw.includes("2W") || raw.includes("FORTNIGHT") || (raw.includes("שבוע") && raw.includes("יים")) || raw.includes("שבועיים")) {
+    return "BIWEEKLY";
+  }
+  if (raw.includes("MONTH") || raw.includes("חודש")) return "MONTHLY";
+  if (raw.includes("WEEK") || raw.includes("שבוע")) return "WEEKLY";
+  return "NONE";
+};
 
   const fetchTasksForContainers = async ({
     eventIds = [],
@@ -362,41 +430,22 @@ export default function Dashboard() {
             return;
           }
 
-          const assigneeStr = (taskData.assignee || "").toLowerCase();
-          const assigneeId = taskData.assigneeId as string | undefined;
-          const assigneesArr = (taskData.assignees as { name: string; userId?: string; email?: string }[] | undefined) ||
-            (taskData.assignee ? [{ name: taskData.assignee, userId: taskData.assigneeId, email: (taskData as any).assigneeEmail }] : []);
-          const mentionsArr = (taskData.lastMessageMentions as { name?: string; userId?: string; email?: string }[] | undefined) || [];
-          const isAssigned =
-            (assigneeId && assigneeId === currentUid) ||
-            assigneesArr.some(a => a.userId && a.userId === currentUid) ||
-            assigneesArr.some(a => a.email && userEmail && a.email.toLowerCase() === userEmail.toLowerCase()) ||
-            (assigneeStr && (
-              (userName && assigneeStr.includes(userName.toLowerCase())) ||
-              (userEmail && assigneeStr.includes(userEmail.split('@')[0].toLowerCase())) ||
-              assigneeStr === "אני"
-            )) ||
-            assigneesArr.some(a => {
-              const nameLower = (a.name || "").toLowerCase();
-              return (userName && nameLower.includes(userName.toLowerCase())) ||
-                (userEmail && nameLower.includes(userEmail.split('@')[0].toLowerCase())) ||
-                nameLower === "אני";
-            });
+          const match = matchAssignee({
+            taskData,
+            userId: currentUid,
+            userName,
+            userEmail,
+          });
 
-          const isMentioned = mentionsArr.some(m =>
-            (m.userId && m.userId === currentUid) ||
-            (m.email && userEmail && m.email.toLowerCase() === userEmail.toLowerCase())
-          );
-
-          if (isAssigned || isMentioned) {
+          if (match.isAssigned || match.isMentioned) {
             notif.push({
               id: docSnap.id,
               title: taskData.title,
               dueDate: taskData.dueDate,
               priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
               assignee: taskData.assignee,
-              assigneeId,
-              assignees: assigneesArr,
+              assigneeId: match.assigneeId,
+              assignees: match.assigneesArr,
               status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
               eventId: eventId,
               eventTitle: isProjectTask
@@ -408,7 +457,7 @@ export default function Dashboard() {
               lastMessageTime: taskData.lastMessageTime || null,
               lastMessageBy: taskData.lastMessageBy || "",
               readBy: taskData.readBy || {},
-              lastMessageMentions: mentionsArr
+              lastMessageMentions: (taskData.lastMessageMentions as any) || []
             } as Task);
           }
         });
@@ -491,10 +540,40 @@ export default function Dashboard() {
         setUsersError(null);
         // Fetch all events (for per-user stats)
         const allEventsSnapshot = await getDocs(query(collection(db, "events"), orderBy("createdAt", "desc")));
-        const allEventsData = allEventsSnapshot.docs.map((doc) => ({
+        const allEventsRaw = allEventsSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
-        })) as Event[];
+        })) as any[];
+        const allEventsData: Event[] = [];
+        for (const ev of allEventsRaw) {
+          const recurrence = normalizeRecurrence(ev.recurrence);
+          if (recurrence !== "NONE") {
+            const startDate = toDateSafe(ev.startTime) || new Date();
+            const endDate = toDateSafe(ev.endTime);
+            const recurrenceEnd = toDateSafe(ev.recurrenceEndDate);
+            const next = computeNextOccurrence(startDate, recurrence, recurrenceEnd);
+            const durationMs = endDate && startDate ? endDate.getTime() - startDate.getTime() : null;
+            const newEnd = durationMs && durationMs > 0 ? new Date(next.getTime() + durationMs) : endDate;
+            if (next.getTime() !== startDate.getTime()) {
+              try {
+                await updateDoc(doc(db, "events", ev.id), {
+                  startTime: next,
+                  ...(newEnd ? { endTime: newEnd } : {}),
+                });
+              } catch (err) {
+                console.warn("Failed updating recurring event date", ev.id, err);
+              }
+            }
+            allEventsData.push({
+              ...ev,
+              startTime: next,
+              endTime: newEnd || ev.endTime,
+              recurrence,
+            } as Event);
+          } else {
+            allEventsData.push(ev as Event);
+          }
+        }
         // Fetch projects (for volunteer lookup from projects)
         const allProjectsSnapshot = await getDocs(collection(db, "projects"));
         const allProjectsData = allProjectsSnapshot.docs.map((doc) => ({
@@ -528,10 +607,11 @@ export default function Dashboard() {
           (e.createdBy && e.createdBy === user.uid)
         );
         const sortedByDate = [...eventsForUser].sort((a, b) => {
-          const aDate = a.startTime?.seconds ? a.startTime.seconds : 0;
-          const bDate = b.startTime?.seconds ? b.startTime.seconds : 0;
+          const aDate = toDateSafe(a.startTime)?.getTime() || 0;
+          const bDate = toDateSafe(b.startTime)?.getTime() || 0;
           return aDate - bDate;
         });
+        const displayEventIds = new Set(sortedByDate.map(e => e.id));
         setEvents(sortedByDate);
 
         // Fetch projects relevant to current user
@@ -582,24 +662,19 @@ export default function Dashboard() {
         const userName = user.displayName || "";
         const userEmail = user.email || "";
         let tasksInMyEvents = 0;
+        let unassignedCount = 0;
 
         const eventLookup = new Map(allEventsData.map(e => [e.id, e]));
         const projectLookup = new Map(allProjectsData.map(p => [p.id, p]));
 
         const isTaskAssignedToCurrentUser = (task: any) => {
-          const uid = user.uid;
-          const emailNorm = normalizeKey(user.email);
-          const assigneeEmailNorm = normalizeKey(task.assigneeEmail) || normalizeKey(task.assignee);
-          const assigneesArr: { userId?: string; email?: string }[] = Array.isArray(task.assignees) ? task.assignees : [];
-          const hasUid = uid && (
-            (task.assigneeId && task.assigneeId === uid) ||
-            assigneesArr.some(a => a.userId && a.userId === uid)
-          );
-          const hasEmail = emailNorm && (
-            assigneeEmailNorm === emailNorm ||
-            assigneesArr.some(a => normalizeKey(a.email) === emailNorm)
-          );
-          return Boolean(hasUid || hasEmail);
+          const match = matchAssignee({
+            taskData: task,
+            userId: user.uid,
+            userName,
+            userEmail,
+          });
+          return match.isAssigned;
         };
 
         tasksSnapshot.forEach(doc => {
@@ -651,6 +726,14 @@ export default function Dashboard() {
             } as Task);
           }
 
+          const hasAssignees =
+            match.assigneesArr.length > 0 &&
+            match.assigneesArr.some(a => (a.userId || a.email || a.name));
+          const isVolunteer = taskData.isVolunteerTask === true;
+          if (scope === "event" && displayEventIds.has(eventId) && !isVolunteer && !hasAssignees && !taskData.assigneeId && !taskData.assignee) {
+            unassignedCount += 1;
+          }
+
           const isAssignedToUser = taskData.status !== "DONE" && isTaskAssignedToCurrentUser({
             ...taskData,
             assignees: match.assigneesArr,
@@ -683,6 +766,7 @@ export default function Dashboard() {
 
         setMyTasks(userTasks);
         setNotificationTasks(notifTasks);
+        setUnassignedTasksCount(unassignedCount);
         const attendeesByEvent = await Promise.all(
           myCreatedEvents.map(async (ev) => {
             try {
@@ -1908,9 +1992,14 @@ export default function Dashboard() {
 
         {/* Active Events Section */}
         <div className="bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-3 mb-2">
             <Calendar style={{ color: 'var(--patifon-orange)' }} />
-            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>אירועים פעילים</h2>
+            <div className="flex flex-col">
+              <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>אירועים פעילים</h2>
+              <span className="text-xs text-gray-600">
+                משימות ללא שיוך (לא הוקצו ולא משימת מתנדב): {unassignedTasksCount}
+              </span>
+            </div>
           </div>
           {loadingEvents ? (
             <div className="text-gray-500 text-center py-8">טוען אירועים...</div>
