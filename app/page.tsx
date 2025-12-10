@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit } from "lucide-react";
 import { db, auth } from "@/lib/firebase";
@@ -82,6 +82,22 @@ interface Project {
   updatedAt?: any;
 }
 
+interface VolunteerRecord {
+  id: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  eventId: string;
+  eventTitle?: string;
+  createdAt?: any;
+  scope?: "event" | "project";
+  program?: string;
+  year?: string;
+  idNumber?: string;
+}
+
 const matchAssignee = (opts: {
   taskData: any;
   userId?: string | null;
@@ -139,16 +155,21 @@ export default function Dashboard() {
   const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
-  const [volunteersList, setVolunteersList] = useState<{ id: string; name?: string; firstName?: string; lastName?: string; email?: string; phone?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project"; program?: string; year?: string; idNumber?: string }[]>([]);
+  const [volunteersList, setVolunteersList] = useState<VolunteerRecord[]>([]);
   const [loadingVolunteers, setLoadingVolunteers] = useState(true);
   const [showAllVolunteers, setShowAllVolunteers] = useState(false);
-  const [editingVolunteer, setEditingVolunteer] = useState<{ id: string; eventId: string; scope?: "event" | "project" } | null>(null);
+  const [volunteerSearch, setVolunteerSearch] = useState("");
+  const [editingVolunteer, setEditingVolunteer] = useState<VolunteerRecord | null>(null);
   const [editVolunteerName, setEditVolunteerName] = useState("");
   const [editVolunteerEmail, setEditVolunteerEmail] = useState("");
   const [editVolunteerPhone, setEditVolunteerPhone] = useState("");
   const [savingVolunteer, setSavingVolunteer] = useState(false);
+  const [manualTaskTitle, setManualTaskTitle] = useState("");
+  const [manualTaskHours, setManualTaskHours] = useState("");
+  const [manualEventTitle, setManualEventTitle] = useState("");
+  const [manualSaving, setManualSaving] = useState(false);
   const [deletingVolunteerId, setDeletingVolunteerId] = useState<string | null>(null);
-  const [confirmDeleteVolunteer, setConfirmDeleteVolunteer] = useState<{ id: string; eventId: string; scope?: "event" | "project"; name?: string; eventTitle?: string } | null>(null);
+  const [confirmDeleteVolunteer, setConfirmDeleteVolunteer] = useState<VolunteerRecord | null>(null);
   const [viewVolunteer, setViewVolunteer] = useState<{ id: string; name?: string; firstName?: string; lastName?: string; email?: string; phone?: string; program?: string; year?: string; idNumber?: string } | null>(null);
   const [volTasksPending, setVolTasksPending] = useState<Task[]>([]);
   const [volTasksDone, setVolTasksDone] = useState<Task[]>([]);
@@ -171,6 +192,15 @@ export default function Dashboard() {
   const [newNote, setNewNote] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteText, setEditingNoteText] = useState("");
+
+  const filteredVolunteers = useMemo(() => {
+    const query = volunteerSearch.trim().toLowerCase();
+    if (!query) return volunteersList;
+    return volunteersList.filter((vol) => {
+      const name = vol.name || "";
+      return name.toLowerCase().includes(query);
+    });
+  }, [volunteerSearch, volunteersList]);
 
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
@@ -819,6 +849,31 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
           const eventTitleMap = new Map(allEventsData.map(e => [e.id, e.title || "אירוע ללא שם"]));
           const projectTitleMap = new Map(allProjectsData.map(p => [p.id, (p as any).name || (p as any).title || "פרויקט ללא שם"]));
           const seenVolunteers = new Set<string>();
+          const emailIndex = new Map<string, number>();
+          const phoneIndex = new Map<string, number>();
+          const normalizeLower = (val?: string) => (val || "").toString().trim().toLowerCase();
+          const normalizePhone = (val?: string) => {
+            const digits = (val || "").toString().replace(/\D/g, "");
+            if (!digits) return "";
+            if (digits.startsWith("972")) return digits;
+            if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+            return digits;
+          };
+          const mergeVolunteerFields = (target: any, src: any) => ({
+            ...target,
+            name: (target.name && target.name.trim() !== "מתנדב ללא שם") ? target.name : (src.name || target.name),
+            firstName: target.firstName || src.firstName,
+            lastName: target.lastName || src.lastName,
+            email: target.email || src.email,
+            phone: target.phone || src.phone,
+            program: target.program || src.program,
+            year: target.year || src.year,
+            idNumber: target.idNumber || src.idNumber,
+            createdAt: target.createdAt || src.createdAt,
+            eventId: target.eventId || src.eventId,
+            eventTitle: target.eventTitle || src.eventTitle,
+            scope: target.scope || src.scope,
+          });
           const addVolunteer = (volDoc: any, eventId: string, volData: any, eventTitle?: string, scope: "event" | "project" = "event") => {
             const key = `${scope}-${eventId}-${volDoc.id}`;
             if (seenVolunteers.has(key)) return;
@@ -840,11 +895,17 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
               volunteerName = "מתנדב ללא שם";
             }
 
-            volunteersData.push({
+            const emailKey = normalizeLower(volData.email);
+            const phoneKey = normalizePhone(volData.phone);
+            let existingIdx = -1;
+            if (emailKey && emailIndex.has(emailKey)) existingIdx = emailIndex.get(emailKey)!;
+            else if (phoneKey && phoneIndex.has(phoneKey)) existingIdx = phoneIndex.get(phoneKey)!;
+
+            const baseData = {
               id: volDoc.id,
               name: volunteerName,
-              firstName: volData.firstName,
-              lastName: volData.lastName,
+              firstName: volData.firstName || "",
+              lastName: volData.lastName || "",
               email: volData.email || "",
               phone: volData.phone || "",
               eventId: eventId,
@@ -854,7 +915,18 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
               program: volData.program || "",
               year: volData.year || "",
               idNumber: volData.idNumber || "",
-            });
+            };
+
+            if (existingIdx >= 0) {
+              volunteersData[existingIdx] = mergeVolunteerFields(volunteersData[existingIdx], baseData);
+              if (emailKey) emailIndex.set(emailKey, existingIdx);
+              if (phoneKey) phoneIndex.set(phoneKey, existingIdx);
+            } else {
+              volunteersData.push(baseData);
+              const idx = volunteersData.length - 1;
+              if (emailKey) emailIndex.set(emailKey, idx);
+              if (phoneKey) phoneIndex.set(phoneKey, idx);
+            }
           };
 
           try {
@@ -1149,18 +1221,31 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
     }
   };
 
-  const getVolunteerRef = (vol: { id: string; eventId: string; scope?: "event" | "project" }) => {
+  const getVolunteerRef = (vol: VolunteerRecord) => {
     if (!db) throw new Error("Missing db");
     return vol.scope === "project"
       ? doc(db, "projects", vol.eventId, "volunteers", vol.id)
       : doc(db, "events", vol.eventId, "volunteers", vol.id);
   };
 
-  const startEditVolunteer = (vol: { id: string; eventId: string; scope?: "event" | "project"; name?: string; email?: string; phone?: string; eventTitle?: string }) => {
-    setEditingVolunteer({ id: vol.id, eventId: vol.eventId, scope: vol.scope });
+  const resetManualTaskForm = () => {
+    setManualTaskTitle("");
+    setManualTaskHours("");
+  };
+
+  const closeVolunteerEditor = () => {
+    setEditingVolunteer(null);
+    resetManualTaskForm();
+    setManualEventTitle("");
+  };
+
+  const startEditVolunteer = (vol: VolunteerRecord) => {
+    setEditingVolunteer(vol);
     setEditVolunteerName(vol.name || "");
     setEditVolunteerEmail(vol.email || "");
     setEditVolunteerPhone(vol.phone || "");
+    setManualEventTitle(vol.eventTitle || "");
+    resetManualTaskForm();
   };
 
   const handleSaveVolunteer = async (e: React.FormEvent) => {
@@ -1189,12 +1274,56 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
             : v
         )
       );
-      setEditingVolunteer(null);
+      closeVolunteerEditor();
     } catch (err) {
       console.error("Error updating volunteer", err);
       alert("שגיאה בעדכון מתנדב");
     } finally {
       setSavingVolunteer(false);
+    }
+  };
+
+  const handleAddManualCompletion = async () => {
+    if (!db || !editingVolunteer) return;
+    const title = manualTaskTitle.trim();
+    if (!title) {
+      alert("יש להזין שם משימה.");
+      return;
+    }
+    const hours = parseFloat(manualTaskHours);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      alert("יש להזין מספר שעות חיובי.");
+      return;
+    }
+    const volunteerEmail = (editVolunteerEmail.trim() || editingVolunteer.email || "").toLowerCase();
+    if (!volunteerEmail) {
+      alert("יש להזין אימייל כדי לשמור את המשימה.");
+      return;
+    }
+    setManualSaving(true);
+    try {
+      const eventTitle = manualEventTitle.trim() || editingVolunteer.eventTitle || "";
+      await addDoc(collection(db, "volunteer_completions"), {
+        email: volunteerEmail,
+        name: editVolunteerName.trim() || editingVolunteer.name || "",
+        eventId: editingVolunteer.eventId,
+        eventTitle,
+        taskId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        taskTitle: title,
+        volunteerHours: hours,
+        completedAt: serverTimestamp(),
+        scope: editingVolunteer.scope || "event",
+      });
+      resetManualTaskForm();
+      alert("המשימה נוספה לרישום שעות המתנדב.");
+      if (viewVolunteer && viewVolunteer.email && viewVolunteer.email.toLowerCase() === volunteerEmail) {
+        loadVolunteerTasks(viewVolunteer);
+      }
+    } catch (err) {
+      console.error("Error adding manual completion:", err);
+      alert("שגיאה בהוספת המשימה הידנית.");
+    } finally {
+      setManualSaving(false);
     }
   };
 
@@ -1312,6 +1441,46 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
     } finally {
       setLoadingVolTasks(false);
     }
+  };
+
+  const exportVolunteersToCsv = () => {
+    if (typeof window === "undefined") return;
+    if (!volunteersList || volunteersList.length === 0) {
+      alert("אין מתנדבים לייצוא");
+      return;
+    }
+
+    const headers = ["שם פרטי", "שם משפחה", "תעודת זהות", "נייד", "מייל", "חוג", "שנת לימודים"];
+    const rows = volunteersList.map((vol) => {
+      const nameParts = (vol.name || "").trim().split(/\s+/).filter(Boolean);
+      const derivedFirst = vol.firstName || nameParts[0] || "";
+      const derivedLast = vol.lastName || nameParts.slice(1).join(" ") || "";
+      return [
+        derivedFirst,
+        derivedLast,
+        vol.idNumber || "",
+        vol.phone || "",
+        vol.email || "",
+        vol.program || "",
+        vol.year || ""
+      ];
+    });
+
+    const csvBody = [headers, ...rows]
+      .map(row => row.map(cell => `"${(cell ?? "").toString().replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    // Add BOM so שהאקסל יזהה עברית נכון
+    const csv = `\uFEFF${csvBody}`;
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "volunteers.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleApproveJoinRequest = async (reqId: string) => {
@@ -1561,16 +1730,25 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
 
   const handleApproveCompletion = async (req: any, approve: boolean) => {
     if (!db) return;
-    try {
-      await updateDoc(doc(db, "task_completion_requests", req.id), { status: approve ? "APPROVED" : "REJECTED", respondedAt: serverTimestamp() });
-      const taskRef = req.scope === "project"
+    const requestRef = doc(db, "task_completion_requests", req.id);
+    const isManualRequest = req.manualRequest === true || req.scope === "manual";
+    let taskRef: ReturnType<typeof doc> | null = null;
+    if (!isManualRequest) {
+      taskRef = req.scope === "project"
         ? doc(db, "projects", req.eventId, "tasks", req.taskId)
         : doc(db, "events", req.eventId, "tasks", req.taskId);
+    }
+    try {
+      await updateDoc(requestRef, { status: approve ? "APPROVED" : "REJECTED", respondedAt: serverTimestamp() });
       if (!approve) {
-        await updateDoc(taskRef, { status: "TODO", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "REJECTED" });
+        if (!isManualRequest && taskRef) {
+          await updateDoc(taskRef, { status: "TODO", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "REJECTED" });
+        }
       } else {
-        await updateDoc(taskRef, { status: "DONE", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "APPROVED" });
-        await addDoc(collection(db, "volunteer_completions"), {
+        if (!isManualRequest && taskRef) {
+          await updateDoc(taskRef, { status: "DONE", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "APPROVED" });
+        }
+        const completionData: any = {
           email: req.volunteerEmail,
           name: req.volunteerName,
           eventId: req.eventId,
@@ -1579,7 +1757,12 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
           taskTitle: req.taskTitle || "משימה",
           volunteerHours: req.volunteerHours ?? null,
           completedAt: serverTimestamp(),
-        });
+          notes: req.notes || "",
+        };
+        if (isManualRequest) {
+          completionData.manualRequest = true;
+        }
+        await addDoc(collection(db, "volunteer_completions"), completionData);
       }
       setCompletionRequests(prev => {
         const next = prev.filter(r => r.id !== req.id);
@@ -1672,32 +1855,42 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
               </button>
             </div>
             <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-              {completionRequests.map((req) => (
-                <div key={req.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-gray-900">{req.taskTitle || "משימה"}</p>
-                      <p className="text-sm text-gray-600">אירוע/פרויקט: {req.eventTitle || req.eventId}</p>
-                      <p className="text-sm text-gray-600">מתנדב: {req.volunteerName || req.volunteerEmail}</p>
+              {completionRequests.map((req) => {
+                const requestTypeLabel = req.manualRequest
+                  ? "דיווח ידני"
+                  : req.scope === "project"
+                    ? "פרויקט"
+                    : "אירוע";
+                return (
+                  <div key={req.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-900">{req.taskTitle || "משימה"}</p>
+                        <p className="text-sm text-gray-600">אירוע/פרויקט: {req.eventTitle || req.eventId}</p>
+                        <p className="text-sm text-gray-600">מתנדב: {req.volunteerName || req.volunteerEmail}</p>
+                        {req.notes && (
+                          <p className="text-xs text-gray-500 mt-1">הערות: {req.notes}</p>
+                        )}
+                      </div>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">{requestTypeLabel}</span>
                     </div>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">{req.scope === "project" ? "פרויקט" : "אירוע"}</span>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => handleApproveCompletion(req, true)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
+                      >
+                        אשר ביצוע
+                      </button>
+                      <button
+                        onClick={() => handleApproveCompletion(req, false)}
+                        className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+                      >
+                        דחה
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => handleApproveCompletion(req, true)}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
-                    >
-                      אשר ביצוע
-                    </button>
-                    <button
-                      onClick={() => handleApproveCompletion(req, false)}
-                      className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
-                    >
-                      דחה
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1805,7 +1998,7 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור שינויים</button>
               </div>
             </form>
-          </div>
+            </div>
         </div>
       )}
       {/* Status Edit Modal */}
@@ -2409,11 +2602,34 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
               <UserPlus style={{ color: 'var(--patifon-orange)' }} />
               <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>מתנדבים רשומים</h2>
             </div>
-            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
-              {volunteersList.length}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={exportVolunteersToCsv}
+                disabled={!volunteersList.length}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                  volunteersList.length
+                    ? "bg-white border-indigo-200 text-indigo-800 hover:bg-indigo-50"
+                    : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
+                }`}
+                title="ייצא את כל המתנדבים לטבלת אקסל"
+              >
+                ייצוא לאקסל
+              </button>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
+                {filteredVolunteers.length}
+              </span>
+            </div>
           </div>
           <div className="flex flex-wrap gap-3 mb-4">
+            <div className="flex-1 min-w-[220px]">
+              <input
+                type="search"
+                value={volunteerSearch}
+                onChange={(e) => setVolunteerSearch(e.target.value)}
+                placeholder="חיפוש לפי שם מתנדב"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
             <button
               onClick={() => {
                 const url = typeof window !== "undefined" ? `${window.location.origin}/volunteers/register` : "/volunteers/register";
@@ -2441,44 +2657,54 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 </div>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-white border border-amber-200 text-amber-800">{completionRequests.length}</span>
               </div>
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {completionRequests.map((req) => (
-                  <div key={req.id} className="border border-amber-200 rounded-lg p-3 bg-white">
-                    <div className="flex items-center justify-between">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-gray-900 truncate">{req.taskTitle || "משימה"}</p>
-                        <p className="text-sm text-gray-600 truncate">אירוע/פרויקט: {req.eventTitle || req.eventId}</p>
-                        <p className="text-sm text-gray-600 truncate">מתנדב: {req.volunteerName || req.volunteerEmail}</p>
+              <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                {completionRequests.map((req) => {
+                  const requestTypeLabel = req.manualRequest
+                    ? "דיווח ידני"
+                    : req.scope === "project"
+                      ? "פרויקט"
+                      : "אירוע";
+                  return (
+                    <div key={req.id} className="border border-amber-200 rounded-lg p-3 bg-white">
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-900 truncate">{req.taskTitle || "משימה"}</p>
+                          <p className="text-sm text-gray-600 truncate">אירוע/פרויקט: {req.eventTitle || req.eventId || "נקבע"}</p>
+                          <p className="text-sm text-gray-600 truncate">מתנדב: {req.volunteerName || req.volunteerEmail}</p>
+                          {req.notes && (
+                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">הערות: {req.notes}</p>
+                          )}
+                        </div>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">{requestTypeLabel}</span>
                       </div>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">{req.scope === "project" ? "פרויקט" : "אירוע"}</span>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => handleApproveCompletion(req, true)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
+                        >
+                          אשר ביצוע
+                        </button>
+                        <button
+                          onClick={() => handleApproveCompletion(req, false)}
+                          className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+                        >
+                          דחה
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        onClick={() => handleApproveCompletion(req, true)}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
-                      >
-                        אשר ביצוע
-                      </button>
-                      <button
-                        onClick={() => handleApproveCompletion(req, false)}
-                        className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
-                      >
-                        דחה
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
           {loadingVolunteers ? (
             <div className="text-gray-500 text-center py-6">טוען מתנדבים...</div>
-          ) : volunteersList.length === 0 ? (
-            <div className="text-gray-500 text-center py-6">לא נמצאו מתנדבים רשומים.</div>
+          ) : filteredVolunteers.length === 0 ? (
+            <div className="text-gray-500 text-center py-6">לא נמצאו מתנדבים מתאימים לחיפוש.</div>
           ) : (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(showAllVolunteers ? volunteersList : volunteersList.slice(0, 5)).map((vol) => {
+                {(showAllVolunteers ? filteredVolunteers : filteredVolunteers.slice(0, 5)).map((vol) => {
                   const regDate = vol.createdAt?.seconds ? new Date(vol.createdAt.seconds * 1000) : null;
                   const deletingKey = `${vol.scope || "event"}-${vol.eventId}-${vol.id}`;
                   return (
@@ -2547,13 +2773,13 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                   );
                 })}
               </div>
-              {volunteersList.length > 5 && (
+              {filteredVolunteers.length > 5 && (
                 <div className="mt-4 flex justify-center">
                   <button
                     onClick={() => setShowAllVolunteers(!showAllVolunteers)}
                     className="px-4 py-2 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition text-sm font-medium"
                   >
-                    {showAllVolunteers ? "הצג 5 ראשונים בלבד" : `הצג את כל ${volunteersList.length} המתנדבים`}
+                    {showAllVolunteers ? "הצג 5 ראשונים בלבד" : `הצג את כל ${filteredVolunteers.length} המתנדבים`}
                   </button>
                 </div>
               )}
@@ -2599,7 +2825,7 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 <button
                   type="button"
                   className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
-                  onClick={() => setEditingVolunteer(null)}
+                  onClick={closeVolunteerEditor}
                   disabled={savingVolunteer}
                 >
                   ביטול
@@ -2613,6 +2839,52 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 </button>
               </div>
             </form>
+            <div className="mt-6 space-y-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-800">הוספת משימה ידנית</p>
+                <p className="text-xs text-gray-500">הרשאה למנהלים בלבד</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">שם המשימה</label>
+                <input
+                  type="text"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={manualTaskTitle}
+                  onChange={(e) => setManualTaskTitle(e.target.value)}
+                  placeholder="לדוגמה: אריזת מתנות"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">אירוע / פרויקט (אופציונלי)</label>
+                <input
+                  type="text"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={manualEventTitle}
+                  onChange={(e) => setManualEventTitle(e.target.value)}
+                  placeholder="שם האירוע או הפרויקט שבו בוצעה המשימה"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">שעות בפועל</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={manualTaskHours}
+                  onChange={(e) => setManualTaskHours(e.target.value)}
+                  placeholder="לדוגמה: 3.5"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={manualSaving}
+                onClick={handleAddManualCompletion}
+                className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {manualSaving ? "שומר..." : "הוסף משימה ידנית"}
+              </button>
+            </div>
           </div>
         </div>
       )}

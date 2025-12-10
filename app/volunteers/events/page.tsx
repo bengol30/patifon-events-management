@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { collection, collectionGroup, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc, setDoc } from "firebase/firestore";
-import { Calendar, MapPin, Users, Handshake, Clock, Target, AlertCircle, ArrowRight, CheckSquare, Square, UserCheck, Lock, Circle, CheckCircle2, MessageCircle } from "lucide-react";
+import { Calendar, MapPin, Users, Handshake, Clock, Target, AlertCircle, ArrowRight, CheckSquare, Square, UserCheck, Lock, Circle, CheckCircle2, MessageCircle, X } from "lucide-react";
 
 interface Task {
     id: string;
@@ -41,6 +41,8 @@ interface CompletedTaskItem {
     task: Task;
     completedAt?: any;
 }
+
+const ADMIN_EMAIL = "bengo0469@gmail.com";
 
 interface EventData {
     id: string;
@@ -85,6 +87,13 @@ export default function VolunteerEventsPage() {
     const [showPendingOnly, setShowPendingOnly] = useState(true);
     const [showAllCompleted, setShowAllCompleted] = useState(false);
     const [userMetaCache, setUserMetaCache] = useState<Record<string, { phone?: string; name?: string }>>({});
+    const selectionSummaryTimer = useRef<NodeJS.Timeout | null>(null);
+    const [manualRequestModalOpen, setManualRequestModalOpen] = useState(false);
+    const [manualRequestTitle, setManualRequestTitle] = useState("");
+    const [manualRequestHours, setManualRequestHours] = useState("");
+    const [manualRequestEvent, setManualRequestEvent] = useState("");
+    const [manualRequestNotes, setManualRequestNotes] = useState("");
+    const [manualRequestSubmitting, setManualRequestSubmitting] = useState(false);
     const handleVolunteerLogout = () => {
         setSessionMap({});
         setMatchedEventIds(new Set());
@@ -116,6 +125,13 @@ export default function VolunteerEventsPage() {
         const name = first?.name || (emailRaw ? emailRaw.split("@")[0] : "מתנדב/ת");
         return { email, name };
     }, [sessionMap, authEmail]);
+
+    const eventMetaMap = useMemo(() => {
+        const map = new Map<string, EventData>();
+        events.forEach(ev => map.set(ev.id, ev));
+        projectsPool.forEach(p => map.set(p.id, p));
+        return map;
+    }, [events, projectsPool]);
 
     // helper to read selected tasks per event
     const getSelectedForEvent = useMemo(() => {
@@ -481,6 +497,66 @@ const totalAvailableVolunteerTasks = useMemo(() => {
             }
         } catch (err) {
             console.warn("Error sending completion WhatsApp", err);
+        }
+    };
+
+    const handleManualRequestSubmit = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        if (!db) return;
+        if (!isAuthed) {
+            alert("יש להתחבר כדי לשלוח בקשה זו.");
+            return;
+        }
+        const title = manualRequestTitle.trim();
+        if (!title) {
+            alert("יש להזין שם משימה או פעילות.");
+            return;
+        }
+        const hours = parseFloat(manualRequestHours);
+        if (!Number.isFinite(hours) || hours <= 0) {
+            alert("יש להזין מספר שעות חיובי.");
+            return;
+        }
+        const volunteerEmail = sessionIdentity.email;
+        if (!volunteerEmail) {
+            alert("המערכת לא מזהה אימייל. נסה/י להתחבר שוב.");
+            return;
+        }
+        setManualRequestSubmitting(true);
+        try {
+            await addDoc(collection(db, "task_completion_requests"), {
+                taskId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                taskTitle: title,
+                eventId: "manual",
+                eventTitle: manualRequestEvent.trim() || "הגשה ידנית",
+                scope: "manual",
+                volunteerEmail,
+                volunteerName: sessionIdentity.name,
+                volunteerHours: hours,
+                ownerEmail: ADMIN_EMAIL.toLowerCase(),
+                status: "PENDING",
+                manualRequest: true,
+                notes: manualRequestNotes.trim(),
+                createdAt: serverTimestamp(),
+            });
+            notifyOwnerTaskCompletion({
+                ownerEmail: ADMIN_EMAIL.toLowerCase(),
+                ownerId: undefined,
+                taskTitle: title,
+                volunteerName: sessionIdentity.name,
+                eventId: "manual"
+            });
+            alert("הבקשה נשלחה למנהל. ההתנדבות תתווסף לאחר אישור.");
+            setManualRequestModalOpen(false);
+            setManualRequestTitle("");
+            setManualRequestHours("");
+            setManualRequestEvent("");
+            setManualRequestNotes("");
+        } catch (err) {
+            console.error("Error sending manual completion request", err);
+            alert("שגיאה בשליחת הבקשה. נסה/י שנית.");
+        } finally {
+            setManualRequestSubmitting(false);
         }
     };
 
@@ -1029,11 +1105,21 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                                     <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">בוצע</span>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
-                                </div>
+                                    );
+                                })}
                             </div>
-                        )}
+                        </div>
+                    )}
+                    {isAuthed && (
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => setManualRequestModalOpen(true)}
+                                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+                            >
+                                דיווח על שעות/משימות שלא נרשמו
+                            </button>
+                        </div>
+                    )}
                         {isAuthed && totalAvailableVolunteerTasks === 0 && (
                             <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 text-center text-gray-700">
                                 <p className="text-lg font-semibold mb-1">אין כרגע משימות פנויות למתנדבים.</p>
@@ -1355,6 +1441,88 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                 אין חשבון באירוע? יש לבצע הרשמה באירוע הרלוונטי ואז להתחבר כאן כדי לבחור משימות.
                             </p>
                         </div>
+                    </div>
+                </div>
+            )}
+            {manualRequestModalOpen && (
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-bold text-gray-900">בקשת דיווח שעות ישנות</h3>
+                            <button
+                                onClick={() => setManualRequestModalOpen(false)}
+                                className="text-gray-500 hover:text-gray-700"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <p className="text-sm text-gray-600">
+                            תוכל לדווח על משימה או שעת התנדבות שנעשתה לפני שהמערכת הייתה פעילה.
+                            המנהל יאשר ויעדכן את סך השעות שלך באזור האישי.
+                        </p>
+                        <form className="space-y-3" onSubmit={handleManualRequestSubmit}>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">אירוע/פרויקט (אופציונלי)</label>
+                                <input
+                                    type="text"
+                                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    value={manualRequestEvent}
+                                    onChange={(e) => setManualRequestEvent(e.target.value)}
+                                    placeholder="לדוגמה: אירוע התרמה 2022"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">שם המשימה</label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    value={manualRequestTitle}
+                                    onChange={(e) => setManualRequestTitle(e.target.value)}
+                                    placeholder="לדוגמה: סידור אולם"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">שעות</label>
+                                <input
+                                    type="number"
+                                    step="0.25"
+                                    min="0"
+                                    required
+                                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    value={manualRequestHours}
+                                    onChange={(e) => setManualRequestHours(e.target.value)}
+                                    placeholder="לדוגמה: 3"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">פרטים נוספים</label>
+                                <textarea
+                                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    rows={3}
+                                    value={manualRequestNotes}
+                                    onChange={(e) => setManualRequestNotes(e.target.value)}
+                                    placeholder="תיאור קצר של הפעילות"
+                                />
+                            </div>
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setManualRequestModalOpen(false)}
+                                    className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                                    disabled={manualRequestSubmitting}
+                                >
+                                    ביטול
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={manualRequestSubmitting}
+                                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-70"
+                                >
+                                    {manualRequestSubmitting ? "שולח..." : "שלח בקשה"}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

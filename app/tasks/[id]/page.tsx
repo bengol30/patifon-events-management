@@ -35,6 +35,7 @@ interface Task {
     createdByName?: string;
     createdByPhone?: string;
     createdBy?: string | null;
+    scope?: "event" | "project";
 }
 
 interface EventTeamMember {
@@ -68,6 +69,7 @@ export default function TaskDetailPage() {
 
     const [task, setTask] = useState<Task | null>(null);
     const [loadingTask, setLoadingTask] = useState(true);
+    const updateTimeouts = useRef<{ [key: string]: NodeJS.Timeout }>({});
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [newMessage, setNewMessage] = useState("");
     const [error, setError] = useState("");
@@ -276,7 +278,8 @@ export default function TaskDetailPage() {
                             createdByName: (taskData as any).createdByName || (taskData as any).createdBy || "",
                             createdByPhone: (taskData as any).createdByPhone || (taskData as any).creatorPhone || "",
                             createdBy: (taskData as any).createdBy || null,
-                            eventId
+                            eventId,
+                            scope: "event"
                         } as Task,
                         eventTitle: (eventData as any).title,
                         eventTeam: ((eventData as any).team as EventTeamMember[]) || [],
@@ -299,6 +302,26 @@ export default function TaskDetailPage() {
                     if (!projectDoc.exists()) return null;
                     const projectData = projectDoc.data();
                     const taskData = taskSnap.data();
+
+                    // Fetch all users for project tasks so we can tag anyone
+                    let allUsers: EventTeamMember[] = [];
+                    try {
+                        const usersSnap = await getDocs(collection(db, "users"));
+                        allUsers = usersSnap.docs.map(u => {
+                            const d = u.data();
+                            return {
+                                userId: u.id,
+                                name: d.fullName || d.name || d.displayName || d.email || "Unknown",
+                                email: d.email,
+                                role: "member"
+                            };
+                        });
+                    } catch (e) {
+                        console.error("Error fetching users for project task:", e);
+                        // Fallback to project team members if fetching users fails
+                        allUsers = ((projectData as any).teamMembers as EventTeamMember[]) || [];
+                    }
+
                     return {
                         task: {
                             id: taskSnap.id,
@@ -308,10 +331,11 @@ export default function TaskDetailPage() {
                             createdByName: (taskData as any).createdByName || (taskData as any).createdBy || "",
                             createdByPhone: (taskData as any).createdByPhone || (taskData as any).creatorPhone || "",
                             createdBy: (taskData as any).createdBy || null,
-                            eventId: projectId
+                            eventId: projectId,
+                            scope: "project"
                         } as Task,
                         eventTitle: (projectData as any).name || (projectData as any).title || "פרויקט",
-                        eventTeam: ((projectData as any).teamMembers as EventTeamMember[]) || [],
+                        eventTeam: allUsers,
                         eventNeedsVolunteers: false,
                         creatorName:
                             (projectData as any).ownerName ||
@@ -484,7 +508,8 @@ export default function TaskDetailPage() {
     const handleUpdateStatus = async (newStatus: string) => {
         if (!db || !task) return;
         try {
-            await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), {
+            const collectionName = task.scope === "project" ? "projects" : "events";
+            await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), {
                 status: newStatus
             });
         } catch (err) {
@@ -495,14 +520,58 @@ export default function TaskDetailPage() {
     const handleUpdateField = async (field: string, value: string | boolean | number | null) => {
         if (!db || !task) return;
         try {
-            await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), {
+            const collectionName = task.scope === "project" ? "projects" : "events";
+            const taskRef = doc(db, collectionName, task.eventId, "tasks", task.id);
+            // Check if document exists before updating
+            const taskSnap = await getDoc(taskRef);
+            if (!taskSnap.exists()) {
+                console.error(`Task document not found: ${task.id}`);
+                alert("המשימה לא נמצאה במערכת. ייתכן שהיא נמחקה.");
+                const redirectPath = task.scope === "project" ? `/projects/${task.eventId}` : `/events/${task.eventId}`;
+                router.push(redirectPath);
+                return;
+            }
+
+            await updateDoc(taskRef, {
                 [field]: value
             });
             // Update local state
             setTask(prev => prev ? { ...prev, [field]: value } : prev);
-        } catch (err) {
+        } catch (err: any) {
             console.error(`Error updating ${field}:`, err);
+            // Only show alert for non-existence errors (other errors are logged but silent)
+            if (err?.code === 'not-found') {
+                alert("המשימה לא נמצאה במערכת. ייתכן שהיא נמחקה.");
+                const redirectPath = task.scope === "project" ? `/projects/${task.eventId}` : `/events/${task.eventId}`;
+                router.push(redirectPath);
+            }
         }
+    };
+
+    const handleDebouncedUpdate = (field: string, value: string) => {
+        if (!task) return;
+
+        // 1. Update local state immediately for responsive UI
+        setTask(prev => prev ? { ...prev, [field]: value } : prev);
+
+        // 2. Clear existing timeout
+        if (updateTimeouts.current[field]) {
+            clearTimeout(updateTimeouts.current[field]);
+        }
+
+        // 3. Set new timeout for DB update
+        updateTimeouts.current[field] = setTimeout(async () => {
+            if (!db || !task) return;
+            try {
+                const collectionName = task.scope === "project" ? "projects" : "events";
+                await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), {
+                    [field]: value
+                });
+            } catch (err) {
+                console.error(`Error updating ${field}:`, err);
+            }
+            delete updateTimeouts.current[field];
+        }, 1000); // 1 second delay
     };
 
     const sanitizeAssigneesForWrite = (arr: Assignee[] = []) => {
@@ -527,7 +596,8 @@ export default function TaskDetailPage() {
         const cleaned = sanitizeAssigneesForWrite(nextAssignees);
         const primary = cleaned[0];
         try {
-            await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), {
+            const collectionName = task.scope === "project" ? "projects" : "events";
+            await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), {
                 assignees: cleaned,
                 assignee: primary?.name || "",
                 assigneeId: primary?.userId || null,
@@ -591,7 +661,8 @@ export default function TaskDetailPage() {
         if (!newMessage.trim() || !db || !user || !task) return;
 
         try {
-            await addDoc(collection(db, "events", task.eventId, "tasks", task.id, "messages"), {
+            const collectionName = task.scope === "project" ? "projects" : "events";
+            await addDoc(collection(db, collectionName, task.eventId, "tasks", task.id, "messages"), {
                 text: newMessage,
                 senderId: user.uid,
                 senderUid: user.uid,
@@ -601,7 +672,7 @@ export default function TaskDetailPage() {
             });
 
             // Update task last message info
-            await updateDoc(doc(db, "events", task.eventId, "tasks", task.id), {
+            await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), {
                 lastMessageTime: serverTimestamp(),
                 lastMessageBy: user.uid,
                 [`readBy.${user.uid}`]: true
@@ -665,11 +736,11 @@ export default function TaskDetailPage() {
                         </button>
                     ) : (
                         <Link
-                            href={task ? `/events/${task.eventId}` : "/"}
+                            href={task ? (task.scope === "project" ? `/projects/${task.eventId}` : `/events/${task.eventId}`) : "/"}
                             className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition w-fit"
                         >
                             <ArrowRight size={20} />
-                            חזרה לדף האירוע
+                            {task?.scope === "project" ? "חזרה לדף הפרויקט" : "חזרה לדף האירוע"}
                         </Link>
                     )}
                 </div>
@@ -702,7 +773,7 @@ export default function TaskDetailPage() {
                                     className="w-full p-3 border border-gray-200 rounded-lg text-gray-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
                                     rows={4}
                                     value={task.description || ""}
-                                    onChange={(e) => handleUpdateField('description', e.target.value)}
+                                    onChange={(e) => handleDebouncedUpdate('description', e.target.value)}
                                     placeholder="הוסף תיאור למשימה..."
                                 />
                             </div>
@@ -714,7 +785,7 @@ export default function TaskDetailPage() {
                                         className="w-full bg-white p-2 rounded border border-yellow-200 text-sm focus:outline-none focus:border-yellow-400"
                                         rows={2}
                                         value={task.currentStatus || ""}
-                                        onChange={(e) => handleUpdateField('currentStatus', e.target.value)}
+                                        onChange={(e) => handleDebouncedUpdate('currentStatus', e.target.value)}
                                         placeholder="עדכן סטטוס נוכחי..."
                                     />
                                 </div>
@@ -724,7 +795,7 @@ export default function TaskDetailPage() {
                                         className="w-full bg-white p-2 rounded border border-orange-200 text-sm focus:outline-none focus:border-orange-400"
                                         rows={2}
                                         value={task.nextStep || ""}
-                                        onChange={(e) => handleUpdateField('nextStep', e.target.value)}
+                                        onChange={(e) => handleDebouncedUpdate('nextStep', e.target.value)}
                                         placeholder="מה הצעד הבא..."
                                     />
                                 </div>
