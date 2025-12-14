@@ -41,6 +41,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
     const [sendingMentions, setSendingMentions] = useState(false);
     const [eventTitle, setEventTitle] = useState("");
     const [taskDetails, setTaskDetails] = useState<{ description?: string; dueDate?: any; priority?: string }>({});
+    const mentionQueueRef = useRef<{ name: string; userId?: string; email?: string; phone?: string }[]>([]);
 
     useEffect(() => {
         if (!db || !eventId || !taskId) return;
@@ -225,7 +226,9 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         }
     };
 
-    const getUserPhone = async (mention: { userId?: string; email?: string }) => {
+    const getUserPhone = async (mention: { userId?: string; email?: string; phone?: string }) => {
+        if (mention.phone) return mention.phone;
+        if ((mention as any).phoneNormalized) return (mention as any).phoneNormalized;
         if (mention.userId) {
             try {
                 const snap = await getDoc(doc(db!, "users", mention.userId));
@@ -247,20 +250,40 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
         return "";
     };
 
-    const sendMentionAlerts = async (mentionsList: { name: string; userId?: string; email?: string }[]) => {
-        if (!db || !mentionsList.length) return;
+    const dedupeMentions = (list: { name: string; userId?: string; email?: string; phone?: string }[]) => {
+        const seen = new Set<string>();
+        return list.filter((m) => {
+            const key = `${m.userId || ""}|${(m.email || "").toLowerCase()}|${m.name || ""}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
+
+    const sendMentionAlerts = async (mentionsList: { name: string; userId?: string; email?: string; phone?: string }[] = []) => {
+        if (!db) return;
+        if (mentionsList.length) {
+            mentionQueueRef.current = dedupeMentions([...mentionQueueRef.current, ...mentionsList]);
+        } else if (!mentionQueueRef.current.length) {
+            return;
+        }
         if (sendingMentions) return;
-        const cfg = await fetchWhatsappConfig();
-        if (!cfg) return;
         setSendingMentions(true);
         try {
+            const cfg = await fetchWhatsappConfig();
+            if (!cfg) {
+                mentionQueueRef.current = [];
+                return;
+            }
             const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
             const origin = getPublicBaseUrl(cfg.baseUrl);
             const taskLink = origin ? `${origin}/tasks/${taskId}?eventId=${eventId}` : "";
             const eventLink = origin ? `${origin}/events/${eventId}` : "";
             const senderName = user?.displayName || user?.email || "משתמש";
             const due = taskDetails.dueDate ? new Date(taskDetails.dueDate).toLocaleDateString("he-IL") : "";
-            for (const mention of mentionsList) {
+
+            while (mentionQueueRef.current.length) {
+                const mention = mentionQueueRef.current.shift()!;
                 await ensureGlobalRateLimit();
                 const phoneRaw = await getUserPhone(mention);
                 const phone = normalizePhone(phoneRaw);
@@ -290,6 +313,10 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
             console.warn("שגיאה בשליחת התראות וואטסאפ", err);
         } finally {
             setSendingMentions(false);
+            if (mentionQueueRef.current.length) {
+                // New mentions arrived while we were sending
+                sendMentionAlerts([]);
+            }
         }
     };
 

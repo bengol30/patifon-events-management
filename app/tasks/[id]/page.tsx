@@ -82,6 +82,10 @@ export default function TaskDetailPage() {
     const [creatorDisplayName, setCreatorDisplayName] = useState<string>("");
     const [savingTemplate, setSavingTemplate] = useState(false);
     const [templateSaved, setTemplateSaved] = useState(false);
+    const [eventStartTime, setEventStartTime] = useState<Date | null>(null);
+    const [dueMode, setDueMode] = useState<"event_day" | "offset">("event_day");
+    const [dueOffsetDays, setDueOffsetDays] = useState<string>("0");
+    const [dueTime, setDueTime] = useState<string>("09:00");
 
     // Backfill creator contact details from the user profile (registration info)
     useEffect(() => {
@@ -129,6 +133,231 @@ export default function TaskDetailPage() {
             .replace(/[^\w\sא-ת]/g, " ")
             .replace(/\s+/g, " ")
             .trim();
+    const parseOffset = (raw: string) => {
+        if (raw === "" || raw === "-") return null;
+        const n = parseInt(raw, 10);
+        return Number.isFinite(n) ? n : null;
+    };
+
+    const MIN_SEND_INTERVAL_MS = 5000;
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const [sendingTagAlerts, setSendingTagAlerts] = useState(false);
+    const tagAlertsQueueRef = useRef<Assignee[]>([]);
+
+    const normalizePhone = (value: string) => {
+        const digits = (value || "").replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("972")) return digits;
+        if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+        return digits;
+    };
+
+    const getPublicBaseUrl = (preferred?: string) => {
+        const cleanPreferred = (preferred || "").trim().replace(/\/$/, "");
+        if (cleanPreferred) return cleanPreferred;
+        const fromEnv = (process.env.NEXT_PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+        if (fromEnv) return fromEnv;
+        if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+        return "";
+    };
+
+    const ensureGlobalRateLimit = async () => {
+        const ref = doc(db!, "rate_limits", "whatsapp_mentions");
+        while (true) {
+            const snap = await getDoc(ref);
+            const last = snap.exists() ? (snap.data() as any).lastSendAt?.toMillis?.() || 0 : 0;
+            const now = Date.now();
+            const waitMs = last ? Math.max(0, MIN_SEND_INTERVAL_MS - (now - last)) : 0;
+            if (waitMs > 0) {
+                await sleep(waitMs);
+            }
+            try {
+                await setDoc(ref, { lastSendAt: serverTimestamp() }, { merge: true });
+                return;
+            } catch (err) {
+                await sleep(200);
+            }
+        }
+    };
+
+    const fetchWhatsappConfig = async () => {
+        try {
+            const ref = doc(db!, "integrations", "whatsapp");
+            const snap = await getDoc(ref);
+            if (!snap.exists()) return null;
+            const data = snap.data() as any;
+            if (!data.rules?.notifyOnMention) return null;
+            if (!data.idInstance || !data.apiTokenInstance) return null;
+            return {
+                idInstance: data.idInstance as string,
+                apiTokenInstance: data.apiTokenInstance as string,
+                baseUrl: (data.baseUrl as string) || "",
+            };
+        } catch (err) {
+            console.warn("שגיאה בקריאת הגדרות וואטסאפ", err);
+            return null;
+        }
+    };
+
+    const getUserPhone = async (assignee: Assignee) => {
+        if ((assignee as any).phone) return (assignee as any).phone as string;
+        if ((assignee as any).phoneNormalized) return (assignee as any).phoneNormalized as string;
+        if (assignee.userId) {
+            try {
+                const snap = await getDoc(doc(db!, "users", assignee.userId));
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    if (data?.phone) return data.phone;
+                    if (data?.fullName) return data.phone || "";
+                }
+            } catch { /* ignore */ }
+        }
+        if (assignee.email) {
+            try {
+                const qUsers = query(collection(db!, "users"), where("email", "==", assignee.email.toLowerCase()));
+                const res = await getDocs(qUsers);
+                const data = res.docs[0]?.data() as any;
+                if (data?.phone) return data.phone;
+            } catch { /* ignore */ }
+        }
+        return "";
+    };
+
+    const dedupeAssignees = (arr: Assignee[]) => {
+        const seen = new Set<string>();
+        return arr.filter((a) => {
+            const key = `${a.userId || ""}|${(a.email || "").toLowerCase()}|${a.name || ""}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
+
+    const sendTagAlerts = async (assignees: Assignee[] = [], targetTask: Task) => {
+        if (!db) return;
+        if (assignees.length) {
+            tagAlertsQueueRef.current = dedupeAssignees([...tagAlertsQueueRef.current, ...assignees]);
+        } else if (!tagAlertsQueueRef.current.length) {
+            return;
+        }
+        if (sendingTagAlerts) return;
+        setSendingTagAlerts(true);
+        try {
+            const cfg = await fetchWhatsappConfig();
+            if (!cfg) {
+                tagAlertsQueueRef.current = [];
+                return;
+            }
+            const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+            const origin = getPublicBaseUrl(cfg.baseUrl);
+            const taskLink = origin ? `${origin}/tasks/${targetTask.id}?eventId=${targetTask.eventId}` : "";
+            const eventLink = origin ? `${origin}/events/${targetTask.eventId}` : "";
+            const senderName = user?.displayName || user?.email || "משתמש";
+            const due = targetTask.dueDate ? new Date(targetTask.dueDate).toLocaleDateString("he-IL") : "";
+
+            while (tagAlertsQueueRef.current.length) {
+                const assignee = tagAlertsQueueRef.current.shift()!;
+                await ensureGlobalRateLimit();
+                const phoneRaw = await getUserPhone(assignee);
+                const phone = normalizePhone(phoneRaw);
+                if (!phone) continue;
+                const lines = [
+                    `היי ${assignee.name || ""},`,
+                    `תוייגת במשימה: "${targetTask.title}".`,
+                    targetTask.eventTitle ? `אירוע: ${targetTask.eventTitle}` : "",
+                    due ? `דדליין: ${due}` : "",
+                    targetTask.priority ? `עדיפות: ${targetTask.priority}` : "",
+                    targetTask.description ? `תיאור: ${targetTask.description}` : "",
+                    taskLink ? `דף המשימה: ${taskLink}` : "",
+                    eventLink ? `דף האירוע: ${eventLink}` : "",
+                    `התוייג ע\"י: ${senderName}`,
+                ].filter(Boolean);
+                const message = lines.join("\n");
+                const res = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
+                });
+                if (!res.ok) {
+                    console.warn("שליחת וואטסאפ נכשלה", assignee, await res.text());
+                }
+            }
+        } catch (err) {
+            console.warn("שגיאה בשליחת התראות תיוג", err);
+        } finally {
+            setSendingTagAlerts(false);
+            if (tagAlertsQueueRef.current.length) {
+                sendTagAlerts([], targetTask);
+            }
+        }
+    };
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    const formatDateTimeLocal = (date: Date) =>
+        `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const extractTimeString = (date?: Date | null) => {
+        if (!date) return "09:00";
+        return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+    const addHours = (date: Date, hours: number) => new Date(date.getTime() + hours * 60 * 60 * 1000);
+    const addDays = (date: Date, days: number) => {
+        const d = new Date(date);
+        d.setDate(d.getDate() + days);
+        return d;
+    };
+    const computeDueDateFromMode = (mode: "event_day" | "offset", offsetDays: number, timeStr: string, base?: Date | null) => {
+        const anchor = base || eventStartTime || new Date();
+        const [h, m] = (timeStr || "09:00").split(":").map(v => parseInt(v, 10) || 0);
+        const dt = new Date(anchor);
+        dt.setHours(h, m, 0, 0);
+        dt.setDate(dt.getDate() + (Number.isFinite(offsetDays) ? offsetDays : 0));
+        return formatDateTimeLocal(dt);
+    };
+    const deriveDueState = (dueDate?: string | null, base?: Date | null) => {
+        const anchor = base || eventStartTime;
+        const parsed = dueDate ? new Date(dueDate) : null;
+        const validParsed = parsed && !isNaN(parsed.getTime()) ? parsed : null;
+        const timeStr = extractTimeString(validParsed || anchor || new Date());
+        if (!anchor || !validParsed) return { mode: "event_day" as const, offset: "0", time: timeStr };
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const diff = Math.round((validParsed.getTime() - anchor.getTime()) / msPerDay);
+        return { mode: diff === 0 ? "event_day" as const : "offset" as const, offset: diff.toString(), time: timeStr };
+    };
+    const inferSmartDueDate = (taskData: Task, eventStart: Date | null) => {
+        const fallbackBase = new Date(Date.now() + 48 * 60 * 60 * 1000); // ברירת מחדל יומיים קדימה אם אין תאריך אירוע
+        const baseDate = eventStart || fallbackBase;
+        const text = `${taskData.title || ""} ${taskData.description || ""}`.toLowerCase();
+        const contains = (phrases: string[]) => phrases.some(p => text.includes(p));
+        let candidate: Date = new Date(baseDate);
+
+        if (contains(["פרסום", "קידום", "שיווק", "פוסט", "מודעה", "קמפיין", "ניוזלטר", "דיוור", "הזמנה", "שיתוף", "social", "marketing"])) {
+            candidate = addDays(baseDate, -5);
+            candidate.setHours(12, 0, 0, 0);
+        } else if (contains(["מתנדב", "מתנדבים", "גיוס", "שיבוץ", "חונך"])) {
+            candidate = addDays(baseDate, -3);
+            candidate.setHours(11, 0, 0, 0);
+        } else if (contains(["סאונד", "תאורה", "במה", "ציוד", "הקמה", "לוגיסט", "setup", "בדיקה", "חזרה", "rehearsal", "טסט", "בר", "bar", "drink"])) {
+            candidate = addHours(baseDate, -6);
+        } else if (contains(["תזכורת", "תזכיר", "reminder", "sms", "וואטסאפ", "whatsapp", "הודעה"])) {
+            candidate = addHours(baseDate, -4);
+        } else if (contains(["חשבונית", "תשלום", "קבלה", "invoice", "billing", "התחשבנות"])) {
+            candidate = addDays(baseDate, 2);
+            candidate.setHours(10, 0, 0, 0);
+        } else if (contains(["סיכום", "סיכומים", "תודה", "פולואפ", "דוח", "דו\"ח", "report", "feedback", "משוב"])) {
+            candidate = addDays(baseDate, 1);
+            candidate.setHours(9, 30, 0, 0);
+        } else {
+            candidate = new Date(baseDate);
+        }
+
+        const now = new Date();
+        if (!candidate || Number.isNaN(candidate.getTime())) {
+            return formatDateTimeLocal(baseDate);
+        }
+        if (candidate.getTime() < now.getTime()) {
+            candidate = addHours(now, 2);
+        }
+        return formatDateTimeLocal(candidate);
+    };
     const fetchTaskFilesForLibrary = async (eventId?: string, taskId?: string): Promise<{ name?: string; url?: string; storagePath?: string; originalName?: string }[]> => {
         if (!db || !eventId || !taskId) return [];
         const paths: Array<["events" | "projects", string, "tasks", string, "files"]> = [
@@ -269,6 +498,7 @@ export default function TaskDetailPage() {
                     if (!eventDoc.exists()) return null;
                     const eventData = eventDoc.data();
                     const taskData = taskSnap.data();
+                    const start = (eventData as any)?.startTime;
                     return {
                         task: {
                             id: taskSnap.id,
@@ -282,6 +512,7 @@ export default function TaskDetailPage() {
                             scope: "event"
                         } as Task,
                         eventTitle: (eventData as any).title,
+                        eventStart: start,
                         eventTeam: ((eventData as any).team as EventTeamMember[]) || [],
                         eventNeedsVolunteers: !!(eventData as any).needsVolunteers,
                         creatorName:
@@ -335,6 +566,7 @@ export default function TaskDetailPage() {
                             scope: "project"
                         } as Task,
                         eventTitle: (projectData as any).name || (projectData as any).title || "פרויקט",
+                        eventStart: (projectData as any)?.startTime || null,
                         eventTeam: allUsers,
                         eventNeedsVolunteers: false,
                         creatorName:
@@ -348,6 +580,7 @@ export default function TaskDetailPage() {
                 let foundTask: Task | null = null;
                 let foundEventId = "";
                 let foundEventTitle = "";
+                let foundEventStart: any = null;
                 let foundCreatorName = "";
                 let foundEventTeam: EventTeamMember[] = [];
                 let foundEventNeedsVolunteers = false;
@@ -360,6 +593,7 @@ export default function TaskDetailPage() {
                         foundEventId = hintedEventId;
                         foundEventTitle = res.eventTitle;
                         foundEventTeam = res.eventTeam;
+                        foundEventStart = (res as any).eventStart || null;
                         foundCreatorName = (res as any).creatorName || "";
                         foundEventNeedsVolunteers = res.eventNeedsVolunteers;
                     }
@@ -379,6 +613,7 @@ export default function TaskDetailPage() {
                             foundEventId = eventDoc.id;
                             foundEventTitle = res.eventTitle;
                             foundEventTeam = res.eventTeam;
+                            foundEventStart = (res as any).eventStart || null;
                             foundCreatorName = (res as any).creatorName || "";
                             foundEventNeedsVolunteers = res.eventNeedsVolunteers;
                             break;
@@ -398,6 +633,7 @@ export default function TaskDetailPage() {
                             foundEventId = projDoc.id;
                             foundEventTitle = res.eventTitle;
                             foundEventTeam = res.eventTeam;
+                            foundEventStart = (res as any).eventStart || null;
                             foundCreatorName = (res as any).creatorName || "";
                             foundEventNeedsVolunteers = res.eventNeedsVolunteers;
                             break;
@@ -411,6 +647,26 @@ export default function TaskDetailPage() {
                     setEventCreatorName(foundCreatorName || foundTask.createdByName || "");
                     setCreatorDisplayName(foundCreatorName || foundTask.createdByName || "");
                     setEventNeedsVolunteers(foundEventNeedsVolunteers);
+                    if (foundEventStart?.seconds) {
+                        setEventStartTime(new Date(foundEventStart.seconds * 1000));
+                    } else if (foundEventStart) {
+                        const d = new Date(foundEventStart);
+                        if (!isNaN(d.getTime())) setEventStartTime(d);
+                    }
+                    const startDate = foundEventStart?.seconds ? new Date(foundEventStart.seconds * 1000) : (foundEventStart ? new Date(foundEventStart) : null);
+                    const inferredDue = !foundTask.dueDate ? inferSmartDueDate(foundTask, startDate) : null;
+                    const effectiveDue = foundTask.dueDate || inferredDue || "";
+                    const meta = deriveDueState(effectiveDue, startDate);
+                    setDueMode(meta.mode);
+                    setDueOffsetDays(meta.offset);
+                    setDueTime(meta.time);
+                    if (inferredDue) {
+                        setTask(prev => prev ? { ...prev, dueDate: inferredDue } : prev);
+                        handleUpdateField("dueDate", inferredDue);
+                    } else if (!foundTask.dueDate && effectiveDue) {
+                        setTask(prev => prev ? { ...prev, dueDate: effectiveDue } : prev);
+                        handleUpdateField("dueDate", effectiveDue);
+                    }
 
                     // Subscribe to chat
                     if (!db) return;
@@ -591,7 +847,7 @@ export default function TaskDetailPage() {
             });
     };
 
-    const updateAssignees = async (nextAssignees: Assignee[]) => {
+    const updateAssignees = async (nextAssignees: Assignee[], newlyAdded: Assignee[] = []) => {
         if (!db || !task) return;
         const cleaned = sanitizeAssigneesForWrite(nextAssignees);
         const primary = cleaned[0];
@@ -608,6 +864,15 @@ export default function TaskDetailPage() {
                 assignee: primary?.name || "",
                 assigneeId: primary?.userId || "",
             } : prev);
+            if (newlyAdded.length) {
+                const nextTask: Task = {
+                    ...task,
+                    assignees: cleaned,
+                    assignee: primary?.name || "",
+                    assigneeId: primary?.userId || "",
+                };
+                sendTagAlerts(newlyAdded, nextTask).catch(() => { /* logged internally */ });
+            }
         } catch (err) {
             console.error("Error updating assignees:", err);
         }
@@ -620,7 +885,8 @@ export default function TaskDetailPage() {
         const next = exists
             ? (task.assignees || []).filter(a => getAssigneeKey(a) !== memberKey)
             : ([...(task.assignees || []), { name: member.name, userId: member.userId, email: member.email }]);
-        await updateAssignees(next);
+        const added = exists ? [] : [{ name: member.name, userId: member.userId, email: member.email }];
+        await updateAssignees(next, added);
     };
 
     const handleUploadFiles = async (e: React.FormEvent) => {
@@ -1011,12 +1277,83 @@ export default function TaskDetailPage() {
                                                 <Calendar size={16} />
                                                 תאריך יעד
                                             </label>
-                                            <input
-                                                type="date"
-                                                className="w-full p-2 border border-gray-200 rounded-lg text-sm"
-                                                value={task.dueDate}
-                                                onChange={(e) => handleUpdateField('dueDate', e.target.value)}
-                                            />
+                                            <div className="space-y-2">
+                                                <div className="flex flex-wrap gap-3 text-xs">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="radio"
+                                                            className="accent-indigo-600"
+                                                            checked={dueMode === "event_day"}
+                                                            onChange={() => {
+                                                                const nextTime = dueTime || extractTimeString(eventStartTime || new Date());
+                                                                const dueVal = computeDueDateFromMode("event_day", 0, nextTime);
+                                                                setDueMode("event_day");
+                                                                setDueOffsetDays("0");
+                                                                setDueTime(nextTime);
+                                                                handleUpdateField("dueDate", dueVal);
+                                                            }}
+                                                        />
+                                                        ביום האירוע
+                                                    </label>
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="radio"
+                                                            className="accent-indigo-600"
+                                                            checked={dueMode === "offset"}
+                                                            onChange={() => {
+                                                                const nextTime = dueTime || extractTimeString(eventStartTime || new Date());
+                                                                setDueMode("offset");
+                                                                const dueVal = computeDueDateFromMode("offset", dueOffsetDays, nextTime);
+                                                                handleUpdateField("dueDate", dueVal);
+                                                            }}
+                                                        />
+                                                        ימים ביחס לאירוע
+                                                    </label>
+                                                </div>
+                                                {dueMode === "offset" && (
+                                                <div className="flex items-center gap-2 text-xs">
+                                                    <span>ימים מהאירוע:</span>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        className="w-24 p-2 border border-gray-200 rounded-lg text-sm"
+                                                        value={dueOffsetDays}
+                                                        onChange={(e) => {
+                                                            const raw = e.target.value;
+                                                            setDueOffsetDays(raw);
+                                                            const parsed = parseOffset(raw);
+                                                            if (parsed === null) return;
+                                                            const nextTime = dueTime || extractTimeString(eventStartTime || new Date());
+                                                            const dueVal = computeDueDateFromMode("offset", parsed, nextTime);
+                                                            handleUpdateField("dueDate", dueVal);
+                                                        }}
+                                                    />
+                                                    <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                                </div>
+                                                )}
+                                                <div className="flex items-center gap-2 text-xs">
+                                                    <span>שעה:</span>
+                                                    <input
+                                                        type="time"
+                                                        className="p-2 border border-gray-200 rounded-lg text-sm"
+                                                        value={dueTime}
+                                                        onChange={(e) => {
+                                                            const nextTime = e.target.value || extractTimeString(eventStartTime || new Date());
+                                                            setDueTime(nextTime);
+                                                            const dueVal = computeDueDateFromMode(dueMode, dueOffsetDays, nextTime);
+                                                            handleUpdateField("dueDate", dueVal);
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="text-xs text-gray-600">
+                                                    {task.dueDate
+                                                        ? `המשימה מתוזמנת ל-${new Date(task.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
+                                                        : "לא נקבע מועד למשימה"}
+                                                    {!eventStartTime && (
+                                                        <div className="text-red-500 mt-1">לא נמצא תאריך אירוע, חישוב המועד הוא ביחס להיום.</div>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </div>
 
                                         <div ref={assigneeSectionRef}>

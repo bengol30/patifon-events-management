@@ -48,6 +48,7 @@ interface Assignee {
     name: string;
     userId?: string;
     email?: string;
+    phone?: string;
 }
 
 interface Task {
@@ -70,6 +71,7 @@ interface Task {
     volunteerHours?: number | null;
     createdByName?: string;
     scope?: "event" | "project";
+    specialType?: string;
 }
 
 interface BudgetItem {
@@ -112,6 +114,17 @@ interface EventVolunteer {
     email?: string;
     createdAt?: any;
 }
+
+const dedupeById = <T extends { id?: string }>(arr: T[]): T[] => {
+    const seen = new Set<string>();
+    return arr.filter(item => {
+        const key = item.id || "";
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
 
 interface JoinRequest {
     id: string;
@@ -211,7 +224,6 @@ export default function EventDetailsPage() {
         volunteerHours: null as number | null,
     });
     const [saveNewTaskToLibrary, setSaveNewTaskToLibrary] = useState(false);
-    const dueDateInputRef = useRef<HTMLInputElement | null>(null);
     const newTaskFileInputRef = useRef<HTMLInputElement | null>(null);
     const [newTaskFiles, setNewTaskFiles] = useState<File[]>([]);
     const normalizeTaskKey = (title: string) =>
@@ -310,6 +322,13 @@ export default function EventDetailsPage() {
     const [newTaskSearch, setNewTaskSearch] = useState("");
     const [editTaskSearch, setEditTaskSearch] = useState("");
     const [sendingTagAlerts, setSendingTagAlerts] = useState(false);
+    const tagAlertsQueueRef = useRef<Assignee[]>([]);
+    const [newTaskDueMode, setNewTaskDueMode] = useState<"event_day" | "offset">("event_day");
+    const [newTaskOffsetDays, setNewTaskOffsetDays] = useState<string>("0");
+    const [newTaskTime, setNewTaskTime] = useState<string>("");
+    const [editTaskDueMode, setEditTaskDueMode] = useState<"event_day" | "offset">("event_day");
+    const [editTaskOffsetDays, setEditTaskOffsetDays] = useState<string>("0");
+    const [editTaskTime, setEditTaskTime] = useState<string>("");
 
     const getAssigneeKey = (assignee?: Assignee | null) => {
         if (!assignee) return "";
@@ -340,7 +359,8 @@ export default function EventDetailsPage() {
             .map(a => ({
                 name: (a.name || "").trim(),
                 ...(a.userId ? { userId: a.userId } : {}),
-                ...(a.email ? { email: a.email.trim().toLowerCase() } : {})
+                ...(a.email ? { email: a.email.trim().toLowerCase() } : {}),
+                ...(a.phone ? { phone: a.phone } : {}),
             }))
             .filter(a => {
                 const key = getAssigneeKey(a);
@@ -375,6 +395,135 @@ export default function EventDetailsPage() {
         if (fromEnv) return fromEnv;
         if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
         return "";
+    };
+
+    const getEventStartDate = () => {
+        if (!event?.startTime) return null;
+        const raw = event.startTime as any;
+        if (raw?.seconds) return new Date(raw.seconds * 1000);
+        const d = new Date(raw);
+        return isNaN(d.getTime()) ? null : d;
+    };
+
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    const formatDateTimeLocal = (date: Date) =>
+        `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const extractTimeString = (date?: Date | null) => {
+        if (!date) return "09:00";
+        return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+
+    const computeDueDateFromMode = (mode: "event_day" | "offset", offsetDays: number, timeStr: string) => {
+        const base = getEventStartDate() || new Date();
+        const [h, m] = (timeStr || "09:00").split(":").map(v => parseInt(v, 10) || 0);
+        const dt = new Date(base);
+        dt.setHours(h, m, 0, 0);
+        dt.setDate(dt.getDate() + (Number.isFinite(offsetDays) ? offsetDays : 0));
+        return formatDateTimeLocal(dt);
+    };
+    const parseOffset = (raw: string) => {
+        if (raw === "" || raw === "-") return null;
+        const n = parseInt(raw, 10);
+        return Number.isFinite(n) ? n : null;
+    };
+
+    const syncNewTaskDueDate = (mode: "event_day" | "offset", offsetRaw: string, timeStr: string) => {
+        setNewTaskDueMode(mode);
+        setNewTaskOffsetDays(offsetRaw);
+        setNewTaskTime(timeStr);
+        const offsetParsed = parseOffset(offsetRaw);
+        if (offsetParsed === null) return;
+        const normalized = computeDueDateFromMode(mode, offsetParsed, timeStr);
+        setNewTask(prev => ({ ...prev, dueDate: normalized }));
+    };
+
+    const syncEditTaskDueDate = (mode: "event_day" | "offset", offsetRaw: string, timeStr: string) => {
+        setEditTaskDueMode(mode);
+        setEditTaskOffsetDays(offsetRaw);
+        setEditTaskTime(timeStr);
+        const offsetParsed = parseOffset(offsetRaw);
+        if (offsetParsed === null) return;
+        const normalized = computeDueDateFromMode(mode, offsetParsed, timeStr);
+        setEditingTask(prev => (prev ? { ...prev, dueDate: normalized } : prev));
+    };
+
+    const deriveEditDueState = (dueDate?: string | null) => {
+        const base = getEventStartDate();
+        const parsed = dueDate ? new Date(dueDate) : null;
+        const validParsed = parsed && !isNaN(parsed.getTime()) ? parsed : null;
+        const baseTime = extractTimeString(base || validParsed || new Date());
+        if (!base || !validParsed) {
+            return { mode: "event_day" as const, offset: "0", time: baseTime };
+        }
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const diff = Math.round((validParsed.getTime() - base.getTime()) / msPerDay);
+        const timeStr = extractTimeString(validParsed);
+        return { mode: diff === 0 ? "event_day" as const : "offset" as const, offset: diff.toString(), time: timeStr };
+    };
+
+    const inferSmartDueDate = (task: Task, eventStart: Date | null) => {
+        const fallbackBase = new Date(Date.now() + 48 * 60 * 60 * 1000); // יומיים קדימה כברירת מחדל
+        const baseDate = eventStart || fallbackBase;
+        const text = `${task.title || ""} ${task.description || ""}`.toLowerCase();
+        const contains = (phrases: string[]) => phrases.some(p => text.includes(p));
+        const addHours = (base: Date, h: number) => new Date(base.getTime() + h * 60 * 60 * 1000);
+        const addDays = (base: Date, d: number) => {
+            const dt = new Date(base);
+            dt.setDate(dt.getDate() + d);
+            return dt;
+        };
+
+        // ברירת מחדל: ביום האירוע בשעה המקורית של האירוע (או 10:00 אם אין שעה)
+        let candidate: Date | null = baseDate ? new Date(baseDate) : null;
+        if (!candidate) {
+            candidate = new Date();
+            candidate.setHours(10, 0, 0, 0);
+        } else if (!eventStart) {
+            candidate.setHours(10, 0, 0, 0);
+        }
+
+        // שיווק/פרסום – בין 3 ל-10 ימים לפני האירוע (נבחר אמצע טווח: 5 ימים לפני)
+        if (contains(["פרסום", "קידום", "שיווק", "פוסט", "מודעה", "קמפיין", "ניוזלטר", "דיוור", "הזמנה", "שיתוף", "social", "marketing"])) {
+            candidate = addDays(candidate, -5);
+            candidate.setHours(12, 0, 0, 0);
+        }
+        // גיוס/שיבוץ/מתנדבים – כמה ימים לפני כדי לאפשר תיאום
+        else if (contains(["מתנדב", "מתנדבים", "גיוס", "שיבוץ", "חונך"])) {
+            candidate = addDays(candidate, -3);
+            candidate.setHours(11, 0, 0, 0);
+        }
+        // לוגיסטיקה/סאונד/תאורה/בר/במה/הקמה – ביום האירוע או ערב קודם
+        else if (contains(["סאונד", "תאורה", "במה", "ציוד", "הקמה", "לוגיסט", "setup", "בדיקה", "חזרה", "rehearsal", "טסט", "בר", "bar", "drink"])) {
+            candidate = addHours(candidate, -6); // שש שעות לפני האירוע כברירת מחדל
+        }
+        // תזכורות למשתתפים/קהל – כמה שעות לפני
+        else if (contains(["תזכורת", "תזכיר", "reminder", "sms", "וואטסאפ", "whatsapp", "הודעה"])) {
+            candidate = addHours(candidate, -4);
+        }
+        // כספים/חשבוניות/תשלומים – אחרי האירוע
+        else if (contains(["חשבונית", "תשלום", "קבלה", "invoice", "billing", "התחשבנות"])) {
+            candidate = addDays(candidate, 2);
+            candidate.setHours(10, 0, 0, 0);
+        }
+        // סיכומים/פולואפ/דוחות – יום אחרי
+        else if (contains(["סיכום", "סיכומים", "תודה", "פולואפ", "דוח", "דו\"ח", "report", "feedback", "משוב"])) {
+            candidate = addDays(candidate, 1);
+            candidate.setHours(9, 30, 0, 0);
+        }
+        // שאר המשימות – ברירת מחדל ביום האירוע
+        else {
+            candidate = new Date(candidate);
+        }
+
+        // הגנות
+        if (!candidate || Number.isNaN(candidate.getTime())) {
+            return formatDateTimeLocal(baseDate);
+        }
+        const now = new Date();
+        if (candidate.getTime() < now.getTime()) {
+            candidate = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+        }
+        return formatDateTimeLocal(candidate);
     };
 
     const MIN_SEND_INTERVAL_MS = 5000;
@@ -419,6 +568,8 @@ export default function EventDetailsPage() {
     };
 
     const getUserPhone = async (assignee: Assignee) => {
+        if (assignee.phone) return assignee.phone;
+        if ((assignee as any).phoneNormalized) return (assignee as any).phoneNormalized;
         // 1) userId
         if (assignee.userId) {
             try {
@@ -442,20 +593,39 @@ export default function EventDetailsPage() {
         return "";
     };
 
-    const sendTagAlerts = async (assignees: Assignee[], task: Task) => {
-        if (!db || !assignees.length) return;
+    const dedupeAssignees = (arr: Assignee[]) => {
+        const seen = new Set<string>();
+        return arr.filter((a) => {
+            const key = `${a.userId || ""}|${(a.email || "").toLowerCase()}|${a.name || ""}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
+
+    const sendTagAlerts = async (assignees: Assignee[] = [], task: Task) => {
+        if (!db) return;
+        if (assignees.length) {
+            tagAlertsQueueRef.current = dedupeAssignees([...tagAlertsQueueRef.current, ...assignees]);
+        } else if (!tagAlertsQueueRef.current.length) {
+            return;
+        }
         if (sendingTagAlerts) return;
-        const cfg = await fetchWhatsappConfig();
-        if (!cfg) return;
         setSendingTagAlerts(true);
         try {
+            const cfg = await fetchWhatsappConfig();
+            if (!cfg) {
+                tagAlertsQueueRef.current = [];
+                return;
+            }
             const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
             const origin = getPublicBaseUrl(cfg.baseUrl);
             const taskLink = origin ? `${origin}/tasks/${task.id}?eventId=${id}` : "";
             const eventLink = origin ? `${origin}/events/${id}` : "";
             const senderName = user?.displayName || user?.email || "משתמש";
             const due = task.dueDate ? new Date(task.dueDate).toLocaleDateString("he-IL") : "";
-            for (const assignee of assignees) {
+            while (tagAlertsQueueRef.current.length) {
+                const assignee = tagAlertsQueueRef.current.shift()!;
                 await ensureGlobalRateLimit();
                 const phoneRaw = await getUserPhone(assignee);
                 const phone = normalizePhone(phoneRaw);
@@ -485,6 +655,9 @@ export default function EventDetailsPage() {
             console.warn("שגיאה בשליחת התראות תיוג", err);
         } finally {
             setSendingTagAlerts(false);
+            if (tagAlertsQueueRef.current.length) {
+                sendTagAlerts([], task);
+            }
         }
     };
 
@@ -502,6 +675,7 @@ export default function EventDetailsPage() {
     const [allUsers, setAllUsers] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
     const [collaboratorsView, setCollaboratorsView] = useState<"past" | "all">("past");
     const [showCollaboratorsPicker, setShowCollaboratorsPicker] = useState(false);
+    const eventStartRef = useRef<Date | null>(null);
 
     const hydrateTeamNames = async (teamArr: { name: string; role: string; email?: string; userId?: string }[]) => {
         if (!db) return teamArr;
@@ -576,8 +750,29 @@ export default function EventDetailsPage() {
     const [infoBlockDraft, setInfoBlockDraft] = useState<InfoBlock | null>(null);
     const [showAdvancedActions, setShowAdvancedActions] = useState(false);
     const [showPostModal, setShowPostModal] = useState(false);
+    const defaultInstagramTags = [
+        "patiphongallery",
+        "bengolano",
+        "nagomi_art_by_yael",
+        "roi_guetta1",
+        "youngis_k8",
+        "roniegol",
+        "bar_ztulker",
+        "matnasks8",
+        "tozeret_k8",
+    ];
+
     const [postContent, setPostContent] = useState("");
     const [flyerLink, setFlyerLink] = useState("");
+    const [showContentModal, setShowContentModal] = useState(false);
+    const [officialPostText, setOfficialPostText] = useState("");
+    const [officialInstaTagsList, setOfficialInstaTagsList] = useState<string[]>(defaultInstagramTags);
+    const [instaTagInput, setInstaTagInput] = useState("");
+    const [officialFlyerUrl, setOfficialFlyerUrl] = useState("");
+    const [officialFlyerFile, setOfficialFlyerFile] = useState<File | null>(null);
+    const [officialFlyerUploading, setOfficialFlyerUploading] = useState(false);
+    const contentFlyerInputRef = useRef<HTMLInputElement | null>(null);
+    const [showFlyerPicker, setShowFlyerPicker] = useState(false);
     const [showVolunteerModal, setShowVolunteerModal] = useState(false);
     const [volunteerCountInput, setVolunteerCountInput] = useState("");
     const [showEventFileModal, setShowEventFileModal] = useState(false);
@@ -592,6 +787,8 @@ export default function EventDetailsPage() {
     const [loadingVolunteers, setLoadingVolunteers] = useState(true);
     const [volunteerBusyId, setVolunteerBusyId] = useState<string | null>(null);
     const [creatorName, setCreatorName] = useState("");
+    const [showSpecialModal, setShowSpecialModal] = useState(false);
+    const [creatingSpecialTask, setCreatingSpecialTask] = useState(false);
     const handleShareWhatsApp = (title: string, url?: string) => {
         if (!url) {
             alert("אין קישור לקובץ לשיתוף");
@@ -799,7 +996,21 @@ export default function EventDetailsPage() {
             if (docSnap.exists()) {
                 const data = docSnap.data() as EventData;
                 const enrichedTeam = await hydrateTeamNames(data.team || []);
+                const rawStart = (data as any).startTime;
+                if (rawStart?.seconds) {
+                    eventStartRef.current = new Date(rawStart.seconds * 1000);
+                } else if (rawStart) {
+                    const d = new Date(rawStart);
+                    if (!isNaN(d.getTime())) eventStartRef.current = d;
+                }
                 setEvent({ ...data, team: enrichedTeam });
+                setOfficialPostText((data as any).officialPostText || "");
+                const tags = Array.isArray((data as any).officialInstagramTags)
+                    ? (data as any).officialInstagramTags
+                    : (Array.isArray((data as any).instagramTags) ? (data as any).instagramTags : []);
+                const cleanedTags = (tags || []).map((t: string) => t?.replace(/^@+/, "")).filter(Boolean);
+                setOfficialInstaTagsList(cleanedTags.length ? cleanedTags : defaultInstagramTags);
+                setOfficialFlyerUrl((data as any).officialFlyerUrl || "");
                 setSelectedProject((data as any).projectId || "");
                 // fetch creator name (prefers user profile by UID/email)
                 const creatorUid = (data as any).createdBy;
@@ -838,17 +1049,33 @@ export default function EventDetailsPage() {
         const qTasks = query(collection(db, "events", id, "tasks"), orderBy("createdAt", "desc"));
         const unsubscribeTasks = onSnapshot(qTasks, (querySnapshot) => {
             const tasksData: Task[] = [];
+            const updates: { taskId: string; dueDate: string }[] = [];
             querySnapshot.forEach((doc) => {
                 const data = doc.data() as any;
-                tasksData.push({
+                let taskRecord: Task = {
                     id: doc.id,
                     ...data,
                     assignee: data.assignee || (data.assignees && data.assignees[0]?.name) || "",
                     assignees: data.assignees || (data.assignee ? [{ name: data.assignee, userId: data.assigneeId }] : []),
                     previewImage: data.previewImage || "",
-                } as Task);
+                } as Task;
+                if (!taskRecord.dueDate) {
+                    const inferred = inferSmartDueDate(taskRecord, eventStartRef.current);
+                    if (inferred) {
+                        taskRecord = { ...taskRecord, dueDate: inferred };
+                        updates.push({ taskId: doc.id, dueDate: inferred });
+                    }
+                }
+                tasksData.push(taskRecord);
             });
-            setTasks(tasksData);
+            setTasks(dedupeById(tasksData));
+            updates.forEach(async (u) => {
+                try {
+                    await updateDoc(doc(db!, "events", id, "tasks", u.taskId), { dueDate: u.dueDate });
+                } catch (err) {
+                    console.warn("Failed to auto-assign due date", u, err);
+                }
+            });
         });
 
         const qBudget = query(collection(db, "events", id, "budgetItems"), orderBy("createdAt", "desc"));
@@ -884,7 +1111,7 @@ export default function EventDetailsPage() {
             querySnapshot.forEach((doc) => {
                 filesData.push({ id: doc.id, ...doc.data() } as EventFileThumb);
             });
-            setEventFiles(filesData);
+            setEventFiles(dedupeById(filesData));
         });
 
         const qVolunteers = query(collection(db, "events", id, "volunteers"), orderBy("createdAt", "desc"));
@@ -893,7 +1120,7 @@ export default function EventDetailsPage() {
             querySnapshot.forEach((doc) => {
                 vols.push({ id: doc.id, ...doc.data() } as EventVolunteer);
             });
-            setVolunteers(vols);
+            setVolunteers(dedupeById(vols));
             setLoadingVolunteers(false);
         });
 
@@ -907,6 +1134,43 @@ export default function EventDetailsPage() {
             unsubscribeVolunteers();
         };
     }, [id, db]);
+
+    const [dateModalMode, setDateModalMode] = useState<"event_day" | "offset">("event_day");
+    const [dateModalOffset, setDateModalOffset] = useState<string>("0");
+    const [dateModalTime, setDateModalTime] = useState<string>("09:00");
+
+    useEffect(() => {
+        const base = getEventStartDate();
+        const defaultTime = extractTimeString(base || null);
+        if (!newTaskTime) setNewTaskTime(defaultTime);
+        if (!newTask.dueDate && base) {
+            syncNewTaskDueDate(newTaskDueMode, newTaskOffsetDays, defaultTime);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [event?.startTime]);
+
+    useEffect(() => {
+        if (!editingDateTask) return;
+        const meta = deriveEditDueState(editingDateTask.dueDate);
+        setDateModalMode(meta.mode);
+        setDateModalOffset(meta.offset);
+        setDateModalTime(meta.time);
+        if (!editingDateTask.dueDate) {
+            setEditingDateTask({ ...editingDateTask, dueDate: computeDueDateFromMode(meta.mode, parseOffset(meta.offset) ?? 0, meta.time) });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editingDateTask?.id]);
+
+    useEffect(() => {
+        if (!editingDateTask) return;
+        const parsed = parseOffset(dateModalOffset);
+        if (parsed === null) return;
+        const nextDue = computeDueDateFromMode(dateModalMode, parsed, dateModalTime || extractTimeString(getEventStartDate() || new Date()));
+        if (nextDue && nextDue !== editingDateTask.dueDate) {
+            setEditingDateTask({ ...editingDateTask, dueDate: nextDue });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dateModalMode, dateModalOffset, dateModalTime]);
 
     // Load collaborators + all users
     useEffect(() => {
@@ -1082,6 +1346,12 @@ export default function EventDetailsPage() {
                 }
             }
             const cleanAssignees = sanitizeAssigneesForWrite(newTask.assignees);
+            const offsetParsed = parseOffset(newTaskOffsetDays);
+            const eventStart = eventStartRef.current || getEventStartDate();
+            const inferredDue = newTask.dueDate ? "" : inferSmartDueDate(newTask as Task, eventStart);
+            const dueDateValue = newTask.dueDate
+                ? newTask.dueDate
+                : inferredDue || computeDueDateFromMode(newTaskDueMode, offsetParsed ?? 0, newTaskTime || extractTimeString(eventStart || new Date()));
             const primary = cleanAssignees[0];
             const docRef = await addDoc(collection(db, "events", id, "tasks"), {
                 ...newTask,
@@ -1094,6 +1364,7 @@ export default function EventDetailsPage() {
                 volunteerHours: newTask.isVolunteerTask
                     ? (newTask.volunteerHours != null ? Number(newTask.volunteerHours) : null)
                     : null,
+                dueDate: dueDateValue,
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
                 createdByEmail: user.email || "",
@@ -1108,7 +1379,7 @@ export default function EventDetailsPage() {
                     title: newTask.title,
                     description: newTask.description,
                     priority: newTask.priority,
-                    dueDate: newTask.dueDate,
+                    dueDate: dueDateValue,
                     assignees: cleanAssignees,
                     isVolunteerTask: newTask.isVolunteerTask,
                     volunteerHours: newTask.volunteerHours,
@@ -1121,16 +1392,30 @@ export default function EventDetailsPage() {
                 title: newTask.title,
                 description: newTask.description,
                 priority: newTask.priority,
-                dueDate: newTask.dueDate,
+                dueDate: dueDateValue,
             } as Task).catch(() => { /* כבר טופל בלוג */ });
             setShowNewTask(false);
             setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false, volunteerHours: null });
+            setNewTaskDueMode("event_day");
+            setNewTaskOffsetDays(0);
+            setNewTaskTime(extractTimeString(getEventStartDate() || new Date()));
             setNewTaskFiles([]);
             setSaveNewTaskToLibrary(false);
         } catch (err) {
             console.error("Error adding task:", err);
             alert("שגיאה בהוספת משימה");
         }
+    };
+
+    const startEditingTask = (task: Task) => {
+        const meta = deriveEditDueState(task.dueDate);
+        const ensuredDue = task.dueDate || computeDueDateFromMode(meta.mode, parseOffset(meta.offset) ?? 0, meta.time);
+        setEditTaskDueMode(meta.mode);
+        setEditTaskOffsetDays(meta.offset);
+        setEditTaskTime(meta.time);
+        setEditingTask({ ...task, dueDate: ensuredDue });
+        setEditTaskSearch("");
+        setSaveEditTaskToLibrary(false);
     };
 
     const handleUpdateTask = async (e: React.FormEvent) => {
@@ -1147,13 +1432,15 @@ export default function EventDetailsPage() {
             }
             const taskRef = doc(db, "events", id, "tasks", editingTask.id);
             const cleanAssignees = sanitizeAssigneesForWrite(editingTask.assignees || []);
+            const offsetParsed = parseOffset(editTaskOffsetDays);
+            const dueDateValue = editingTask.dueDate || computeDueDateFromMode(editTaskDueMode, offsetParsed ?? 0, editTaskTime || extractTimeString(getEventStartDate() || new Date()));
                 const updateData: any = {
                     title: editingTask.title,
                     description: editingTask.description || "",
                     assignee: cleanAssignees[0]?.name || editingTask.assignee || "",
                     assigneeId: cleanAssignees[0]?.userId || editingTask.assigneeId || null,
                     assignees: cleanAssignees,
-                    dueDate: editingTask.dueDate,
+                    dueDate: dueDateValue,
                     priority: editingTask.priority,
                     status: editingTask.status,
                     currentStatus: editingTask.currentStatus || "",
@@ -1187,10 +1474,61 @@ export default function EventDetailsPage() {
         }
     };
 
-    const handleStatusChange = async (taskId: string, newStatus: string) => {
+    const sendSpecialDoneMessage = async (task: Task) => {
+        const cfg = await fetchWhatsappConfig();
+        if (!cfg) return;
+        const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+        const origin = getPublicBaseUrl(cfg.baseUrl);
+        const taskLink = origin ? `${origin}/tasks/${task.id}?eventId=${id}` : "";
+        const eventLink = origin ? `${origin}/events/${id}` : "";
+        const senderName = user?.displayName || user?.email || "מתנדב";
+
+        const getCreatorPhone = async () => {
+            if ((task as any).createdByPhone) return (task as any).createdByPhone as string;
+            if ((task as any).createdBy) {
+                try {
+                    const snap = await getDoc(doc(db!, "users", (task as any).createdBy));
+                    if (snap.exists()) {
+                        const data = snap.data() as any;
+                        if (data?.phone) return data.phone as string;
+                    }
+                } catch { /* ignore */ }
+            }
+            if (event?.contactPerson?.phone) return event.contactPerson.phone;
+            return "";
+        };
+
+        const phone = normalizePhone(await getCreatorPhone());
+        if (!phone) return;
+
+        const lines = [
+            "בקשת אישור משימה מיוחדת:",
+            `משימה: ${task.title}`,
+            event?.title ? `אירוע: ${event.title}` : "",
+            `המתנדב אישר ששלח צילומי מסך.`,
+            `מתנדב: ${senderName}`,
+            taskLink ? `דף המשימה: ${taskLink}` : "",
+            eventLink ? `דף האירוע: ${eventLink}` : "",
+        ].filter(Boolean);
+        const message = lines.join("\n");
+        await ensureGlobalRateLimit();
+        await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
+        }).catch(err => console.warn("שליחת וואטסאפ לאישור משימה נכשלה", err));
+    };
+
+    const handleStatusChange = async (task: Task, newStatus: string) => {
         if (!db) return;
+        const isSpecialMarketing = (task as any).specialType === "marketing_distribution" || task.title.includes("שיווק והפצה בקבוצות");
+        if (newStatus === "DONE" && isSpecialMarketing) {
+            const ok = window.confirm("האם שלחת צילומי מסך ליוצר המשימה כהוכחה לביצוע?");
+            if (!ok) return;
+            sendSpecialDoneMessage(task).catch(() => { /* logged inside */ });
+        }
         try {
-            await updateDoc(doc(db, "events", id, "tasks", taskId), {
+            await updateDoc(doc(db, "events", id, "tasks", task.id), {
                 status: newStatus
             });
         } catch (err) {
@@ -1387,6 +1725,25 @@ export default function EventDetailsPage() {
         setShowPostModal(true);
     };
 
+    const handleOpenContentModal = () => {
+        setOfficialPostText(prev => prev || buildPostContent());
+        setShowContentModal(true);
+    };
+
+    const addInstagramTag = (raw: string) => {
+        const clean = (raw || "").trim().replace(/^@+/, "");
+        if (!clean) return;
+        setOfficialInstaTagsList(prev => {
+            if (prev.includes(clean)) return prev;
+            return [...prev, clean];
+        });
+        setInstaTagInput("");
+    };
+
+    const removeInstagramTag = (tag: string) => {
+        setOfficialInstaTagsList(prev => prev.filter(t => t !== tag));
+    };
+
     const handleCopyPost = async () => {
         try {
             await navigator.clipboard.writeText(postContent);
@@ -1399,6 +1756,139 @@ export default function EventDetailsPage() {
 
     const handleRefreshPost = () => {
         setPostContent(buildPostContent());
+    };
+
+    const handleUploadOfficialFlyer = async () => {
+        if (!db || !storage || !officialFlyerFile) {
+            alert("בחר קובץ פלייר קודם");
+            return;
+        }
+        setOfficialFlyerUploading(true);
+        try {
+            const path = `events/${id}/files/flyer-${Date.now()}-${officialFlyerFile.name}`;
+            const storageRef = ref(storage, path);
+            await uploadBytes(storageRef, officialFlyerFile);
+            const url = await getDownloadURL(storageRef);
+            const fileData = {
+                name: officialFlyerFile.name,
+                originalName: officialFlyerFile.name,
+                url,
+                storagePath: path,
+                createdAt: serverTimestamp(),
+                createdBy: user?.uid || "system",
+                createdByName: user?.displayName || user?.email || "משתמש",
+            };
+            const fileDoc = await addDoc(collection(db, "events", id, "files"), fileData);
+            setOfficialFlyerUrl(url);
+            setEventFiles(prev => [{ id: fileDoc.id, name: fileData.name, url }, ...prev]);
+            setOfficialFlyerFile(null);
+            // Persist on the event so שיישמר גם אחרי יציאה
+            try {
+                await updateDoc(doc(db, "events", id), {
+                    officialFlyerUrl: url,
+                    updatedAt: serverTimestamp(),
+                });
+                setEvent(prev => prev ? { ...prev, officialFlyerUrl: url } : prev);
+            } catch (eventErr) {
+                console.warn("שגיאה בעדכון האירוע עם הפלייר", eventErr);
+            }
+        } catch (err) {
+            console.error("שגיאה בהעלאת הפלייר", err);
+            alert("לא הצלחנו להעלות את הפלייר");
+        } finally {
+            setOfficialFlyerUploading(false);
+        }
+    };
+
+    const handleSaveContentAndMedia = async () => {
+        if (!db) return;
+        const tags = officialInstaTagsList
+            .map(t => t.trim())
+            .filter(Boolean)
+            .map(t => t.startsWith("@") ? t : `@${t}`);
+        try {
+            await updateDoc(doc(db, "events", id), {
+                officialPostText,
+                officialInstagramTags: tags,
+                officialFlyerUrl,
+            });
+            setEvent(prev => prev ? { ...prev, officialPostText, officialInstagramTags: tags, officialFlyerUrl } : prev);
+            setShowContentModal(false);
+            alert("תוכן ומדיה נשמרו");
+        } catch (err) {
+            console.error("שגיאה בשמירת תוכן/מדיה", err);
+            alert("לא הצלחנו לשמור את התוכן");
+        }
+    };
+
+    const buildMarketingTaskDescription = () => {
+            const officialText = officialPostText || buildPostContent();
+            const lines = [
+                "הנחיות שיווק והפצה בקבוצות:",
+                "1. קח/י את המלל הרשמי והפלייר המצורף.",
+                "2. פרסם/י ב-5 קבוצות וואטסאפ שונות עם 30+ משתתפים כל אחת.",
+            "3. צלם/י מסך מכל פרסום והעלה/י כהוכחה לביצוע.",
+            "",
+            "מלל רשמי:",
+            officialText,
+            officialFlyerUrl ? `קישור פלייר: ${officialFlyerUrl}` : "",
+        ].filter(Boolean);
+        return lines.join("\n");
+    };
+
+    const handleCreateSpecialMarketingTask = async () => {
+        if (!db || !id) return;
+        setCreatingSpecialTask(true);
+        try {
+            const taskPayload: Partial<Task> = {
+                title: "שיווק והפצה בקבוצות",
+                description: buildMarketingTaskDescription(),
+                priority: "HIGH",
+                status: "TODO",
+                assignee: "",
+                assigneeId: "",
+                assignees: [],
+                isVolunteerTask: true,
+                volunteerHours: 1,
+                specialType: "marketing_distribution" as any,
+                eventTitle: event?.title || "",
+                eventId: id,
+                previewImage: officialFlyerUrl || "",
+            };
+            const start = getEventStartDate();
+            const due = inferSmartDueDate(taskPayload as Task, start);
+            const docRef = await addDoc(collection(db, "events", id, "tasks"), {
+                ...taskPayload,
+                dueDate: due,
+                filesCount: officialFlyerUrl ? 1 : 0,
+                createdAt: serverTimestamp(),
+                createdBy: user?.uid || null,
+                createdByName: user?.displayName || user?.email || "",
+            });
+            if (officialFlyerUrl) {
+                try {
+                    await addDoc(collection(db, "events", id, "tasks", docRef.id, "files"), {
+                        name: "פלייר האירוע",
+                        originalName: "official-flyer",
+                        url: officialFlyerUrl,
+                        storagePath: "",
+                        createdAt: serverTimestamp(),
+                        createdBy: user?.uid || null,
+                        createdByName: user?.displayName || user?.email || "משתמש",
+                    });
+                } catch (fileErr) {
+                    console.warn("שגיאה בשמירת הפלייר על המשימה", fileErr);
+                }
+            }
+            // optimistic: no need to push to state as snapshot updates, but add quick local feedback
+            alert("המשימה נוצרה ונוספה למשימות האירוע");
+            setShowSpecialModal(false);
+        } catch (err) {
+            console.error("שגיאה ביצירת משימה מיוחדת", err);
+            alert("לא הצלחנו ליצור את המשימה המיוחדת");
+        } finally {
+            setCreatingSpecialTask(false);
+        }
     };
 
     const executeDelete = async () => {
@@ -1685,6 +2175,60 @@ export default function EventDetailsPage() {
             return;
         }
         window.open(`https://wa.me/${normalized}`, "_blank");
+    };
+
+    const formatGoogleDate = (date: Date) =>
+        date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+
+    const handleAddEventToCalendar = () => {
+        if (!event) return;
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const collectTeamEmails = () => {
+            const set = new Set<string>();
+            (event.team || []).forEach((m) => {
+                const raw = (m.email || "").toLowerCase();
+                const parts = raw.split(/[,;\s]+/).map(p => p.trim()).filter(Boolean);
+                parts.forEach((p) => {
+                    if (emailRegex.test(p)) set.add(p);
+                });
+            });
+            return Array.from(set);
+        };
+        const parseDate = (value: any) => {
+            if (!value) return null;
+            if (value?.seconds) return new Date(value.seconds * 1000);
+            const d = new Date(value);
+            return isNaN(d.getTime()) ? null : d;
+        };
+        const start = parseDate(event.startTime);
+        const endCandidate = parseDate((event as any).endTime);
+        const origin = getPublicBaseUrl();
+        if (!start) {
+            alert("אין תאריך התחלה תקין לאירוע. עדכן/י תאריך לפני הוספה ליומן.");
+            return;
+        }
+        const end = endCandidate || new Date(start.getTime() + 2 * 60 * 60 * 1000);
+        const text = encodeURIComponent(event.title || "אירוע");
+        const whenStr = start.toLocaleString("he-IL", { dateStyle: "full", timeStyle: "short" });
+        const endStr = end ? end.toLocaleString("he-IL", { dateStyle: "full", timeStyle: "short" }) : "";
+        const detailsLines = [
+            `שם האירוע: ${event.title || "אירוע"}`,
+            `מתי: ${whenStr}${endStr ? ` עד ${endStr}` : ""}`,
+            event.location ? `איפה: ${event.location}` : "",
+            event.description ? `תיאור: ${event.description}` : "",
+            event.contactPerson?.name ? `איש קשר: ${event.contactPerson.name}` : "",
+            event.contactPerson?.phone ? `טלפון: ${event.contactPerson.phone}` : "",
+            (event.partners as any)?.length ? `שותפים: ${(event.partners as any).join(", ")}` : "",
+            event.needsVolunteers ? `התנדבות: ${event.volunteersCount ? `נדרשים ${event.volunteersCount}` : "נדרשים מתנדבים"}` : "",
+            origin ? `דף האירוע: ${origin}/events/${id}` : "",
+        ].filter(Boolean);
+        const details = encodeURIComponent(detailsLines.join("\n"));
+        const location = encodeURIComponent(event.location || "");
+        const dates = `${formatGoogleDate(start)}/${formatGoogleDate(end)}`;
+        const teamEmails = collectTeamEmails();
+        const addParam = teamEmails.length ? `&add=${encodeURIComponent(teamEmails.join(","))}` : "";
+        const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${dates}&details=${details}&location=${location}${addParam}`;
+        window.open(url, "_blank", "noopener,noreferrer");
     };
 
     const handleLibraryEditStart = (t?: { id?: string; title?: string; description?: string; priority?: any }) => {
@@ -2243,14 +2787,64 @@ export default function EventDetailsPage() {
                                         )}
                                     </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
-                                    <input
-                                        type="date"
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        value={editingTask.dueDate}
-                                        onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })}
-                                    />
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מועד המשימה</label>
+                                    <div className="flex flex-wrap gap-3 text-xs">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                className="accent-indigo-600"
+                                                checked={editTaskDueMode === "event_day"}
+                                                onChange={() => syncEditTaskDueDate("event_day", "0", editTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                            />
+                                            ביום האירוע
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                className="accent-indigo-600"
+                                                checked={editTaskDueMode === "offset"}
+                                                onChange={() => syncEditTaskDueDate("offset", editTaskOffsetDays, editTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                            />
+                                            ימים ביחס לאירוע
+                                        </label>
+                                    </div>
+                                    {editTaskDueMode === "offset" && (
+                                        <div className="flex items-center gap-2 text-xs">
+                                            <span>ימים מהאירוע:</span>
+                                            <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                className="w-24 p-2 border rounded-lg text-sm"
+                                                value={editTaskOffsetDays}
+                                                onChange={(e) => {
+                                                    const raw = e.target.value;
+                                                    setEditTaskOffsetDays(raw);
+                                                    const parsed = parseOffset(raw);
+                                                    if (parsed === null) return;
+                                                    syncEditTaskDueDate("offset", raw, editTaskTime || extractTimeString(getEventStartDate() || new Date()));
+                                                }}
+                                            />
+                                            <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-2 text-xs">
+                                        <span>שעה:</span>
+                                        <input
+                                            type="time"
+                                            className="p-2 border rounded-lg text-sm"
+                                            value={editTaskTime}
+                                            onChange={(e) => syncEditTaskDueDate(editTaskDueMode, editTaskOffsetDays, e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+                                        />
+                                    </div>
+                                    <div className="text-xs text-gray-600">
+                                        {editingTask.dueDate
+                                            ? `המשימה מתוזמנת ל-${new Date(editingTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
+                                            : "לא נקבע מועד למשימה"}
+                                        {!getEventStartDate() && (
+                                            <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                             <div>
@@ -2453,131 +3047,86 @@ export default function EventDetailsPage() {
                         )}
                     </div>
                 </div>
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                    <button
-                        onClick={copyInviteLink}
-                                className={`p-2 rounded-full transition vinyl-shadow text-white ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"}`}
-                                title={copied ? "הקישור הועתק!" : "שיתוף דף ניהול האירוע"}
-                            >
-                                {copied ? <Check size={20} /> : <Share2 size={20} />}
-                            </button>
-                            <button
-                                onClick={() => setIsEditEventOpen(true)}
-                                className="p-2 rounded-full border border-indigo-100 text-indigo-700 hover:bg-indigo-50 transition"
-                                title="ערוך פרטי אירוע"
-                            >
-                                <Edit2 size={18} />
-                            </button>
-                            {isOwner && (
-                                <button
-                                    onClick={confirmDeleteEvent}
-                                    className="p-2 rounded-full transition hover:bg-red-100"
-                                    style={{ color: 'var(--patifon-red)', background: '#fee', border: '1px solid var(--patifon-red)' }}
-                                    title="מחק אירוע"
-                                >
-                                    <Trash2 size={18} />
-                                </button>
-                            )}
-                        </div>
-                    </div>
                 </div>
-
-                <div className="flex flex-col gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100 md:w-auto md:self-start md:items-start">
-                    <div className="space-y-3 w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
-                        {event.contactPerson?.name ? (
-                            <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
-                                        <User size={20} />
-                                    </div>
-                                    <div className="text-sm">
-                                        <p className="font-semibold text-gray-900">איש קשר: {event.contactPerson.name}</p>
-                                        <div className="text-gray-600 flex flex-col">
-                                            {event.contactPerson.phone && <span>טלפון: {event.contactPerson.phone}</span>}
-                                            {event.contactPerson.email && <span>אימייל: {event.contactPerson.email}</span>}
-                                        </div>
-                                    </div>
-                                </div>
-                                {event.contactPerson.phone && (
-                                    <button
-                                        type="button"
-                                        onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
-                                        className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
-                                        title="שליחת הודעת וואטסאפ"
-                                    >
-                                        <MessageCircle size={18} />
-                                    </button>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="p-3 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 bg-white">
-                                לא הוגדר איש קשר לאירוע.
-                            </div>
+                <div className="flex flex-col md:flex-row md:items-start gap-4 shrink-0">
+                    <div className="flex md:flex-col gap-2 md:gap-3">
+                        <button
+                            onClick={copyInviteLink}
+                            className={`w-11 h-11 rounded-full transition vinyl-shadow text-white flex items-center justify-center ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"}`}
+                            title={copied ? "הקישור הועתק!" : "שיתוף דף ניהול האירוע"}
+                        >
+                            {copied ? <Check size={20} /> : <Share2 size={20} />}
+                        </button>
+                        <button
+                            onClick={handleAddEventToCalendar}
+                            className="w-11 h-11 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition flex items-center justify-center"
+                            title="הוסף ליומן והזמן את הצוות"
+                        >
+                            <Calendar size={18} />
+                        </button>
+                        <button
+                            onClick={() => setIsEditEventOpen(true)}
+                            className="w-11 h-11 rounded-full border border-indigo-100 text-indigo-700 hover:bg-indigo-50 transition flex items-center justify-center"
+                            title="ערוך פרטי אירוע"
+                        >
+                            <Edit2 size={18} />
+                        </button>
+                        {isOwner && (
+                            <button
+                                onClick={confirmDeleteEvent}
+                                className="w-11 h-11 rounded-full transition hover:bg-red-100 flex items-center justify-center"
+                                style={{ color: 'var(--patifon-red)', background: '#fee', border: '1px solid var(--patifon-red)' }}
+                                title="מחק אירוע"
+                            >
+                                <Trash2 size={18} />
+                            </button>
                         )}
                     </div>
-                    <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
-                        <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setShowAdvancedActions(!showAdvancedActions)}
-                                className="flex-1 flex items-center justify-between text-sm font-semibold text-gray-800 px-2 py-1 rounded-md hover:bg-gray-50"
-                            >
-                                <span>פעולות מתקדמות</span>
-                                <ChevronDown
-                                    size={18}
-                                    className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`}
-                                />
-                            </button>
-                            <button
-                                onClick={() => router.push(`/events/${id}/files`)}
-                                className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                                title="מעבר למאגר הקבצים של האירוע"
-                            >
-                                <Paperclip size={14} />
-                                קבצים מצורפים
-                            </button>
-                            {event.needsVolunteers && (
-                                <button
-                                    onClick={() => {
-                                        setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
-                                        setShowVolunteerModal(true);
-                                    }}
-                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                    style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                                    title="הזמנת מתנדבים לאירוע"
-                                >
-                                    <Handshake size={14} />
-                                    הזמנת מתנדבים
-                                </button>
+                    <div className="flex flex-col gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100 md:w-auto md:self-start md:items-start">
+                        <div className="space-y-3 w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
+                            {event.contactPerson?.name ? (
+                                <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
+                                            <User size={20} />
+                                        </div>
+                                        <div className="text-sm min-w-0">
+                                            <p className="font-semibold text-gray-900 truncate">איש קשר: {event.contactPerson.name}</p>
+                                            <div className="text-gray-600 flex flex-col gap-0.5">
+                                                {event.contactPerson.phone && <span className="flex items-center gap-1 truncate">טלפון: {event.contactPerson.phone}</span>}
+                                                {event.contactPerson.email && <span className="truncate">אימייל: {event.contactPerson.email}</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {event.contactPerson.phone && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
+                                            className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
+                                            title="שליחת הודעת וואטסאפ"
+                                        >
+                                            <MessageCircle size={18} />
+                                        </button>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="p-3 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 bg-white">
+                                    לא הוגדר איש קשר לאירוע.
+                                </div>
                             )}
                         </div>
-                        {showAdvancedActions && (
-                            <div className="flex flex-wrap items-center gap-2 mt-3">
+                        <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
+                            <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => router.push(`/events/${id}/registrants`)}
-                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold text-white text-center flex items-center gap-1"
-                                    style={{ background: 'var(--patifon-burgundy)' }}
+                                    type="button"
+                                    onClick={() => setShowAdvancedActions(!showAdvancedActions)}
+                                    className="flex-1 flex items-center justify-between text-sm font-semibold text-gray-800 px-2 py-1 rounded-md hover:bg-gray-50"
                                 >
-                                    <Users size={16} />
-                                    נרשמים
-                                </button>
-                                <button
-                                    onClick={copyRegisterLink}
-                                    className={`px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center justify-center gap-1 border-2 ${copiedRegister ? "bg-green-600 text-white border-green-600" : ""}`}
-                                    style={!copiedRegister ? { borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' } : undefined}
-                                    title="העתק קישור לטופס רישום"
-                                >
-                                    {copiedRegister ? <Check size={14} /> : <List size={14} />}
-                                    {copiedRegister ? "קישור הועתק" : "העתק קישור הרשמה"}
-                                </button>
-                                <button
-                                    onClick={handleOpenPostModal}
-                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                    style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                                >
-                                    <Sparkles size={14} />
-                                    מלל לפוסט
+                                    <span>פעולות מתקדמות</span>
+                                    <ChevronDown
+                                        size={18}
+                                        className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`}
+                                    />
                                 </button>
                                 <button
                                     onClick={() => router.push(`/events/${id}/files`)}
@@ -2586,11 +3135,73 @@ export default function EventDetailsPage() {
                                     title="מעבר למאגר הקבצים של האירוע"
                                 >
                                     <Paperclip size={14} />
-                                    קבצים מצורפים לאירוע
+                                    קבצים מצורפים
                                 </button>
+                                <button
+                                    onClick={handleOpenContentModal}
+                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                    style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                    title="תוכן ומדיה - פלייר, מלל ותיוגים"
+                                >
+                                    <Sparkles size={14} />
+                                    תוכן ומדיה
+                                </button>
+                                {event.needsVolunteers && (
+                                    <button
+                                        onClick={() => {
+                                            setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
+                                            setShowVolunteerModal(true);
+                                        }}
+                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                        style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                        title="הזמנת מתנדבים לאירוע"
+                                    >
+                                        <Handshake size={14} />
+                                        הזמנת מתנדבים
+                                    </button>
+                                )}
                             </div>
-                        )}
+                            {showAdvancedActions && (
+                                <div className="flex flex-wrap items-center gap-2 mt-3">
+                                    <button
+                                        onClick={() => router.push(`/events/${id}/registrants`)}
+                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold text-white text-center flex items-center gap-1"
+                                        style={{ background: 'var(--patifon-burgundy)' }}
+                                    >
+                                        <Users size={16} />
+                                        נרשמים
+                                    </button>
+                                    <button
+                                        onClick={copyRegisterLink}
+                                        className={`px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center justify-center gap-1 border-2 ${copiedRegister ? "bg-green-600 text-white border-green-600" : ""}`}
+                                        style={!copiedRegister ? { borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' } : undefined}
+                                        title="העתק קישור לטופס רישום"
+                                    >
+                                        {copiedRegister ? <Check size={14} /> : <List size={14} />}
+                                        {copiedRegister ? "קישור הועתק" : "העתק קישור הרשמה"}
+                                    </button>
+                                    <button
+                                        onClick={handleOpenPostModal}
+                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                        style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                    >
+                                        <Sparkles size={14} />
+                                        מלל לפוסט
+                                    </button>
+                                    <button
+                                        onClick={() => router.push(`/events/${id}/files`)}
+                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                        style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                        title="מעבר למאגר הקבצים של האירוע"
+                                    >
+                                        <Paperclip size={14} />
+                                        קבצים מצורפים לאירוע
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
+                </div>
                 </div>
             </header>
 
@@ -2832,6 +3443,14 @@ export default function EventDetailsPage() {
                                 משימות חוזרות
                             </button>
                             <button
+                                onClick={() => setShowSpecialModal(true)}
+                                className="bg-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:opacity-80 transition text-xs md:text-sm font-medium vinyl-shadow"
+                                style={{ border: '2px solid var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                            >
+                                <Sparkles size={16} />
+                                משימות מיוחדות
+                            </button>
+                            <button
                                 onClick={() => {
                                     const next = !showNewTask;
                                     setShowNewTask(next);
@@ -2898,37 +3517,62 @@ export default function EventDetailsPage() {
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <p className="text-xs font-semibold text-gray-600">תאריך ושעה</p>
-                                        <input
-                                            ref={dueDateInputRef}
-                                            type="datetime-local"
-                                            className="hidden"
-                                            value={newTask.dueDate}
-                                            onChange={e => setNewTask({ ...newTask, dueDate: e.target.value })}
-                                            step={900}
-                                        />
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => dueDateInputRef.current?.showPicker ? dueDateInputRef.current.showPicker() : dueDateInputRef.current?.click()}
-                                                className="flex flex-col items-center justify-center gap-2 border-2 border-indigo-200 text-indigo-700 rounded-xl py-3 hover:bg-indigo-50 transition"
-                                            >
-                                                <Calendar size={28} />
-                                                <span className="text-xs font-semibold">בחר תאריך</span>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => dueDateInputRef.current?.showPicker ? dueDateInputRef.current.showPicker() : dueDateInputRef.current?.click()}
-                                                className="flex flex-col items-center justify-center gap-2 border-2 border-orange-200 text-orange-700 rounded-xl py-3 hover:bg-orange-50 transition"
-                                            >
-                                                <Clock size={28} />
-                                                <span className="text-xs font-semibold">בחר שעה</span>
-                                            </button>
+                                        <p className="text-xs font-semibold text-gray-600">מועד המשימה</p>
+                                        <div className="flex flex-wrap gap-3 text-xs">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    className="accent-indigo-600"
+                                                    checked={newTaskDueMode === "event_day"}
+                                                    onChange={() => syncNewTaskDueDate("event_day", "0", newTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                                />
+                                                ביום האירוע
+                                            </label>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    className="accent-indigo-600"
+                                                    checked={newTaskDueMode === "offset"}
+                                                    onChange={() => syncNewTaskDueDate("offset", newTaskOffsetDays, newTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                                />
+                                                ימים ביחס לאירוע
+                                            </label>
+                                        </div>
+                                        {newTaskDueMode === "offset" && (
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <span>ימים מהאירוע:</span>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    className="w-24 p-2 border rounded-lg text-sm"
+                                                    value={newTaskOffsetDays}
+                                                    onChange={(e) => {
+                                                        const raw = e.target.value;
+                                                        setNewTaskOffsetDays(raw);
+                                                        const parsed = parseOffset(raw);
+                                                        if (parsed === null) return;
+                                                        syncNewTaskDueDate("offset", raw, newTaskTime || extractTimeString(getEventStartDate() || new Date()));
+                                                    }}
+                                                />
+                                                <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                            </div>
+                                        )}
+                                        <div className="flex items-center gap-2 text-xs">
+                                            <span>שעה:</span>
+                                            <input
+                                                type="time"
+                                                className="p-2 border rounded-lg text-sm"
+                                                value={newTaskTime}
+                                                onChange={(e) => syncNewTaskDueDate(newTaskDueMode, newTaskOffsetDays, e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+                                            />
                                         </div>
                                         <div className="text-xs text-gray-600">
                                             {newTask.dueDate
-                                                ? new Date(newTask.dueDate).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })
-                                                : "טרם נבחר תאריך/שעה"}
+                                                ? `המשימה מתוזמנת ל-${new Date(newTask.dueDate).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}`
+                                                : "טרם נבחר מועד למשימה"}
+                                            {!getEventStartDate() && (
+                                                <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -3083,8 +3727,9 @@ export default function EventDetailsPage() {
                                                     eventId={id}
                                                     eventTitle={event?.title}
                                                     scope={task.scope}
+                                                    specialType={(task as any).specialType}
                                                     createdByName={task.createdByName}
-                                                    onEdit={() => { setEditingTask(task); setSaveEditTaskToLibrary(false); }}
+                                                    onEdit={() => { startEditingTask(task); }}
                                                     onDelete={() => confirmDeleteTask(task.id)}
                                                     onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
                                                     onChat={() => setChatTask(task)}
@@ -3128,8 +3773,9 @@ export default function EventDetailsPage() {
                                                     eventId={id}
                                                     eventTitle={event?.title}
                                                     scope={task.scope}
+                                                    specialType={(task as any).specialType}
                                                     createdByName={task.createdByName}
-                                                    onEdit={() => { setEditingTask(task); setSaveEditTaskToLibrary(false); }}
+                                                    onEdit={() => { startEditingTask(task); }}
                                                     onDelete={() => confirmDeleteTask(task.id)}
                                                     onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
                                                     onChat={() => setChatTask(task)}
@@ -3692,6 +4338,221 @@ export default function EventDetailsPage() {
             )}
 
             {/* Status Edit Modal */}
+            {showSpecialModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-xl w-full p-6 space-y-4">
+                        <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <Sparkles size={20} className="text-indigo-600" />
+                                <h3 className="text-lg font-bold">משימות מיוחדות</h3>
+                            </div>
+                            <button onClick={() => setShowSpecialModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800">
+                            יוצרת משימת "שיווק והפצה בקבוצות" עם המלל והפלייר הרשמי, כדי שהמתנדב יפרסם ב-5 קבוצות וואטסאפ (30+ אנשים) ויעלה צילום מסך כהוכחה.
+                        </div>
+                        <div className="space-y-2 text-sm">
+                            <p className="font-semibold text-gray-800">מה נשלח במשימה:</p>
+                            <ul className="list-disc list-inside text-gray-700 space-y-1">
+                                <li>מלל רשמי לפוסט</li>
+                                <li>קישור לפלייר (אם קיים)</li>
+                                <li>הנחיה לפרסם ב-5 קבוצות (30+)</li>
+                                <li>דרישה להעלות צילומי מסך כהוכחה</li>
+                            </ul>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowSpecialModal(false)}
+                                className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
+                            >
+                                ביטול
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCreateSpecialMarketingTask}
+                                disabled={creatingSpecialTask}
+                                className={`px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                            >
+                                {creatingSpecialTask ? "יוצר..." : "צור משימה מיוחדת"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Status Edit Modal */}
+            {showContentModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-bold">תוכן ומדיה לאירוע</h3>
+                            <button onClick={() => setShowContentModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">מלל רשמי לפוסט</label>
+                                <textarea
+                                    rows={5}
+                                    className="w-full border rounded-lg p-3 text-sm"
+                                    value={officialPostText}
+                                    onChange={(e) => setOfficialPostText(e.target.value)}
+                                    placeholder="הקלד את הטקסט הרשמי לפרסום"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700">תיוגים לאינסטגרם (שם משתמש אחד בכל פעם, אנטר להוספה)</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        className="flex-1 border rounded-lg p-2 text-sm"
+                                        value={instaTagInput}
+                                        placeholder="לדוגמה: user_name"
+                                        onChange={(e) => setInstaTagInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                addInstagramTag(instaTagInput);
+                                            }
+                                        }}
+                                        onBlur={() => addInstagramTag(instaTagInput)}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => addInstagramTag(instaTagInput)}
+                                        className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                                        style={{ background: 'var(--patifon-orange)' }}
+                                    >
+                                        הוסף
+                                    </button>
+                                </div>
+                                {officialInstaTagsList.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {officialInstaTagsList.map(tag => (
+                                            <span key={tag} className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1 text-xs text-indigo-800">
+                                                @{tag}
+                                                <button type="button" onClick={() => removeInstagramTag(tag)} className="text-indigo-500 hover:text-indigo-700">×</button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700">פלייר רשמי</label>
+                                {officialFlyerUrl && (
+                                    <div className="flex items-center gap-2 text-sm">
+                                        <a href={officialFlyerUrl} target="_blank" className="text-indigo-600 underline" rel="noreferrer">פתח פלייר נוכחי</a>
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                if (!db) return;
+                                                const confirmDelete = window.confirm("למחוק את הפלייר הנוכחי?");
+                                                if (!confirmDelete) return;
+                                                try {
+                                                    await updateDoc(doc(db, "events", id), { officialFlyerUrl: "" });
+                                                    setOfficialFlyerUrl("");
+                                                    setEvent(prev => prev ? { ...prev, officialFlyerUrl: "" } : prev);
+                                                } catch (err) {
+                                                    console.error("שגיאה במחיקת הפלייר", err);
+                                                    alert("לא הצלחנו למחוק את הפלייר");
+                                                }
+                                            }}
+                                            className="px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                                        >
+                                            מחק
+                                        </button>
+                                    </div>
+                                )}
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <input
+                                        ref={contentFlyerInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(e) => setOfficialFlyerFile(e.target.files?.[0] || null)}
+                                        className="hidden"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => contentFlyerInputRef.current?.click()}
+                                        className="px-3 py-2 rounded-lg text-sm font-semibold border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                                    >
+                                        בחר פלייר מהמחשב
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleUploadOfficialFlyer}
+                                        disabled={officialFlyerUploading}
+                                        className={`px-3 py-2 rounded-lg text-sm font-semibold text-white ${officialFlyerUploading ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                                    >
+                                        {officialFlyerUploading ? "מעלה..." : "העלה פלייר"}
+                                    </button>
+                                </div>
+                                {officialFlyerFile && <p className="text-xs text-gray-600">נבחר: {officialFlyerFile.name}</p>}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowFlyerPicker(prev => !prev)}
+                                    className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                >
+                                    בחר פלייר ממאגר האירוע
+                                </button>
+                                {showFlyerPicker && (
+                                    <div className="mt-3 border border-gray-200 rounded-lg p-3 max-h-64 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                        {eventFiles.length === 0 ? (
+                                            <p className="text-sm text-gray-500">אין קבצים במאגר האירוע.</p>
+                                        ) : (
+                                            eventFiles.map((file) => (
+                                                <button
+                                                    key={file.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (file.url) {
+                                                            setOfficialFlyerUrl(file.url);
+                                                            setShowFlyerPicker(false);
+                                                        }
+                                                    }}
+                                                    className="border border-gray-200 rounded-lg overflow-hidden bg-white hover:shadow-md transition text-left"
+                                                >
+                                                    <div className="h-20 bg-gray-50 flex items-center justify-center">
+                                                        {file.url ? (
+                                                            <img src={file.url} alt={file.name} className="w-full h-full object-cover" />
+                                                        ) : (
+                                                            <span className="text-xs text-gray-400">אין תצוגה</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="px-2 py-2 text-xs font-semibold text-gray-800 truncate">{file.name || "קובץ"}</div>
+                                                </button>
+                                            ))
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowContentModal(false)}
+                                className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
+                            >
+                                ביטול
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveContentAndMedia}
+                                className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                                style={{ background: 'var(--patifon-burgundy)' }}
+                            >
+                                שמור
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Status Edit Modal */}
             {showPostModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
@@ -3799,24 +4660,66 @@ export default function EventDetailsPage() {
                             if (!db || !editingDateTask) return;
                             try {
                                 const taskRef = doc(db, "events", id, "tasks", editingDateTask.id);
-                                await updateDoc(taskRef, {
-                                    dueDate: editingDateTask.dueDate,
-                                });
+                                const dueVal = computeDueDateFromMode(dateModalMode, dateModalOffset, dateModalTime || extractTimeString(getEventStartDate() || new Date()));
+                                await updateDoc(taskRef, { dueDate: dueVal });
                                 setEditingDateTask(null);
                             } catch (err) {
                                 console.error("Error updating date:", err);
                                 alert("שגיאה בעדכון התאריך");
                             }
                         }} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
-                                <input
-                                    type="date"
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    value={editingDateTask.dueDate}
-                                    onChange={e => setEditingDateTask({ ...editingDateTask, dueDate: e.target.value })}
-                                    autoFocus
-                                />
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">מועד המשימה</label>
+                                <div className="flex flex-wrap gap-3 text-xs">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            className="accent-indigo-600"
+                                            checked={dateModalMode === "event_day"}
+                                            onChange={() => { setDateModalMode("event_day"); setDateModalOffset(0); }}
+                                        />
+                                        ביום האירוע
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            className="accent-indigo-600"
+                                            checked={dateModalMode === "offset"}
+                                            onChange={() => setDateModalMode("offset")}
+                                        />
+                                        ימים ביחס לאירוע
+                                    </label>
+                                </div>
+                                    {dateModalMode === "offset" && (
+                                        <div className="flex items-center gap-2 text-xs">
+                                            <span>ימים מהאירוע:</span>
+                                            <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                className="w-24 p-2 border rounded-lg text-sm"
+                                                value={dateModalOffset}
+                                                onChange={(e) => setDateModalOffset(e.target.value)}
+                                            />
+                                            <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                        </div>
+                                    )}
+                                <div className="flex items-center gap-2 text-xs">
+                                    <span>שעה:</span>
+                                    <input
+        type="time"
+        className="p-2 border rounded-lg text-sm"
+        value={dateModalTime}
+        onChange={(e) => setDateModalTime(e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+    />
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                    {editingDateTask.dueDate
+                                        ? `המשימה מתוזמנת ל-${new Date(editingDateTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
+                                        : "לא נקבע מועד למשימה"}
+                                    {!getEventStartDate() && (
+                                        <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
+                                    )}
+                                </div>
                             </div>
                             <div className="flex justify-end gap-3 pt-4">
                                 <button type="button" onClick={() => setEditingDateTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
@@ -3825,7 +4728,7 @@ export default function EventDetailsPage() {
                         </form>
                     </div>
                 </div>
-            )}
+        )}
         </div>
     );
 }

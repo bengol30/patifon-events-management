@@ -30,6 +30,7 @@ interface TaskProps {
     createdByName?: string;
     onOpen?: () => void;
     scope?: "event" | "project";
+    specialType?: string;
 }
 
 export default function TaskCard({
@@ -59,6 +60,7 @@ export default function TaskCard({
     createdByName,
     onOpen,
     scope,
+    specialType,
 }: TaskProps) {
     const router = useRouter();
 
@@ -89,7 +91,7 @@ export default function TaskCard({
             onEditStatus({
                 id, title, description, assignee, status, dueDate, priority,
                 isSelected, onSelect, onDelete, onEdit, onStatusChange,
-                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate, scope
+                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate, scope, specialType
             });
         }
     };
@@ -100,7 +102,7 @@ export default function TaskCard({
             onEditDate({
                 id, title, description, assignee, status, dueDate, priority,
                 isSelected, onSelect, onDelete, onEdit, onStatusChange,
-                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate, scope
+                onChat, hasUnreadMessages, currentStatus, nextStep, eventId, eventTitle, onEditStatus, onEditDate, scope, specialType
             });
         }
     };
@@ -130,104 +132,92 @@ export default function TaskCard({
             onKeyDown={handleKeyActivate}
             role="button"
             tabIndex={0}
-            className={`bg-white p-4 rounded-lg shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative`}
+            className={`bg-white p-4 rounded-xl shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative overflow-hidden`}
         >
-                <div className="flex items-center justify-between w-full mb-2">
-                <div className="flex items-center gap-3 flex-1">
-                    <button
-                        onClick={handleStatusClick}
-                        className="hover:bg-gray-50 p-1 rounded-full transition z-10"
-                        title="שנה סטטוס"
-                    >
-                        {getStatusIcon()}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                        <h3 className={`font-medium text-gray-900 truncate hover:text-indigo-600 transition ${status === 'DONE' ? 'line-through text-gray-400' : ''}`} title="צפייה בפרטי המשימה">
-                            {title}
-                        </h3>
-                        <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2 text-sm text-gray-500 flex-wrap">
-                                <span>אחראי:</span>
-                                {(assignees && assignees.length > 0 ? assignees : [{ name: assignee }]).map((a, idx) => (
-                                    <span key={idx} className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs border border-gray-200">
-                                        {a.name || 'לא משויך'}
-                                    </span>
-                                ))}
-                            </div>
-                            {previewImage && (
-                                <div className="relative w-20 h-14 rounded-lg overflow-hidden border border-gray-200">
-                                    <img src={previewImage} alt={title} className="w-full h-full object-cover" />
-                                </div>
-                            )}
-                            {description && (
-                                <span className="text-sm text-gray-600 line-clamp-2">
-                                    {description}
-                                </span>
-                            )}
-                            {eventId && eventTitle && (
-                                <span
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        router.push(`/events/${eventId}`);
-                                    }}
-                                    className="text-xs text-indigo-600 font-medium hover:underline w-fit cursor-pointer z-10"
-                                >
-                                    📅 {eventTitle}
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-3 text-sm text-gray-500">
-                    <div
-                        className="flex items-center gap-1 hover:bg-gray-100 p-1 rounded transition z-10 text-xs sm:text-sm"
-                        onClick={handleDateClick}
-                        title="לחץ לשינוי תאריך"
-                    >
-                        <Clock size={14} />
-                        <span>{dueDate ? new Date(dueDate).toLocaleDateString('he-IL') : '-'}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1 z-10">
-                        {onManageAssignees && (
-                            <button
-                                onClick={(e) => { e.stopPropagation(); onManageAssignees(); }}
-                                className="text-gray-400 hover:text-indigo-600 p-1"
-                                title="נהל אחראים"
-                            >
-                                <UserPlus size={16} />
-                            </button>
-                        )}
-                        {onChat && (
-                            <button
-                                onClick={(e) => { e.stopPropagation(); onChat(); }}
-                                className="text-gray-400 hover:text-purple-500 p-1 relative"
-                                title="צ'אט הודעות"
-                            >
-                                <MessageCircle size={16} />
-                                {hasUnreadMessages && (
-                                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-                                )}
-                            </button>
-                        )}
-                        {/* Edit button removed as requested */}
-                        {onDelete && (
-                            <button
-                                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                                className="text-gray-400 hover:text-red-500 p-1"
-                                title="מחק משימה"
-                            >
-                                <Trash2 size={16} />
-                            </button>
-                        )}
-                    </div>
+            <div className="flex items-start justify-between gap-3 w-full mb-3">
+                <button
+                    onClick={handleStatusClick}
+                    className="hover:bg-gray-50 p-1.5 rounded-full transition z-10 shrink-0 border border-gray-200"
+                    title="שנה סטטוס"
+                >
+                    {getStatusIcon()}
+                </button>
+                <div className="flex-1 min-w-0 text-right">
+                    <h3 className={`font-semibold text-gray-900 leading-tight break-words ${status === 'DONE' ? 'line-through text-gray-400' : ''}`} title="צפייה בפרטי המשימה">
+                        {title}
+                    </h3>
+                    {description && (
+                        <p className="text-sm text-gray-600 mt-1 line-clamp-2">{description}</p>
+                    )}
+                    {eventId && eventTitle && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/events/${eventId}`);
+                            }}
+                            className="text-xs text-indigo-600 font-medium hover:underline mt-1"
+                        >
+                            📅 {eventTitle}
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {/* Current Status and Next Step Display */}
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+                <div className="flex items-center gap-2 flex-wrap max-w-full">
+                    <span className="text-xs text-gray-500">אחראי:</span>
+                    {(assignees && assignees.length > 0 ? assignees : [{ name: assignee }]).map((a, idx) => (
+                        <span key={idx} className="px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs border border-gray-200">
+                            {a.name || 'לא משויך'}
+                        </span>
+                    ))}
+                </div>
+                <div
+                    className="flex items-center gap-1 hover:bg-gray-50 px-2 py-1 rounded-lg transition z-10 text-xs sm:text-sm border border-gray-100"
+                    onClick={handleDateClick}
+                    title="לחץ לשינוי תאריך"
+                >
+                    <Clock size={14} />
+                    <span className="font-medium">{dueDate ? new Date(dueDate).toLocaleDateString('he-IL') : '-'}</span>
+                </div>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 justify-end text-sm text-gray-500">
+                {onManageAssignees && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onManageAssignees(); }}
+                        className="text-gray-400 hover:text-indigo-600 p-2 rounded-full border border-transparent hover:border-indigo-100 transition"
+                        title="נהל אחראים"
+                    >
+                        <UserPlus size={16} />
+                    </button>
+                )}
+                {onChat && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onChat(); }}
+                        className="text-gray-400 hover:text-purple-500 p-2 rounded-full border border-transparent hover:border-purple-100 transition relative"
+                        title="צ'אט הודעות"
+                    >
+                        <MessageCircle size={16} />
+                        {hasUnreadMessages && (
+                            <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                        )}
+                    </button>
+                )}
+                {onDelete && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                        className="text-gray-400 hover:text-red-500 p-2 rounded-full border border-transparent hover:border-red-100 transition"
+                        title="מחק משימה"
+                    >
+                        <Trash2 size={16} />
+                    </button>
+                )}
+            </div>
+
             {(currentStatus || nextStep) && (
-                <div className="mt-2 flex flex-wrap gap-2 w-full pr-12 relative z-10">
+                <div className="mt-3 flex flex-wrap gap-2 w-full relative z-10">
                     {currentStatus && (
                         <div
                             onClick={handleEditStatusClick}
@@ -248,7 +238,7 @@ export default function TaskCard({
                         >
                             <div className="flex items-start gap-2">
                                 <span className="font-bold text-xs shrink-0 text-white">➡️ הצעד הבא:</span>
-                                <span className="text-xs font-medium text-white">{nextStep}</span>
+                                <span className="text-xs font-medium text-white break-words">{nextStep}</span>
                             </div>
                         </div>
                     )}

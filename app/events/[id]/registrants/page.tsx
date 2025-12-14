@@ -26,14 +26,40 @@ export default function RegistrantsPage() {
     useEffect(() => {
         if (!db || !id) return;
 
-        const unsubAttendees = onSnapshot(
-            query(collection(db, "events", id, "attendees"), orderBy("createdAt", "desc")),
+        // Registrants via public register flow (primary)
+        const unsubRegistrants = onSnapshot(
+            query(collection(db, "events", id, "registrants"), orderBy("createdAt", "desc")),
             (snap) => {
-                const data: Attendee[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Attendee));
-                setAttendees(data);
+                const regs: Attendee[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Attendee));
+                setAttendees(regs);
             }
         );
 
+        // Legacy attendees collection (fallback/merge)
+        const unsubAttendees = onSnapshot(
+            query(collection(db, "events", id, "attendees"), orderBy("createdAt", "desc")),
+            (snap) => {
+                const att: Attendee[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Attendee));
+                setAttendees(prev => {
+                    const seen = new Set<string>();
+                    const merged: Attendee[] = [];
+                    [...att, ...prev].forEach(a => {
+                        const key = a.id || `${a.name}-${a.phone}-${a.email}`;
+                        if (seen.has(key)) return;
+                        seen.add(key);
+                        merged.push(a);
+                    });
+                    merged.sort((a, b) => {
+                        const ta = a.createdAt?.seconds ? a.createdAt.seconds : 0;
+                        const tb = b.createdAt?.seconds ? b.createdAt.seconds : 0;
+                        return tb - ta;
+                    });
+                    return merged;
+                });
+            }
+        );
+
+        // Event meta
         const unsubEvent = onSnapshot(doc(db, "events", id), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data() as any;
@@ -42,6 +68,7 @@ export default function RegistrantsPage() {
         });
 
         return () => {
+            unsubRegistrants();
             unsubAttendees();
             unsubEvent();
         };

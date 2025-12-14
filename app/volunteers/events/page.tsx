@@ -43,6 +43,7 @@ interface CompletedTaskItem {
 }
 
 const ADMIN_EMAIL = "bengo0469@gmail.com";
+type VolunteerSession = { volunteerId: string; name: string; email: string; phone?: string };
 
 interface EventData {
     id: string;
@@ -73,7 +74,7 @@ export default function VolunteerEventsPage() {
     const [authPassword, setAuthPassword] = useState("");
     const [authError, setAuthError] = useState("");
     const [authing, setAuthing] = useState(false);
-    const [sessionMap, setSessionMap] = useState<Record<string, { volunteerId: string; name: string; email: string }>>({});
+    const [sessionMap, setSessionMap] = useState<Record<string, VolunteerSession>>({});
     const [selectedTasksByEvent, setSelectedTasksByEvent] = useState<Record<string, Set<string>>>(() => ({}));
     const [authModalVisible, setAuthModalVisible] = useState(false);
     const [isAuthed, setIsAuthed] = useState(false);
@@ -123,7 +124,8 @@ export default function VolunteerEventsPage() {
         const emailRaw = (first?.email || authEmail || "").trim();
         const email = emailRaw.toLowerCase();
         const name = first?.name || (emailRaw ? emailRaw.split("@")[0] : "מתנדב/ת");
-        return { email, name };
+        const phone = first?.phone || "";
+        return { email, name, phone };
     }, [sessionMap, authEmail]);
 
     const eventMetaMap = useMemo(() => {
@@ -411,6 +413,14 @@ const totalAvailableVolunteerTasks = useMemo(() => {
 
     const MIN_SEND_INTERVAL_MS = 5000;
     const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const formatPhoneForMessage = (phone: string) => {
+        const digits = (phone || "").replace(/\D/g, "");
+        if (!digits) return phone.trim();
+        if (digits.startsWith("972") && digits.length > 3) {
+            return `0${digits.slice(3)}`;
+        }
+        return digits;
+    };
     const ensureGlobalRateLimit = async () => {
         if (!db) return;
         const ref = doc(db!, "rate_limits", "whatsapp_mentions");
@@ -472,16 +482,73 @@ const totalAvailableVolunteerTasks = useMemo(() => {
         return "";
     };
 
-    const notifyOwnerTaskCompletion = async (opts: { ownerId?: string; ownerEmail?: string; taskTitle: string; volunteerName: string; eventId: string }) => {
+    const resolveVolunteerPhone = async (eventId?: string, scope: "event" | "project" | "manual" = "event") => {
+        const fromSession = eventId ? sessionMap[eventId]?.phone : "";
+        if (fromSession) return fromSession;
+        if (sessionMap["general"]?.phone) return sessionMap["general"]?.phone || "";
+        if (!db || !sessionIdentity.email) return "";
+
+        // Try scoped volunteer collection
+        if (eventId && (scope === "event" || scope === "project")) {
+            try {
+                const volunteersCol = scope === "project"
+                    ? collection(db, "projects", eventId, "volunteers")
+                    : collection(db, "events", eventId, "volunteers");
+                const snap = await getDocs(query(volunteersCol, where("email", "==", sessionIdentity.email)));
+                const data = snap.docs[0]?.data() as any;
+                const phone = data?.phone || data?.phoneNormalized;
+                if (phone) return phone;
+            } catch (err) {
+                console.warn("Volunteer phone lookup failed", err);
+            }
+        }
+
+        // General volunteer registry
+        try {
+            const generalSnap = await getDocs(query(collection(db, "general_volunteers"), where("email", "==", sessionIdentity.email)));
+            const data = generalSnap.docs[0]?.data() as any;
+            const phone = data?.phone || data?.phoneNormalized;
+            if (phone) return phone;
+        } catch (err) {
+            console.warn("General volunteer phone lookup failed", err);
+        }
+
+        // Fallback to user record
+        try {
+            const usersSnap = await getDocs(query(collection(db, "users"), where("email", "==", sessionIdentity.email)));
+            const data = usersSnap.docs[0]?.data() as any;
+            const phone = data?.phone || data?.phoneNumber;
+            if (phone) return phone;
+        } catch {
+            /* ignore */
+        }
+
+        return "";
+    };
+
+    const notifyOwnerTaskCompletion = async (opts: {
+        ownerId?: string;
+        ownerEmail?: string;
+        taskTitle: string;
+        volunteerName: string;
+        eventId: string;
+        eventTitle?: string;
+        volunteerPhone?: string;
+        volunteerEmail?: string;
+        scope?: "event" | "project" | "manual";
+    }) => {
         const cfg = await fetchWhatsappConfig();
         if (!cfg || !cfg.rules?.notifyOnVolunteerDone) return;
         await ensureGlobalRateLimit();
         const phone = normalizePhone(await getUserPhone(opts.ownerId, opts.ownerEmail));
         if (!phone) return;
         const origin = getPublicBaseUrl(cfg.baseUrl);
+        const volunteerPhoneDisplay = opts.volunteerPhone ? formatPhoneForMessage(opts.volunteerPhone) : "";
         const messageLines = [
             `שלום,`,
-            `${opts.volunteerName} סימן/ה שהמשימה "${opts.taskTitle}" הושלמה.`,
+            `${opts.volunteerName} סימן/ה שהמשימה "${opts.taskTitle}" הושלמה${opts.eventTitle ? ` באירוע/פרויקט "${opts.eventTitle}"` : ""}.`,
+            opts.volunteerEmail ? `אימייל מתנדב: ${opts.volunteerEmail}` : "",
+            volunteerPhoneDisplay ? `נייד מתנדב: ${volunteerPhoneDisplay}` : "",
             `יש לאשר את הביצוע באזור האישי.`,
             origin ? `קישור: ${origin}` : ""
         ].filter(Boolean);
@@ -524,6 +591,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
         }
         setManualRequestSubmitting(true);
         try {
+            const volunteerPhone = await resolveVolunteerPhone("manual", "manual");
             await addDoc(collection(db, "task_completion_requests"), {
                 taskId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 taskTitle: title,
@@ -544,7 +612,11 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                 ownerId: undefined,
                 taskTitle: title,
                 volunteerName: sessionIdentity.name,
-                eventId: "manual"
+                volunteerPhone,
+                volunteerEmail: volunteerEmail,
+                eventId: "manual",
+                eventTitle: manualRequestEvent.trim() || "הגשה ידנית",
+                scope: "manual",
             });
             alert("הבקשה נשלחה למנהל. ההתנדבות תתווסף לאחר אישור.");
             setManualRequestModalOpen(false);
@@ -578,9 +650,9 @@ const totalAvailableVolunteerTasks = useMemo(() => {
     };
 
     const performAuthWithHash = async (emailInput: string, passwordHash: string) => {
-        if (!db) return { matched: {} as Record<string, { volunteerId: string; name: string; email: string }>, matchedIds: [] as string[] };
+        if (!db) return { matched: {} as Record<string, VolunteerSession>, matchedIds: [] as string[] };
         const emailLower = emailInput.trim().toLowerCase();
-        const matched: Record<string, { volunteerId: string; name: string; email: string }> = {};
+        const matched: Record<string, VolunteerSession> = {};
         let hasGeneral = false;
 
         for (const ev of events) {
@@ -597,7 +669,12 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                     const storedHash = data.passwordHash;
                     if (storedHash && storedHash === passwordHash) {
                         const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || "מתנדב/ת";
-                        matched[ev.id] = { volunteerId: docSnap.id, name, email: emailInput.trim() };
+                        matched[ev.id] = {
+                            volunteerId: docSnap.id,
+                            name,
+                            email: emailInput.trim(),
+                            phone: data.phone || data.phoneNormalized || "",
+                        };
                         continue;
                     }
                 }
@@ -609,7 +686,12 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                     const storedHash = data.passwordHash;
                     if (storedHash && storedHash === passwordHash) {
                         const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || "מתנדב/ת";
-                        matched[ev.id] = { volunteerId: volDoc.id, name, email: emailInput.trim() };
+                        matched[ev.id] = {
+                            volunteerId: volDoc.id,
+                            name,
+                            email: emailInput.trim(),
+                            phone: data.phone || data.phoneNormalized || "",
+                        };
                         break;
                     }
                 }
@@ -627,7 +709,12 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                 const storedHash = data.passwordHash;
                 if (storedHash && storedHash === passwordHash) {
                     const name = data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim() || emailInput.trim();
-                    matched["general"] = { volunteerId: docSnap.id, name, email: emailInput.trim() };
+                    matched["general"] = {
+                        volunteerId: docSnap.id,
+                        name,
+                        email: emailInput.trim(),
+                        phone: data.phone || data.phoneNormalized || "",
+                    };
                     hasGeneral = true;
                 }
             }
@@ -914,6 +1001,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                     }
                 }
                 ownerEmail = typeof ownerEmail === "string" ? ownerEmail.toLowerCase() : "";
+                const volunteerPhone = await resolveVolunteerPhone(eventId, scope);
                 const reqRef = await addDoc(collection(db, "task_completion_requests"), {
                     taskId,
                     taskTitle: task?.title || "משימה",
@@ -936,6 +1024,10 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                         taskTitle: task?.title || "משימה",
                         volunteerName: sessionIdentity.name || sessionIdentity.email || "מתנדב/ת",
                         eventId,
+                        eventTitle: ev?.title || "",
+                        volunteerPhone,
+                        volunteerEmail: sessionIdentity.email,
+                        scope,
                     });
                 }
                 alert("הבקשה לאישור נשלחה ליוצר המשימה. המשימה תסומן כהושלמה רק לאחר אישור.");

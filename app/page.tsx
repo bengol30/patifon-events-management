@@ -2,11 +2,12 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit } from "lucide-react";
-import { db, auth } from "@/lib/firebase";
-import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc, onSnapshot } from "firebase/firestore";
+import { db, auth, storage } from "@/lib/firebase";
+import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc, onSnapshot, limit } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import TaskChat from "@/components/TaskChat";
 
 import TaskCard from "@/components/TaskCard";
@@ -98,6 +99,16 @@ interface VolunteerRecord {
   idNumber?: string;
 }
 
+interface EventRegistrant {
+  id: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  eventId: string;
+  eventTitle?: string;
+  createdAt?: any;
+}
+
 const matchAssignee = (opts: {
   taskData: any;
   userId?: string | null;
@@ -151,13 +162,28 @@ export default function Dashboard() {
   // Stats State
   const [stats, setStats] = useState({ myEvents: 0, attendees: 0, partners: 0, tasks: 0 });
   const [loadingStats, setLoadingStats] = useState(true);
-  const [activePanel, setActivePanel] = useState<"stats" | "users" | "notifications" | "volunteers" | null>("stats");
+  const [activePanel, setActivePanel] = useState<"stats" | "users" | "notifications" | "volunteers" | "registrants" | null>("stats");
   const [usersList, setUsersList] = useState<{ id: string; fullName?: string; email?: string; role?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [volunteersList, setVolunteersList] = useState<VolunteerRecord[]>([]);
   const [loadingVolunteers, setLoadingVolunteers] = useState(true);
   const [showAllVolunteers, setShowAllVolunteers] = useState(false);
+  const [registrantsList, setRegistrantsList] = useState<EventRegistrant[]>([]);
+  const [loadingRegistrants, setLoadingRegistrants] = useState(true);
+  const [registrantSearch, setRegistrantSearch] = useState("");
+  const [showRegisterEventsModal, setShowRegisterEventsModal] = useState(false);
+  const [registerEventsSelection, setRegisterEventsSelection] = useState<Set<string>>(new Set());
+  const [savingRegisterEvents, setSavingRegisterEvents] = useState(false);
+  const [registerEventsAll, setRegisterEventsAll] = useState<any[]>([]);
+  const [eventEdits, setEventEdits] = useState<Record<string, { title?: string; description?: string; location?: string; startTime?: string; hero?: string }>>({});
+  const [eventFilesMap, setEventFilesMap] = useState<Record<string, { id: string; name?: string; url?: string }[]>>({});
+  const [loadingFilesFor, setLoadingFilesFor] = useState<string | null>(null);
+  const [registerGallery, setRegisterGallery] = useState<{ id: string; name?: string; url?: string; storagePath?: string }[]>([]);
+  const [loadingRegisterGallery, setLoadingRegisterGallery] = useState(false);
+  const [uploadingRegisterGallery, setUploadingRegisterGallery] = useState(false);
+  const [deletingRegisterGalleryId, setDeletingRegisterGalleryId] = useState<string | null>(null);
+  const registerGalleryInputRef = useRef<HTMLInputElement | null>(null);
   const [volunteerSearch, setVolunteerSearch] = useState("");
   const [editingVolunteer, setEditingVolunteer] = useState<VolunteerRecord | null>(null);
   const [editVolunteerName, setEditVolunteerName] = useState("");
@@ -190,17 +216,29 @@ export default function Dashboard() {
   const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [newNote, setNewNote] = useState("");
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [editingNoteText, setEditingNoteText] = useState("");
+const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+const [editingNoteText, setEditingNoteText] = useState("");
 
-  const filteredVolunteers = useMemo(() => {
-    const query = volunteerSearch.trim().toLowerCase();
-    if (!query) return volunteersList;
-    return volunteersList.filter((vol) => {
-      const name = vol.name || "";
-      return name.toLowerCase().includes(query);
-    });
-  }, [volunteerSearch, volunteersList]);
+const filteredVolunteers = useMemo(() => {
+  const query = volunteerSearch.trim().toLowerCase();
+  if (!query) return volunteersList;
+  return volunteersList.filter((vol) => {
+    const name = vol.name || "";
+    return name.toLowerCase().includes(query);
+  });
+}, [volunteerSearch, volunteersList]);
+
+const filteredRegistrants = useMemo(() => {
+  const query = registrantSearch.trim().toLowerCase();
+  if (!query) return registrantsList;
+  return registrantsList.filter((reg) => {
+    const name = (reg.name || "").toLowerCase();
+    const email = (reg.email || "").toLowerCase();
+    const phone = (reg.phone || "").toLowerCase();
+    const eventTitle = (reg.eventTitle || "").toLowerCase();
+    return name.includes(query) || email.includes(query) || phone.includes(query) || eventTitle.includes(query);
+  });
+}, [registrantSearch, registrantsList]);
 
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
@@ -226,11 +264,65 @@ export default function Dashboard() {
     }
   }, [user, loading, router]);
 
+  useEffect(() => {
+    if (!db || !showRegisterEventsModal) return;
+    setLoadingRegisterGallery(true);
+    getDocs(query(collection(db, "register_gallery"), orderBy("createdAt", "desc"), limit(24)))
+      .then((snap) => {
+        const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        setRegisterGallery(items);
+      })
+      .catch((err) => {
+        console.error("Error loading register gallery", err);
+      })
+      .finally(() => setLoadingRegisterGallery(false));
+  }, [db, showRegisterEventsModal]);
+
   const toPartnerArray = (raw: any): string[] => {
     if (!raw) return [];
     if (Array.isArray(raw)) return raw.map(p => (p || "").toString().trim()).filter(Boolean);
     if (typeof raw === "string") return raw.split(/[,\n]/).map(p => p.trim()).filter(Boolean);
     return [];
+  };
+
+  const isHeicFile = (file?: File | null) => {
+    if (!file) return false;
+    const name = (file.name || "").toLowerCase();
+    const type = (file.type || "").toLowerCase();
+    return name.endsWith(".heic") || name.endsWith(".heif") || type === "image/heic" || type === "image/heif";
+  };
+
+  const convertHeicToJpeg = async (file: File): Promise<File | null> => {
+    try {
+      if (typeof window === "undefined") return null;
+      const heic2any = (await import("heic2any")).default;
+      const output = await heic2any({
+        blob: file,
+        toType: "image/jpeg",
+        quality: 0.9,
+      });
+      const blob = Array.isArray(output) ? output[0] : output;
+      const base = file.name.replace(/\.[^/.]+$/, "") || "image";
+      return new File([blob], `${base}.jpg`, { type: "image/jpeg" });
+    } catch (err) {
+      console.warn("Failed to convert HEIC; will upload original", err);
+      return null;
+    }
+  };
+
+  const convertHeicServerSide = async (file: File): Promise<File | null> => {
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/convert-heic", { method: "POST", body: form });
+      if (!res.ok) throw new Error(`Server convert failed: ${res.status}`);
+      const blob = await res.blob();
+      const base = file.name.replace(/\.[^/.]+$/, "") || "image";
+      return new File([blob], `${base}.jpg`, { type: "image/jpeg" });
+    } catch (err) {
+      console.error("Server HEIC convert failed", err);
+      return null;
+    }
   };
 
 const isProjectTaskRef = (ref?: any) => {
@@ -244,6 +336,66 @@ const isProjectTaskRef = (ref?: any) => {
     }
   return path.startsWith("projects/") || path.includes("/projects/");
 };
+
+  const handleRegisterGalleryUpload = async (file: File) => {
+    if (!db || !storage || !isAdmin) return;
+    setUploadingRegisterGallery(true);
+    try {
+      let uploadFile = file;
+      if (isHeicFile(file)) {
+        const converted = await convertHeicToJpeg(file) || await convertHeicServerSide(file);
+        if (converted) {
+          uploadFile = converted;
+        } else {
+          alert("לא הצלחנו להמיר HEIC. אנא המר/י ל-JPG או PNG והעלה שוב כדי לראות תצוגה מקדימה.");
+          setUploadingRegisterGallery(false);
+          return;
+        }
+      }
+
+      const path = `register_gallery/${Date.now()}-${uploadFile.name}`;
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, uploadFile);
+      const url = await getDownloadURL(storageRef);
+      const docRef = await addDoc(collection(db, "register_gallery"), {
+        name: uploadFile.name,
+        url,
+        storagePath: path,
+        createdAt: serverTimestamp(),
+      });
+      setRegisterGallery(prev => [{ id: docRef.id, name: uploadFile.name, url, storagePath: path }, ...prev]);
+    } catch (err) {
+      console.error("Error uploading register gallery image", err);
+      alert("שגיאה בהעלאת תמונה לגלריה");
+    } finally {
+      setUploadingRegisterGallery(false);
+    }
+  };
+
+  const handleDeleteRegisterGallery = async (img: { id: string; storagePath?: string }) => {
+    if (!db || !isAdmin) return;
+    if (typeof window !== "undefined") {
+      const ok = window.confirm("למחוק את התמונה מהגלריה?");
+      if (!ok) return;
+    }
+    setDeletingRegisterGalleryId(img.id);
+    try {
+      await deleteDoc(doc(db, "register_gallery", img.id));
+      if (img.storagePath) {
+        try {
+          await deleteObject(ref(storage, img.storagePath));
+        } catch (err) {
+          console.error("Failed deleting storage object", err);
+        }
+      }
+      setRegisterGallery(prev => prev.filter(item => item.id !== img.id));
+    } catch (err) {
+      console.error("Error deleting register gallery image", err);
+      alert("שגיאה במחיקת תמונה");
+    } finally {
+      setDeletingRegisterGalleryId(null);
+    }
+  };
 
 const toDateSafe = (val: any): Date | null => {
   if (!val) return null;
@@ -999,7 +1151,7 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 addVolunteer(volDoc, project.id, volData, projTitle, "project");
               });
             } catch (projectError) {
-              console.error(`Error loading volunteers for project ${project.id}:`, projectError);
+                console.error(`Error loading volunteers for project ${project.id}:`, projectError);
             }
           }
           console.log(`Loaded ${volunteersData.length} volunteers total after merging per-event/project fetches`);
@@ -1015,9 +1167,104 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
           volunteersData.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
           
           setVolunteersList(volunteersData);
+      // Registrants (event guest registrations)
+      try {
+        const regsQuery = query(collectionGroup(db, "registrants"));
+        const regsSnap = await getDocs(regsQuery);
+        const regs: EventRegistrant[] = [];
+            regsSnap.forEach((rDoc) => {
+              const data = rDoc.data() as any;
+              const parentId = rDoc.ref.parent.parent?.id || "";
+              const regEventTitle = eventTitleMap.get(parentId) || (data.eventTitle as string) || "אירוע";
+              regs.push({
+                id: rDoc.id,
+                name: data.name || data.fullName || data.firstName || "",
+                email: data.email || "",
+                phone: data.phone || "",
+                eventId: parentId,
+                eventTitle: regEventTitle,
+                createdAt: data.createdAt,
+              });
+            });
+            regs.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
+        setRegistrantsList(regs);
+      } catch (err) {
+        console.error("Error loading registrants", err);
+        setRegistrantsList([]);
+      }
+      setLoadingRegistrants(false);
+
+      // Load all events for register modal editing/selection
+      try {
+        const allEventsSnap = await getDocs(collection(db, "events"));
+        const allEv: any[] = [];
+        const byId = new Map<string, any>();
+          allEventsSnap.forEach(d => {
+            const data = d.data() as any;
+          const item = {
+            id: d.id,
+            title: data.title || "אירוע ללא שם",
+            description: data.description || data.goal || "",
+            location: data.location || "",
+            startTime: data.startTime,
+            officialFlyerUrl: data.officialFlyerUrl || data.previewImage || "",
+            createdBy: data.createdBy,
+            members: data.members || [],
+            team: data.team || [],
+          };
+          allEv.push(item);
+          byId.set(d.id, item);
+        });
+        // default selection if not saved
+        const cfgRef = doc(db, "settings", "public_register_events");
+        const cfgSnap = await getDoc(cfgRef);
+        const allowed: string[] = cfgSnap.exists() ? (cfgSnap.data() as any).allowedEventIds || [] : [];
+        const allowedSet = new Set<string>(allowed);
+        if (allowedSet.size === 0) {
+          allEv.forEach(ev => {
+            const hasAdmin =
+              (ev.createdBy === user.uid) ||
+              (Array.isArray(ev.members) && ev.members.includes(user.uid)) ||
+              ((ev.team || []).some((m: any) => (m.userId && m.userId === user.uid) || (m.email && m.email.toLowerCase() === (user.email || "").toLowerCase())));
+            if (hasAdmin) allowedSet.add(ev.id);
+          });
+        }
+        // Ensure allowed events are present even אם לא נטענו ברשימה
+        const missingAllowed = Array.from(allowedSet).filter(id => !byId.has(id));
+        for (const mid of missingAllowed) {
+          try {
+            const docSnap = await getDoc(doc(db, "events", mid));
+            if (docSnap.exists()) {
+              const data = docSnap.data() as any;
+              const item = {
+                id: docSnap.id,
+                title: data.title || "אירוע ללא שם",
+                description: data.description || data.goal || "",
+                location: data.location || "",
+                startTime: data.startTime,
+                officialFlyerUrl: data.officialFlyerUrl || data.previewImage || "",
+                createdBy: data.createdBy,
+                members: data.members || [],
+                team: data.team || [],
+              };
+              allEv.push(item);
+              byId.set(item.id, item);
+            }
+          } catch (err) {
+            console.warn("Failed loading allowed event", mid, err);
+          }
+        }
+        setRegisterEventsAll(allEv);
+        setRegisterEventsSelection(allowedSet);
+      } catch (err) {
+        console.error("Error loading events for register selection", err);
+      }
+
         } catch (volunteersError) {
           console.error("Error loading volunteers:", volunteersError);
           setVolunteersList([]);
+          setRegistrantsList([]);
+          setLoadingRegistrants(false);
         }
 
         // Fetch join requests of current user to show pending/approved
@@ -2447,6 +2694,13 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
           </div>
         </button>
         <button
+          onClick={() => setActivePanel(prev => prev === "registrants" ? null : "registrants")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "registrants" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        >
+          <Users size={18} />
+          נרשמים לאירועים
+        </button>
+        <button
           onClick={() => setActivePanel(prev => prev === "notifications" ? null : "notifications")}
           className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "notifications" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
         >
@@ -2454,6 +2708,289 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
           הודעות
         </button>
       </div>
+
+      {showRegisterEventsModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">עריכת אירועים להרשמה</h3>
+              <button onClick={() => setShowRegisterEventsModal(false)} className="text-gray-500 hover:text-gray-800">סגור</button>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">בחר אילו אירועים יופיעו בדף הרשמה לאורחים. ברירת המחדל: כל אירוע שאדמין יצר או שותף בו.</p>
+            <div className="mb-4 p-3 rounded-lg border border-indigo-100 bg-indigo-50/40">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold text-indigo-900">גלריית תמונות לדף ההרשמה</span>
+                  <span className="text-xs text-gray-600">העלו תמונות שיוצגו בדף ההרשמה לאירועים. נשתמש בהן לעיצוב הדף.</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={registerGalleryInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        handleRegisterGalleryUpload(file);
+                      }
+                      if (e.target) {
+                        e.target.value = "";
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => registerGalleryInputRef.current?.click()}
+                    disabled={!isAdmin || uploadingRegisterGallery}
+                    className="px-3 py-1 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {uploadingRegisterGallery ? "מעלה..." : "העלה תמונה לגלריה"}
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                {loadingRegisterGallery ? (
+                  <div className="col-span-full text-[11px] text-gray-600 text-center">טוען גלריה...</div>
+                ) : registerGallery.length === 0 ? (
+                  <div className="col-span-full text-[11px] text-gray-600 text-center">אין תמונות בגלריה עדיין.</div>
+                ) : (
+                  registerGallery.map((img) => (
+                    <div key={img.id} className="relative border rounded-lg overflow-hidden bg-white flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRegisterGallery(img)}
+                        disabled={deletingRegisterGalleryId === img.id}
+                        className="absolute top-1 right-1 bg-white/90 text-red-600 border border-red-200 rounded-full px-2 text-[10px] font-semibold hover:bg-red-50 disabled:opacity-60"
+                      >
+                        {deletingRegisterGalleryId === img.id ? "מוחק..." : "מחק"}
+                      </button>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {(() => {
+                        const name = (img.name || "").toLowerCase();
+                        const isHeic = name.endsWith(".heic") || name.endsWith(".heif");
+                        if (isHeic) {
+                          return (
+                            <div className="w-full h-20 bg-gradient-to-br from-indigo-50 to-amber-50 flex flex-col items-center justify-center text-[10px] text-indigo-800 px-2">
+                              <div className="font-semibold">פורמט HEIC</div>
+                              <div className="text-[9px] text-gray-600 text-center">מומלץ להעלות JPG/PNG כדי שיוצג לציבור</div>
+                            </div>
+                          );
+                        }
+                        return <img src={img.url || ""} alt={img.name || "gallery"} className="w-full h-20 object-cover" />;
+                      })()}
+                      <div className="px-2 py-1 text-[10px] text-gray-600 truncate pr-10">{img.name || "תמונה"}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="text-[11px] text-gray-600 mt-2">לתצוגה לציבור מומלץ JPG/PNG. קבצי HEIC יוצגו כהערה בלבד בדפדפנים שלא תומכים.</div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              {registerEventsAll.map(ev => {
+                const checked = registerEventsSelection.has(ev.id);
+                const edit = eventEdits[ev.id] || {};
+                return (
+                  <label key={ev.id} className={`border rounded-lg p-3 flex items-start gap-3 cursor-pointer transition ${checked ? "border-indigo-300 bg-indigo-50" : "border-gray-200 bg-white"}`}>
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={checked}
+                      onChange={(e) => {
+                        setRegisterEventsSelection(prev => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(ev.id);
+                          else next.delete(ev.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-14 h-14 rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center">
+                          {((edit.hero ?? ev.officialFlyerUrl) && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={(edit.hero ?? ev.officialFlyerUrl) as string} alt={ev.title} className="w-full h-full object-cover" />
+                          )) || <span className="text-[10px] text-gray-500 px-1 text-center">אין תמונה</span>}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file || !db || !storage || !isAdmin) return;
+                              setLoadingFilesFor(ev.id);
+                              try {
+                                const path = `events/${ev.id}/files/register-${Date.now()}-${file.name}`;
+                                const storageRef = ref(storage, path);
+                                await uploadBytes(storageRef, file);
+                                const url = await getDownloadURL(storageRef);
+                                await addDoc(collection(db, "events", ev.id, "files"), {
+                                  name: file.name,
+                                  url,
+                                  storagePath: path,
+                                  createdAt: serverTimestamp(),
+                                });
+                                setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], hero: url } }));
+                                setRegisterEventsAll(prev => prev.map(item => item.id === ev.id ? { ...item, officialFlyerUrl: url } : item));
+                              } catch (err) {
+                                console.error("Error uploading hero", err);
+                                alert("שגיאה בהעלאת תמונה");
+                              } finally {
+                                setLoadingFilesFor(null);
+                              }
+                            }}
+                            className="text-[11px]"
+                          />
+                          <button
+                            type="button"
+                            className="text-[11px] text-indigo-700 hover:underline"
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              if (!db) return;
+                              setLoadingFilesFor(ev.id);
+                              try {
+                                const snap = await getDocs(query(collection(db, "events", ev.id, "files"), orderBy("createdAt", "desc"), limit(30)));
+                                const files = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+                                setEventFilesMap(prev => ({ ...prev, [ev.id]: files }));
+                              } catch (err) {
+                                console.error("Error loading event files", err);
+                                alert("לא הצלחנו לטעון קבצים");
+                              } finally {
+                                setLoadingFilesFor(null);
+                              }
+                            }}
+                          >
+                            בחר ממאגר האירוע
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        className="w-full border rounded-lg px-2 py-1 text-sm"
+                        value={edit.title ?? ev.title}
+                        onChange={(e) => setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], title: e.target.value } }))}
+                        placeholder="כותרת"
+                      />
+                      <input
+                        type="text"
+                        className="w-full border rounded-lg px-2 py-1 text-sm"
+                        value={edit.location ?? ev.location}
+                        onChange={(e) => setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], location: e.target.value } }))}
+                        placeholder="מיקום"
+                      />
+                      <textarea
+                        className="w-full border rounded-lg px-2 py-1 text-sm"
+                        rows={2}
+                        value={edit.description ?? ev.description}
+                        onChange={(e) => setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], description: e.target.value } }))}
+                        placeholder="תיאור קצר"
+                      />
+                      <input
+                        type="datetime-local"
+                        className="w-full border rounded-lg px-2 py-1 text-sm"
+                        value={edit.startTime ?? (ev.startTime?.seconds ? new Date(ev.startTime.seconds * 1000).toISOString().slice(0,16) : (ev.startTime ? new Date(ev.startTime).toISOString().slice(0,16) : ""))}
+                        onChange={(e) => setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], startTime: e.target.value } }))}
+                      />
+                      <input
+                        type="text"
+                        className="w-full border rounded-lg px-2 py-1 text-sm"
+                        value={(edit.hero ?? ev.officialFlyerUrl) || ""}
+                        onChange={(e) => setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], hero: e.target.value } }))}
+                        placeholder="קישור לתמונה"
+                      />
+                      {loadingFilesFor === ev.id && <div className="text-[11px] text-gray-500">טוען קבצים...</div>}
+                      {eventFilesMap[ev.id] && eventFilesMap[ev.id].length > 0 && (
+                        <div className="grid grid-cols-3 gap-2">
+                          {eventFilesMap[ev.id].map(f => (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => {
+                                const url = (f as any).url || "";
+                                if (url) {
+                                  setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], hero: url } }));
+                                  setRegisterEventsAll(prev => prev.map(item => item.id === ev.id ? { ...item, officialFlyerUrl: url } : item));
+                                }
+                              }}
+                              className="border rounded-lg overflow-hidden bg-gray-50 hover:ring-2 hover:ring-indigo-300"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={(f as any).url || ""} alt={(f as any).name || "file"} className="w-full h-16 object-cover" />
+                              <div className="px-1 py-1 text-[10px] text-gray-600 truncate">{(f as any).name || "קובץ"}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          className="px-3 py-1 rounded-lg text-xs font-semibold border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            if (!db || !isAdmin) return;
+                            const draft = eventEdits[ev.id] || {};
+                            const updates: any = {};
+                            if (draft.title !== undefined) updates.title = draft.title;
+                            if (draft.description !== undefined) updates.description = draft.description;
+                            if (draft.location !== undefined) updates.location = draft.location;
+                            if (draft.startTime !== undefined) {
+                                const d = draft.startTime ? new Date(draft.startTime) : null;
+                                if (d && !isNaN(d.getTime())) updates.startTime = d;
+                            }
+                            if (draft.hero !== undefined) updates.officialFlyerUrl = draft.hero;
+                            try {
+                              await updateDoc(doc(db, "events", ev.id), updates);
+                              setRegisterEventsAll(prev => prev.map(item => item.id === ev.id ? { ...item, ...updates } : item));
+                              alert("עודכן");
+                            } catch (err) {
+                              console.error("Error updating event", err);
+                              alert("שגיאה בעדכון האירוע");
+                            }
+                          }}
+                        >
+                          שמור אירוע
+                        </button>
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowRegisterEventsModal(false)}
+                className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={async () => {
+                  if (!db || !isAdmin) return;
+                  setSavingRegisterEvents(true);
+                  try {
+                    await setDoc(doc(db, "settings", "public_register_events"), {
+                      allowedEventIds: Array.from(registerEventsSelection),
+                      updatedAt: serverTimestamp(),
+                    });
+                    setShowRegisterEventsModal(false);
+                  } catch (err) {
+                    console.error("Error saving register events", err);
+                    alert("לא הצלחנו לשמור את בחירת האירועים");
+                  } finally {
+                    setSavingRegisterEvents(false);
+                  }
+                }}
+                disabled={savingRegisterEvents}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {savingRegisterEvents ? "שומר..." : "שמור"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activePanel === "stats" && (
         <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
@@ -2784,6 +3321,82 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {activePanel === "registrants" && (
+        <div className="mt-4 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Users style={{ color: 'var(--patifon-orange)' }} />
+              <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>נרשמים לאירועים</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterEventsModal(true)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
+                >
+                  עריכת אירועים
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  const url = typeof window !== "undefined" ? `${window.location.origin}/events/register` : "/events/register";
+                  if (navigator?.clipboard?.writeText) {
+                    navigator.clipboard.writeText(url).then(() => alert("קישור דף הנרשמים הועתק")).catch(() => alert(url));
+                  } else {
+                    alert(url);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-indigo-200 text-indigo-800 bg-indigo-50 hover:bg-indigo-100"
+              >
+                העתק קישור לדף הרשמה
+              </button>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
+                {filteredRegistrants.length}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3 mb-4">
+            <div className="flex-1 min-w-[220px]">
+              <input
+                type="search"
+                value={registrantSearch}
+                onChange={(e) => setRegistrantSearch(e.target.value)}
+                placeholder="חיפוש לפי שם/מייל/טלפון/אירוע"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+          {loadingRegistrants ? (
+            <div className="text-gray-500 text-center py-6">טוען נרשמים...</div>
+          ) : filteredRegistrants.length === 0 ? (
+            <div className="text-gray-500 text-center py-6">לא נמצאו נרשמים.</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {filteredRegistrants.map((reg) => {
+                const regDate = reg.createdAt?.seconds ? new Date(reg.createdAt.seconds * 1000) : null;
+                return (
+                  <div key={reg.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-gray-900">{reg.name || "נרשם ללא שם"}</p>
+                        <p className="text-xs text-gray-500 truncate">{reg.email || "ללא מייל"}</p>
+                        {reg.phone && <p className="text-xs text-gray-500">{reg.phone}</p>}
+                        <p className="text-xs text-gray-600 mt-1">אירוע: {reg.eventTitle || reg.eventId || "לא ידוע"}</p>
+                        {regDate && (
+                          <p className="text-[11px] text-gray-400">נרשם ב־{regDate.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

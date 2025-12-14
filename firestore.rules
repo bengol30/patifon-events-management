@@ -51,6 +51,12 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
+    // גלריית תמונות לדף ההרשמה הציבורי
+    match /register_gallery/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // ברירת מחדל: חסום
     match /{document=**} {
       allow read, write: if false;
