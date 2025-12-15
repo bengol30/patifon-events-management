@@ -72,6 +72,8 @@ interface Task {
     createdByName?: string;
     scope?: "event" | "project";
     specialType?: string;
+    eventTitle?: string;
+    eventId?: string;
 }
 
 interface BudgetItem {
@@ -270,40 +272,40 @@ export default function EventDetailsPage() {
             return;
         }
         try {
-        const templateData = {
-            title: task.title.trim(),
-            description: task.description || "",
-            priority: task.priority || "NORMAL",
-            dueDate: task.dueDate || "",
-            assignees: task.assignees || [],
-            isVolunteerTask: !!task.isVolunteerTask,
-            volunteerHours: task.isVolunteerTask ? (task.volunteerHours ?? null) : null,
-            files: task.files || [],
-        };
+            const templateData = {
+                title: task.title.trim(),
+                description: task.description || "",
+                priority: task.priority || "NORMAL",
+                dueDate: task.dueDate || "",
+                assignees: task.assignees || [],
+                isVolunteerTask: !!task.isVolunteerTask,
+                volunteerHours: task.isVolunteerTask ? (task.volunteerHours ?? null) : null,
+                files: task.files || [],
+            };
             await setDoc(doc(db, "repeat_tasks", key), {
                 key,
                 title: task.title.trim(),
                 description: task.description || "",
                 priority: task.priority || "NORMAL",
-            template: templateData,
-            files: task.files || [],
-            createdBy: user?.uid || "",
-            createdByEmail: user?.email || "",
-            createdByName: user?.displayName || user?.email || "",
-            count: increment(1),
-            lastUsedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            createdAt: serverTimestamp(),
-        }, { merge: true });
-        await setDoc(doc(db, "default_tasks", key), {
-            title: task.title.trim(),
-            description: task.description || "",
-            priority: (task.priority as any) || "NORMAL",
-            template: templateData,
-            files: task.files || [],
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        }, { merge: true });
+                template: templateData,
+                files: task.files || [],
+                createdBy: user?.uid || "",
+                createdByEmail: user?.email || "",
+                createdByName: user?.displayName || user?.email || "",
+                count: increment(1),
+                lastUsedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                createdAt: serverTimestamp(),
+            }, { merge: true });
+            await setDoc(doc(db, "default_tasks", key), {
+                title: task.title.trim(),
+                description: task.description || "",
+                priority: (task.priority as any) || "NORMAL",
+                template: templateData,
+                files: task.files || [],
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
             alert("המשימה נשמרה במאגר המשימות החוזרות");
         } catch (err) {
             console.error("Failed saving task to repeat library", err);
@@ -1146,7 +1148,7 @@ export default function EventDetailsPage() {
         if (!newTask.dueDate && base) {
             syncNewTaskDueDate(newTaskDueMode, newTaskOffsetDays, defaultTime);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [event?.startTime]);
 
     useEffect(() => {
@@ -1158,7 +1160,7 @@ export default function EventDetailsPage() {
         if (!editingDateTask.dueDate) {
             setEditingDateTask({ ...editingDateTask, dueDate: computeDueDateFromMode(meta.mode, parseOffset(meta.offset) ?? 0, meta.time) });
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editingDateTask?.id]);
 
     useEffect(() => {
@@ -1169,7 +1171,7 @@ export default function EventDetailsPage() {
         if (nextDue && nextDue !== editingDateTask.dueDate) {
             setEditingDateTask({ ...editingDateTask, dueDate: nextDue });
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dateModalMode, dateModalOffset, dateModalTime]);
 
     // Load collaborators + all users
@@ -1397,7 +1399,7 @@ export default function EventDetailsPage() {
             setShowNewTask(false);
             setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false, volunteerHours: null });
             setNewTaskDueMode("event_day");
-            setNewTaskOffsetDays(0);
+            setNewTaskOffsetDays("0");
             setNewTaskTime(extractTimeString(getEventStartDate() || new Date()));
             setNewTaskFiles([]);
             setSaveNewTaskToLibrary(false);
@@ -1434,24 +1436,24 @@ export default function EventDetailsPage() {
             const cleanAssignees = sanitizeAssigneesForWrite(editingTask.assignees || []);
             const offsetParsed = parseOffset(editTaskOffsetDays);
             const dueDateValue = editingTask.dueDate || computeDueDateFromMode(editTaskDueMode, offsetParsed ?? 0, editTaskTime || extractTimeString(getEventStartDate() || new Date()));
-                const updateData: any = {
-                    title: editingTask.title,
-                    description: editingTask.description || "",
-                    assignee: cleanAssignees[0]?.name || editingTask.assignee || "",
-                    assigneeId: cleanAssignees[0]?.userId || editingTask.assigneeId || null,
-                    assignees: cleanAssignees,
-                    dueDate: dueDateValue,
-                    priority: editingTask.priority,
-                    status: editingTask.status,
-                    currentStatus: editingTask.currentStatus || "",
-                    nextStep: editingTask.nextStep || "",
-                    isVolunteerTask: editingTask.isVolunteerTask || false,
-                    volunteerHours: editingTask.isVolunteerTask
-                        ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
-                        : null,
-                    createdByEmail: (editingTask as any).createdByEmail || user?.email || "",
-                    createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
-                };
+            const updateData: any = {
+                title: editingTask.title,
+                description: editingTask.description || "",
+                assignee: cleanAssignees[0]?.name || editingTask.assignee || "",
+                assigneeId: cleanAssignees[0]?.userId || editingTask.assigneeId || null,
+                assignees: cleanAssignees,
+                dueDate: dueDateValue,
+                priority: editingTask.priority,
+                status: editingTask.status,
+                currentStatus: editingTask.currentStatus || "",
+                nextStep: editingTask.nextStep || "",
+                isVolunteerTask: editingTask.isVolunteerTask || false,
+                volunteerHours: editingTask.isVolunteerTask
+                    ? (editingTask.volunteerHours != null ? Number(editingTask.volunteerHours) : null)
+                    : null,
+                createdByEmail: (editingTask as any).createdByEmail || user?.email || "",
+                createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
+            };
             await updateDoc(taskRef, updateData);
             if (saveEditTaskToLibrary) {
                 const filesForLibrary = await loadTaskFilesForLibrary(editingTask.id);
@@ -1822,11 +1824,11 @@ export default function EventDetailsPage() {
     };
 
     const buildMarketingTaskDescription = () => {
-            const officialText = officialPostText || buildPostContent();
-            const lines = [
-                "הנחיות שיווק והפצה בקבוצות:",
-                "1. קח/י את המלל הרשמי והפלייר המצורף.",
-                "2. פרסם/י ב-5 קבוצות וואטסאפ שונות עם 30+ משתתפים כל אחת.",
+        const officialText = officialPostText || buildPostContent();
+        const lines = [
+            "הנחיות שיווק והפצה בקבוצות:",
+            "1. קח/י את המלל הרשמי והפלייר המצורף.",
+            "2. פרסם/י ב-5 קבוצות וואטסאפ שונות עם 30+ משתתפים כל אחת.",
             "3. צלם/י מסך מכל פרסום והעלה/י כהוכחה לביצוע.",
             "",
             "מלל רשמי:",
@@ -2341,7 +2343,7 @@ export default function EventDetailsPage() {
                     description: template.description,
                     priority: template.priority || "NORMAL",
                     dueDate: template.dueDate || "",
-                } as Task).catch(() => {});
+                } as Task).catch(() => { });
             }
             alert("המשימה נוספה לאירוע");
         } catch (err) {
@@ -2682,19 +2684,19 @@ export default function EventDetailsPage() {
                             {event.team
                                 ?.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase()))
                                 .map((member, idx) => {
-                                const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
-                                const checked = tagSelection.some(a => getAssigneeKey(a) === memberKey);
-                                return (
-                                    <button
-                                        key={idx}
-                                        type="button"
-                                        onClick={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "tag")}
-                                        className={`px-3 py-1 rounded-full text-sm border transition ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
-                                    >
-                                        {member.name}
-                                    </button>
-                                );
-                            })}
+                                    const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
+                                    const checked = tagSelection.some(a => getAssigneeKey(a) === memberKey);
+                                    return (
+                                        <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "tag")}
+                                            className={`px-3 py-1 rounded-full text-sm border transition ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                        >
+                                            {member.name}
+                                        </button>
+                                    );
+                                })}
                             {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase())).length === 0)) && (
                                 <span className="text-sm text-gray-500">אין חברי צוות זמינים</span>
                             )}
@@ -2764,24 +2766,24 @@ export default function EventDetailsPage() {
                                         {event.team
                                             ?.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase()))
                                             .map((member, idx) => {
-                                            const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
-                                            const checked = editingTask.assignees?.some(a => getAssigneeKey(a) === memberKey);
-                                            return (
-                                                <label
-                                                    key={idx}
-                                                    className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
-                                                    style={{ minWidth: '120px' }}
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        className="accent-white w-4 h-4"
-                                                        checked={checked}
-                                                        onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "edit")}
-                                                    />
-                                                    {member.name}
-                                                </label>
-                                            );
-                                        })}
+                                                const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
+                                                const checked = editingTask.assignees?.some(a => getAssigneeKey(a) === memberKey);
+                                                return (
+                                                    <label
+                                                        key={idx}
+                                                        className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                                        style={{ minWidth: '120px' }}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-white w-4 h-4"
+                                                            checked={checked}
+                                                            onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "edit")}
+                                                        />
+                                                        {member.name}
+                                                    </label>
+                                                );
+                                            })}
                                         {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase())).length === 0)) && (
                                             <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
                                         )}
@@ -2889,11 +2891,11 @@ export default function EventDetailsPage() {
                                             checked={editingTask.isVolunteerTask || false}
                                             onChange={e => setEditingTask({ ...editingTask, isVolunteerTask: e.target.checked })}
                                         />
-                                    <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
-                                        <Handshake size={16} className="text-indigo-600" />
-                                        משימה למתנדב
-                                    </label>
-                                    <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                        <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                            <Handshake size={16} className="text-indigo-600" />
+                                            משימה למתנדב
+                                        </label>
+                                        <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
                                     </div>
                                     {editingTask.isVolunteerTask && (
                                         <div className="flex items-center gap-2">
@@ -3009,184 +3011,124 @@ export default function EventDetailsPage() {
                                         </span>
                                     </div>
                                 )}
-                        {partnersLabel && (
-                            <div className="flex items-center gap-1">
-                                <Handshake size={16} />
-                                <span>שותפים: {partnersLabel}</span>
-                            </div>
-                        )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        {event.projectId ? (
-                            <span className="inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
-                                פרויקט משויך: {event.projectName || event.projectId}
-                            </span>
-                        ) : (
-                            <span className="text-xs text-gray-600">אין פרויקט משויך</span>
-                        )}
-                        {isProjectLinker && projectOptions.length > 0 && (
-                            <div className="flex items-center gap-2">
-                                <select
-                                    className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    value={selectedProject}
-                                    onChange={(e) => setSelectedProject(e.target.value)}
-                                >
-                                    <option value="">בחר פרויקט</option>
-                                    {projectOptions.map((p) => (
-                                        <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                </select>
-                                <button
-                                    onClick={handleLinkProject}
-                                    disabled={!selectedProject || linkingProject}
-                                    className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition disabled:opacity-60"
-                                >
-                                    {linkingProject ? "מקשר..." : "שייך לפרויקט"}
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-start gap-4 shrink-0">
-                    <div className="flex md:flex-col gap-2 md:gap-3">
-                        <button
-                            onClick={copyInviteLink}
-                            className={`w-11 h-11 rounded-full transition vinyl-shadow text-white flex items-center justify-center ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"}`}
-                            title={copied ? "הקישור הועתק!" : "שיתוף דף ניהול האירוע"}
-                        >
-                            {copied ? <Check size={20} /> : <Share2 size={20} />}
-                        </button>
-                        <button
-                            onClick={handleAddEventToCalendar}
-                            className="w-11 h-11 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition flex items-center justify-center"
-                            title="הוסף ליומן והזמן את הצוות"
-                        >
-                            <Calendar size={18} />
-                        </button>
-                        <button
-                            onClick={() => setIsEditEventOpen(true)}
-                            className="w-11 h-11 rounded-full border border-indigo-100 text-indigo-700 hover:bg-indigo-50 transition flex items-center justify-center"
-                            title="ערוך פרטי אירוע"
-                        >
-                            <Edit2 size={18} />
-                        </button>
-                        {isOwner && (
-                            <button
-                                onClick={confirmDeleteEvent}
-                                className="w-11 h-11 rounded-full transition hover:bg-red-100 flex items-center justify-center"
-                                style={{ color: 'var(--patifon-red)', background: '#fee', border: '1px solid var(--patifon-red)' }}
-                                title="מחק אירוע"
-                            >
-                                <Trash2 size={18} />
-                            </button>
-                        )}
-                    </div>
-                    <div className="flex flex-col gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100 md:w-auto md:self-start md:items-start">
-                        <div className="space-y-3 w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
-                            {event.contactPerson?.name ? (
-                                <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                        <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
-                                            <User size={20} />
-                                        </div>
-                                        <div className="text-sm min-w-0">
-                                            <p className="font-semibold text-gray-900 truncate">איש קשר: {event.contactPerson.name}</p>
-                                            <div className="text-gray-600 flex flex-col gap-0.5">
-                                                {event.contactPerson.phone && <span className="flex items-center gap-1 truncate">טלפון: {event.contactPerson.phone}</span>}
-                                                {event.contactPerson.email && <span className="truncate">אימייל: {event.contactPerson.email}</span>}
-                                            </div>
-                                        </div>
+                                {partnersLabel && (
+                                    <div className="flex items-center gap-1">
+                                        <Handshake size={16} />
+                                        <span>שותפים: {partnersLabel}</span>
                                     </div>
-                                    {event.contactPerson.phone && (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
-                                            className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
-                                            title="שליחת הודעת וואטסאפ"
-                                        >
-                                            <MessageCircle size={18} />
-                                        </button>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="p-3 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 bg-white">
-                                    לא הוגדר איש קשר לאירוע.
-                                </div>
-                            )}
-                        </div>
-                        <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAdvancedActions(!showAdvancedActions)}
-                                    className="flex-1 flex items-center justify-between text-sm font-semibold text-gray-800 px-2 py-1 rounded-md hover:bg-gray-50"
-                                >
-                                    <span>פעולות מתקדמות</span>
-                                    <ChevronDown
-                                        size={18}
-                                        className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`}
-                                    />
-                                </button>
-                                <button
-                                    onClick={() => router.push(`/events/${id}/files`)}
-                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                    style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                                    title="מעבר למאגר הקבצים של האירוע"
-                                >
-                                    <Paperclip size={14} />
-                                    קבצים מצורפים
-                                </button>
-                                <button
-                                    onClick={handleOpenContentModal}
-                                    className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                    style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                                    title="תוכן ומדיה - פלייר, מלל ותיוגים"
-                                >
-                                    <Sparkles size={14} />
-                                    תוכן ומדיה
-                                </button>
-                                {event.needsVolunteers && (
-                                    <button
-                                        onClick={() => {
-                                            setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
-                                            setShowVolunteerModal(true);
-                                        }}
-                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                        style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                                        title="הזמנת מתנדבים לאירוע"
-                                    >
-                                        <Handshake size={14} />
-                                        הזמנת מתנדבים
-                                    </button>
                                 )}
                             </div>
-                            {showAdvancedActions && (
-                                <div className="flex flex-wrap items-center gap-2 mt-3">
+                            <div className="flex flex-wrap items-center gap-3">
+                                {event.projectId ? (
+                                    <span className="inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                                        פרויקט משויך: {event.projectName || event.projectId}
+                                    </span>
+                                ) : (
+                                    <span className="text-xs text-gray-600">אין פרויקט משויך</span>
+                                )}
+                                {isProjectLinker && projectOptions.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                            value={selectedProject}
+                                            onChange={(e) => setSelectedProject(e.target.value)}
+                                        >
+                                            <option value="">בחר פרויקט</option>
+                                            {projectOptions.map((p) => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            onClick={handleLinkProject}
+                                            disabled={!selectedProject || linkingProject}
+                                            className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition disabled:opacity-60"
+                                        >
+                                            {linkingProject ? "מקשר..." : "שייך לפרויקט"}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex flex-col md:flex-row md:items-start gap-4 shrink-0">
+                        <div className="flex md:flex-col gap-2 md:gap-3">
+                            <button
+                                onClick={copyInviteLink}
+                                className={`w-11 h-11 rounded-full transition vinyl-shadow text-white flex items-center justify-center ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"}`}
+                                title={copied ? "הקישור הועתק!" : "שיתוף דף ניהול האירוע"}
+                            >
+                                {copied ? <Check size={20} /> : <Share2 size={20} />}
+                            </button>
+                            <button
+                                onClick={handleAddEventToCalendar}
+                                className="w-11 h-11 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition flex items-center justify-center"
+                                title="הוסף ליומן והזמן את הצוות"
+                            >
+                                <Calendar size={18} />
+                            </button>
+                            <button
+                                onClick={() => setIsEditEventOpen(true)}
+                                className="w-11 h-11 rounded-full border border-indigo-100 text-indigo-700 hover:bg-indigo-50 transition flex items-center justify-center"
+                                title="ערוך פרטי אירוע"
+                            >
+                                <Edit2 size={18} />
+                            </button>
+                            {isOwner && (
+                                <button
+                                    onClick={confirmDeleteEvent}
+                                    className="w-11 h-11 rounded-full transition hover:bg-red-100 flex items-center justify-center"
+                                    style={{ color: 'var(--patifon-red)', background: '#fee', border: '1px solid var(--patifon-red)' }}
+                                    title="מחק אירוע"
+                                >
+                                    <Trash2 size={18} />
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex flex-col gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100 md:w-auto md:self-start md:items-start">
+                            <div className="space-y-3 w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
+                                {event.contactPerson?.name ? (
+                                    <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
+                                                <User size={20} />
+                                            </div>
+                                            <div className="text-sm min-w-0">
+                                                <p className="font-semibold text-gray-900 truncate">איש קשר: {event.contactPerson.name}</p>
+                                                <div className="text-gray-600 flex flex-col gap-0.5">
+                                                    {event.contactPerson.phone && <span className="flex items-center gap-1 truncate">טלפון: {event.contactPerson.phone}</span>}
+                                                    {event.contactPerson.email && <span className="truncate">אימייל: {event.contactPerson.email}</span>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {event.contactPerson.phone && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
+                                                className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
+                                                title="שליחת הודעת וואטסאפ"
+                                            >
+                                                <MessageCircle size={18} />
+                                            </button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="p-3 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 bg-white">
+                                        לא הוגדר איש קשר לאירוע.
+                                    </div>
+                                )}
+                            </div>
+                            <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
+                                <div className="flex items-center gap-2">
                                     <button
-                                        onClick={() => router.push(`/events/${id}/registrants`)}
-                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold text-white text-center flex items-center gap-1"
-                                        style={{ background: 'var(--patifon-burgundy)' }}
+                                        type="button"
+                                        onClick={() => setShowAdvancedActions(!showAdvancedActions)}
+                                        className="flex-1 flex items-center justify-between text-sm font-semibold text-gray-800 px-2 py-1 rounded-md hover:bg-gray-50"
                                     >
-                                        <Users size={16} />
-                                        נרשמים
-                                    </button>
-                                    <button
-                                        onClick={copyRegisterLink}
-                                        className={`px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center justify-center gap-1 border-2 ${copiedRegister ? "bg-green-600 text-white border-green-600" : ""}`}
-                                        style={!copiedRegister ? { borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' } : undefined}
-                                        title="העתק קישור לטופס רישום"
-                                    >
-                                        {copiedRegister ? <Check size={14} /> : <List size={14} />}
-                                        {copiedRegister ? "קישור הועתק" : "העתק קישור הרשמה"}
-                                    </button>
-                                    <button
-                                        onClick={handleOpenPostModal}
-                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                        style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                                    >
-                                        <Sparkles size={14} />
-                                        מלל לפוסט
+                                        <span>פעולות מתקדמות</span>
+                                        <ChevronDown
+                                            size={18}
+                                            className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`}
+                                        />
                                     </button>
                                     <button
                                         onClick={() => router.push(`/events/${id}/files`)}
@@ -3195,13 +3137,73 @@ export default function EventDetailsPage() {
                                         title="מעבר למאגר הקבצים של האירוע"
                                     >
                                         <Paperclip size={14} />
-                                        קבצים מצורפים לאירוע
+                                        קבצים מצורפים
                                     </button>
+                                    <button
+                                        onClick={handleOpenContentModal}
+                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                        style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                        title="תוכן ומדיה - פלייר, מלל ותיוגים"
+                                    >
+                                        <Sparkles size={14} />
+                                        תוכן ומדיה
+                                    </button>
+                                    {event.needsVolunteers && (
+                                        <button
+                                            onClick={() => {
+                                                setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
+                                                setShowVolunteerModal(true);
+                                            }}
+                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                            style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                            title="הזמנת מתנדבים לאירוע"
+                                        >
+                                            <Handshake size={14} />
+                                            הזמנת מתנדבים
+                                        </button>
+                                    )}
                                 </div>
-                            )}
+                                {showAdvancedActions && (
+                                    <div className="flex flex-wrap items-center gap-2 mt-3">
+                                        <button
+                                            onClick={() => router.push(`/events/${id}/registrants`)}
+                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold text-white text-center flex items-center gap-1"
+                                            style={{ background: 'var(--patifon-burgundy)' }}
+                                        >
+                                            <Users size={16} />
+                                            נרשמים
+                                        </button>
+                                        <button
+                                            onClick={copyRegisterLink}
+                                            className={`px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center justify-center gap-1 border-2 ${copiedRegister ? "bg-green-600 text-white border-green-600" : ""}`}
+                                            style={!copiedRegister ? { borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' } : undefined}
+                                            title="העתק קישור לטופס רישום"
+                                        >
+                                            {copiedRegister ? <Check size={14} /> : <List size={14} />}
+                                            {copiedRegister ? "קישור הועתק" : "העתק קישור הרשמה"}
+                                        </button>
+                                        <button
+                                            onClick={handleOpenPostModal}
+                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                            style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                        >
+                                            <Sparkles size={14} />
+                                            מלל לפוסט
+                                        </button>
+                                        <button
+                                            onClick={() => router.push(`/events/${id}/files`)}
+                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
+                                            style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                            title="מעבר למאגר הקבצים של האירוע"
+                                        >
+                                            <Paperclip size={14} />
+                                            קבצים מצורפים לאירוע
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
                 </div>
             </header>
 
@@ -3493,24 +3495,24 @@ export default function EventDetailsPage() {
                                             {event.team
                                                 ?.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase()))
                                                 .map((member, idx) => {
-                                                const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
-                                                const checked = newTask.assignees.some(a => getAssigneeKey(a) === memberKey);
-                                                return (
-                                                    <label
-                                                        key={idx}
-                                                        className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
-                                                        style={{ minWidth: '120px' }}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            className="accent-white w-4 h-4"
-                                                            checked={checked}
-                                                            onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "new")}
-                                                        />
-                                                        {member.name}
-                                                    </label>
-                                                );
-                                            })}
+                                                    const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
+                                                    const checked = newTask.assignees.some(a => getAssigneeKey(a) === memberKey);
+                                                    return (
+                                                        <label
+                                                            key={idx}
+                                                            className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                                            style={{ minWidth: '120px' }}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                className="accent-white w-4 h-4"
+                                                                checked={checked}
+                                                                onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "new")}
+                                                            />
+                                                            {member.name}
+                                                        </label>
+                                                    );
+                                                })}
                                             {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase())).length === 0)) && (
                                                 <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
                                             )}
@@ -3634,34 +3636,34 @@ export default function EventDetailsPage() {
                                 </div>
                                 {event.needsVolunteers && (
                                     <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                                    <input
-                                        type="checkbox"
-                                        id="newTaskIsVolunteerTask"
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        checked={newTask.isVolunteerTask || false}
-                                        onChange={e => setNewTask({ ...newTask, isVolunteerTask: e.target.checked })}
-                                    />
-                                    <label htmlFor="newTaskIsVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
-                                        <Handshake size={16} className="text-indigo-600" />
-                                        משימה למתנדב
-                                    </label>
-                                    <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
-                                    {newTask.isVolunteerTask && (
-                                        <div className="flex items-center gap-2">
-                                            <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="0.5"
-                                                className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
-                                                value={newTask.volunteerHours ?? ""}
-                                                onChange={(e) => setNewTask({ ...newTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
-                                                placeholder="לדוגמה 2"
-                                            />
-                                            <span className="text-xs text-gray-500">שעות עבודה</span>
-                                        </div>
-                                    )}
-                                </div>
+                                        <input
+                                            type="checkbox"
+                                            id="newTaskIsVolunteerTask"
+                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={newTask.isVolunteerTask || false}
+                                            onChange={e => setNewTask({ ...newTask, isVolunteerTask: e.target.checked })}
+                                        />
+                                        <label htmlFor="newTaskIsVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                            <Handshake size={16} className="text-indigo-600" />
+                                            משימה למתנדב
+                                        </label>
+                                        <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                        {newTask.isVolunteerTask && (
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.5"
+                                                    className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
+                                                    value={newTask.volunteerHours ?? ""}
+                                                    onChange={(e) => setNewTask({ ...newTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
+                                                    placeholder="לדוגמה 2"
+                                                />
+                                                <span className="text-xs text-gray-500">שעות עבודה</span>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
                                     <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 w-full sm:w-auto">
@@ -3731,7 +3733,7 @@ export default function EventDetailsPage() {
                                                     createdByName={task.createdByName}
                                                     onEdit={() => { startEditingTask(task); }}
                                                     onDelete={() => confirmDeleteTask(task.id)}
-                                                    onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
+                                                    onStatusChange={(newStatus) => handleStatusChange(task, newStatus)}
                                                     onChat={() => setChatTask(task)}
                                                     hasUnreadMessages={hasUnread}
                                                     onEditStatus={() => setEditingStatusTask(task)}
@@ -3777,7 +3779,7 @@ export default function EventDetailsPage() {
                                                     createdByName={task.createdByName}
                                                     onEdit={() => { startEditingTask(task); }}
                                                     onDelete={() => confirmDeleteTask(task.id)}
-                                                    onStatusChange={(newStatus) => handleStatusChange(task.id, newStatus)}
+                                                    onStatusChange={(newStatus) => handleStatusChange(task, newStatus)}
                                                     onChat={() => setChatTask(task)}
                                                     hasUnreadMessages={hasUnread}
                                                     onEditStatus={() => setEditingStatusTask(task)}
@@ -3808,209 +3810,209 @@ export default function EventDetailsPage() {
                         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                             <div className="flex justify-between items-center mb-4">
                                 <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={copyInviteLink}
-                                    className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
-                                    title="העתק קישור להזמנה"
-                                >
-                                    <Share2 size={18} />
-                                </button>
-                                {canManageTeam && (
+                                <div className="flex gap-2">
                                     <button
-                                        onClick={() => {
-                                            setShowCollaboratorsPicker(prev => !prev);
-                                            setShowAddTeam(false);
-                                        }}
+                                        onClick={copyInviteLink}
                                         className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
-                                        title="הוסף איש צוות"
+                                        title="העתק קישור להזמנה"
                                     >
-                                        <UserPlus size={18} />
+                                        <Share2 size={18} />
                                     </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {showAddTeam && canManageTeam && (
-                            <div className="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                <form onSubmit={handleAddTeamMember} className="space-y-2">
-                                    <input
-                                        type="text"
-                                        placeholder="שם מלא"
-                                        required
-                                        className="w-full p-2 border rounded text-sm"
-                                        value={newMember.name}
-                                        onChange={e => setNewMember({ ...newMember, name: e.target.value })}
-                                    />
-                                    <input
-                                        type="text"
-                                        placeholder="תפקיד"
-                                        required
-                                        className="w-full p-2 border rounded text-sm"
-                                        value={newMember.role}
-                                        onChange={e => setNewMember({ ...newMember, role: e.target.value })}
-                                    />
-                                    <input
-                                        type="email"
-                                        placeholder="אימייל (אופציונלי)"
-                                        className="w-full p-2 border rounded text-sm"
-                                        value={newMember.email}
-                                        onChange={e => setNewMember({ ...newMember, email: e.target.value })}
-                                    />
-                                    <button
-                                        type="submit"
-                                        className="w-full bg-indigo-600 text-white py-1 rounded text-sm hover:bg-indigo-700"
-                                    >
-                                        הוסף
-                                    </button>
-                                </form>
-                            </div>
-                        )}
-
-                        {showCollaboratorsPicker && canManageTeam && (
-                            <div className="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm">
-                                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-                                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                                    {canManageTeam && (
                                         <button
-                                            className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "past" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
-                                            onClick={() => setCollaboratorsView("past")}
+                                            onClick={() => {
+                                                setShowCollaboratorsPicker(prev => !prev);
+                                                setShowAddTeam(false);
+                                            }}
+                                            className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
+                                            title="הוסף איש צוות"
                                         >
-                                            עבדתי איתם
+                                            <UserPlus size={18} />
                                         </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {showAddTeam && canManageTeam && (
+                                <div className="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                    <form onSubmit={handleAddTeamMember} className="space-y-2">
+                                        <input
+                                            type="text"
+                                            placeholder="שם מלא"
+                                            required
+                                            className="w-full p-2 border rounded text-sm"
+                                            value={newMember.name}
+                                            onChange={e => setNewMember({ ...newMember, name: e.target.value })}
+                                        />
+                                        <input
+                                            type="text"
+                                            placeholder="תפקיד"
+                                            required
+                                            className="w-full p-2 border rounded text-sm"
+                                            value={newMember.role}
+                                            onChange={e => setNewMember({ ...newMember, role: e.target.value })}
+                                        />
+                                        <input
+                                            type="email"
+                                            placeholder="אימייל (אופציונלי)"
+                                            className="w-full p-2 border rounded text-sm"
+                                            value={newMember.email}
+                                            onChange={e => setNewMember({ ...newMember, email: e.target.value })}
+                                        />
                                         <button
-                                            className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "all" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
-                                            onClick={() => setCollaboratorsView("all")}
+                                            type="submit"
+                                            className="w-full bg-indigo-600 text-white py-1 rounded text-sm hover:bg-indigo-700"
                                         >
-                                            כל המשתמשים
+                                            הוסף
+                                        </button>
+                                    </form>
+                                </div>
+                            )}
+
+                            {showCollaboratorsPicker && canManageTeam && (
+                                <div className="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+                                        <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                                            <button
+                                                className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "past" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                                onClick={() => setCollaboratorsView("past")}
+                                            >
+                                                עבדתי איתם
+                                            </button>
+                                            <button
+                                                className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "all" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                                onClick={() => setCollaboratorsView("all")}
+                                            >
+                                                כל המשתמשים
+                                            </button>
+                                        </div>
+                                        <button
+                                            className="text-xs text-indigo-600 hover:underline"
+                                            onClick={() => {
+                                                setShowAddTeam(true);
+                                                setShowCollaboratorsPicker(false);
+                                            }}
+                                        >
+                                            הוסף ידנית
                                         </button>
                                     </div>
-                                    <button
-                                        className="text-xs text-indigo-600 hover:underline"
-                                        onClick={() => {
-                                            setShowAddTeam(true);
-                                            setShowCollaboratorsPicker(false);
-                                        }}
-                                    >
-                                        הוסף ידנית
-                                    </button>
-                                </div>
-                                <div className="max-h-64 overflow-y-auto p-2 space-y-2">
-                                    {(collaboratorsView === "past" ? collaborators : allUsers)
-                                        .filter(c => !(event?.team || []).some(m =>
+                                    <div className="max-h-64 overflow-y-auto p-2 space-y-2">
+                                        {(collaboratorsView === "past" ? collaborators : allUsers)
+                                            .filter(c => !(event?.team || []).some(m =>
+                                                (m.userId && m.userId === c.id) ||
+                                                (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
+                                            ))
+                                            .map(collab => (
+                                                <button
+                                                    key={collab.id}
+                                                    onClick={() => handleAddCollaboratorToTeam(collab)}
+                                                    className="w-full text-left flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition"
+                                                    title="הוסף איש צוות"
+                                                >
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                            {(collab.fullName || collab.email || "?").slice(0, 2)}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-medium text-gray-900 truncate">{collab.fullName || collab.email || "משתמש"}</p>
+                                                            <p className="text-xs text-gray-500 truncate">{collab.role || "חבר צוות"}</p>
+                                                        </div>
+                                                    </div>
+                                                    <span className="px-3 py-1 text-xs rounded-full border border-indigo-200 text-indigo-700 bg-white">
+                                                        הוסף
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        {(collaboratorsView === "past" ? collaborators : allUsers).filter(c => !(event?.team || []).some(m =>
                                             (m.userId && m.userId === c.id) ||
                                             (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
-                                        ))
-                                        .map(collab => (
-                                            <button
-                                                key={collab.id}
-                                                onClick={() => handleAddCollaboratorToTeam(collab)}
-                                                className="w-full text-left flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition"
-                                                title="הוסף איש צוות"
-                                            >
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-                                                        {(collab.fullName || collab.email || "?").slice(0, 2)}
-                                                    </div>
-                                                    <div className="min-w-0">
-                                                        <p className="text-sm font-medium text-gray-900 truncate">{collab.fullName || collab.email || "משתמש"}</p>
-                                                        <p className="text-xs text-gray-500 truncate">{collab.role || "חבר צוות"}</p>
-                                                    </div>
-                                                </div>
-                                                <span className="px-3 py-1 text-xs rounded-full border border-indigo-200 text-indigo-700 bg-white">
-                                                    הוסף
-                                                </span>
-                                            </button>
-                                        ))}
-                                    {(collaboratorsView === "past" ? collaborators : allUsers).filter(c => !(event?.team || []).some(m =>
-                                        (m.userId && m.userId === c.id) ||
-                                        (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
-                                    )).length === 0 && (
-                                            <p className="text-xs text-gray-500 px-2 py-1">לא נמצאו משתמשים להצגה.</p>
-                                        )}
-                                </div>
-                            </div>
-                        )}
-
-                        {canManageTeam && joinRequests.filter(r => r.status === "PENDING").length > 0 && (
-                            <div className="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-3">
-                                <p className="text-sm font-semibold text-amber-800 mb-2">בקשות הצטרפות ממתינות</p>
-                                <div className="space-y-2">
-                                    {joinRequests.filter(r => r.status === "PENDING").map((req) => (
-                                        <div key={req.id} className="flex items-center justify-between gap-3 p-2 bg-white border border-amber-100 rounded-lg">
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-medium text-gray-900 truncate">{req.requesterName || req.requesterEmail || "משתמש"}</p>
-                                                <p className="text-xs text-gray-500 truncate">{req.requesterEmail}</p>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <button
-                                                    onClick={() => handleApproveJoinRequest(req)}
-                                                    className="px-3 py-1 text-xs rounded-full bg-green-600 text-white hover:bg-green-700"
-                                                >
-                                                    אשר
-                                                </button>
-                                                <button
-                                                    onClick={() => handleRejectJoinRequest(req)}
-                                                    className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
-                                                >
-                                                    דחה
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="space-y-4">
-                            {event.team && event.team.length > 0 ? (
-                                event.team.map((member, idx) => (
-                                    <div key={idx} className="flex items-center gap-3 justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-                                                {member.name.substring(0, 2)}
-                                            </div>
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-900">{member.name}</p>
-                                                <p className="text-xs text-gray-500">{member.role}</p>
-                                            </div>
-                                        </div>
-                                        {canManageTeam && (
-                                            <div className="flex items-center gap-2">
-                                                {confirmRemoveIdx === idx ? (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handleRemoveTeamMember(idx)}
-                                                            className="px-2 py-1 text-xs rounded-full bg-red-600 text-white hover:bg-red-700"
-                                                        >
-                                                            הסר
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setConfirmRemoveIdx(null)}
-                                                            className="px-2 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
-                                                        >
-                                                            ביטול
-                                                        </button>
-                                                    </>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => setConfirmRemoveIdx(idx)}
-                                                        className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
-                                                        title="הסר איש צוות"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
+                                        )).length === 0 && (
+                                                <p className="text-xs text-gray-500 px-2 py-1">לא נמצאו משתמשים להצגה.</p>
+                                            )}
                                     </div>
-                                ))
-                            ) : (
-                                <p className="text-sm text-gray-500">עדיין אין חברי צוות</p>
+                                </div>
                             )}
-                            {!canManageTeam && (
-                                <p className="text-xs text-gray-500">רק יוצר האירוע יכול להוסיף שותפים.</p>
+
+                            {canManageTeam && joinRequests.filter(r => r.status === "PENDING").length > 0 && (
+                                <div className="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-3">
+                                    <p className="text-sm font-semibold text-amber-800 mb-2">בקשות הצטרפות ממתינות</p>
+                                    <div className="space-y-2">
+                                        {joinRequests.filter(r => r.status === "PENDING").map((req) => (
+                                            <div key={req.id} className="flex items-center justify-between gap-3 p-2 bg-white border border-amber-100 rounded-lg">
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-medium text-gray-900 truncate">{req.requesterName || req.requesterEmail || "משתמש"}</p>
+                                                    <p className="text-xs text-gray-500 truncate">{req.requesterEmail}</p>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => handleApproveJoinRequest(req)}
+                                                        className="px-3 py-1 text-xs rounded-full bg-green-600 text-white hover:bg-green-700"
+                                                    >
+                                                        אשר
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleRejectJoinRequest(req)}
+                                                        className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                    >
+                                                        דחה
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             )}
-                        </div>
+
+                            <div className="space-y-4">
+                                {event.team && event.team.length > 0 ? (
+                                    event.team.map((member, idx) => (
+                                        <div key={idx} className="flex items-center gap-3 justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                    {member.name.substring(0, 2)}
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900">{member.name}</p>
+                                                    <p className="text-xs text-gray-500">{member.role}</p>
+                                                </div>
+                                            </div>
+                                            {canManageTeam && (
+                                                <div className="flex items-center gap-2">
+                                                    {confirmRemoveIdx === idx ? (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleRemoveTeamMember(idx)}
+                                                                className="px-2 py-1 text-xs rounded-full bg-red-600 text-white hover:bg-red-700"
+                                                            >
+                                                                הסר
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setConfirmRemoveIdx(null)}
+                                                                className="px-2 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                            >
+                                                                ביטול
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => setConfirmRemoveIdx(idx)}
+                                                            className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
+                                                            title="הסר איש צוות"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-sm text-gray-500">עדיין אין חברי צוות</p>
+                                )}
+                                {!canManageTeam && (
+                                    <p className="text-xs text-gray-500">רק יוצר האירוע יכול להוסיף שותפים.</p>
+                                )}
+                            </div>
                         </div>
 
                         {/* Volunteers Section */}
@@ -4660,7 +4662,7 @@ export default function EventDetailsPage() {
                             if (!db || !editingDateTask) return;
                             try {
                                 const taskRef = doc(db, "events", id, "tasks", editingDateTask.id);
-                                const dueVal = computeDueDateFromMode(dateModalMode, dateModalOffset, dateModalTime || extractTimeString(getEventStartDate() || new Date()));
+                                const dueVal = computeDueDateFromMode(dateModalMode, parseOffset(dateModalOffset) ?? 0, dateModalTime || extractTimeString(getEventStartDate() || new Date()));
                                 await updateDoc(taskRef, { dueDate: dueVal });
                                 setEditingDateTask(null);
                             } catch (err) {
@@ -4676,7 +4678,7 @@ export default function EventDetailsPage() {
                                             type="radio"
                                             className="accent-indigo-600"
                                             checked={dateModalMode === "event_day"}
-                                            onChange={() => { setDateModalMode("event_day"); setDateModalOffset(0); }}
+                                            onChange={() => { setDateModalMode("event_day"); setDateModalOffset("0"); }}
                                         />
                                         ביום האירוע
                                     </label>
@@ -4690,27 +4692,27 @@ export default function EventDetailsPage() {
                                         ימים ביחס לאירוע
                                     </label>
                                 </div>
-                                    {dateModalMode === "offset" && (
-                                        <div className="flex items-center gap-2 text-xs">
-                                            <span>ימים מהאירוע:</span>
-                                            <input
-                                                type="text"
-                                                inputMode="numeric"
-                                                className="w-24 p-2 border rounded-lg text-sm"
-                                                value={dateModalOffset}
-                                                onChange={(e) => setDateModalOffset(e.target.value)}
-                                            />
-                                            <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
-                                        </div>
-                                    )}
+                                {dateModalMode === "offset" && (
+                                    <div className="flex items-center gap-2 text-xs">
+                                        <span>ימים מהאירוע:</span>
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            className="w-24 p-2 border rounded-lg text-sm"
+                                            value={dateModalOffset}
+                                            onChange={(e) => setDateModalOffset(e.target.value)}
+                                        />
+                                        <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                    </div>
+                                )}
                                 <div className="flex items-center gap-2 text-xs">
                                     <span>שעה:</span>
                                     <input
-        type="time"
-        className="p-2 border rounded-lg text-sm"
-        value={dateModalTime}
-        onChange={(e) => setDateModalTime(e.target.value || extractTimeString(getEventStartDate() || new Date()))}
-    />
+                                        type="time"
+                                        className="p-2 border rounded-lg text-sm"
+                                        value={dateModalTime}
+                                        onChange={(e) => setDateModalTime(e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+                                    />
                                 </div>
                                 <div className="text-xs text-gray-600">
                                     {editingDateTask.dueDate
@@ -4728,7 +4730,7 @@ export default function EventDetailsPage() {
                         </form>
                     </div>
                 </div>
-        )}
+            )}
         </div>
     );
 }

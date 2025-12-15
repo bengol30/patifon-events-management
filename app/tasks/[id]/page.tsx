@@ -1303,7 +1303,7 @@ export default function TaskDetailPage() {
                                                             onChange={() => {
                                                                 const nextTime = dueTime || extractTimeString(eventStartTime || new Date());
                                                                 setDueMode("offset");
-                                                                const dueVal = computeDueDateFromMode("offset", dueOffsetDays, nextTime);
+                                                                const dueVal = computeDueDateFromMode("offset", parseOffset(dueOffsetDays) ?? 0, nextTime);
                                                                 handleUpdateField("dueDate", dueVal);
                                                             }}
                                                         />
@@ -1311,25 +1311,25 @@ export default function TaskDetailPage() {
                                                     </label>
                                                 </div>
                                                 {dueMode === "offset" && (
-                                                <div className="flex items-center gap-2 text-xs">
-                                                    <span>ימים מהאירוע:</span>
-                                                    <input
-                                                        type="text"
-                                                        inputMode="numeric"
-                                                        className="w-24 p-2 border border-gray-200 rounded-lg text-sm"
-                                                        value={dueOffsetDays}
-                                                        onChange={(e) => {
-                                                            const raw = e.target.value;
-                                                            setDueOffsetDays(raw);
-                                                            const parsed = parseOffset(raw);
-                                                            if (parsed === null) return;
-                                                            const nextTime = dueTime || extractTimeString(eventStartTime || new Date());
-                                                            const dueVal = computeDueDateFromMode("offset", parsed, nextTime);
-                                                            handleUpdateField("dueDate", dueVal);
-                                                        }}
-                                                    />
-                                                    <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
-                                                </div>
+                                                    <div className="flex items-center gap-2 text-xs">
+                                                        <span>ימים מהאירוע:</span>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="numeric"
+                                                            className="w-24 p-2 border border-gray-200 rounded-lg text-sm"
+                                                            value={dueOffsetDays}
+                                                            onChange={(e) => {
+                                                                const raw = e.target.value;
+                                                                setDueOffsetDays(raw);
+                                                                const parsed = parseOffset(raw);
+                                                                if (parsed === null) return;
+                                                                const nextTime = dueTime || extractTimeString(eventStartTime || new Date());
+                                                                const dueVal = computeDueDateFromMode("offset", parsed, nextTime);
+                                                                handleUpdateField("dueDate", dueVal);
+                                                            }}
+                                                        />
+                                                        <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                                    </div>
                                                 )}
                                                 <div className="flex items-center gap-2 text-xs">
                                                     <span>שעה:</span>
@@ -1340,7 +1340,7 @@ export default function TaskDetailPage() {
                                                         onChange={(e) => {
                                                             const nextTime = e.target.value || extractTimeString(eventStartTime || new Date());
                                                             setDueTime(nextTime);
-                                                            const dueVal = computeDueDateFromMode(dueMode, dueOffsetDays, nextTime);
+                                                            const dueVal = computeDueDateFromMode(dueMode, parseOffset(dueOffsetDays) ?? 0, nextTime);
                                                             handleUpdateField("dueDate", dueVal);
                                                         }}
                                                     />

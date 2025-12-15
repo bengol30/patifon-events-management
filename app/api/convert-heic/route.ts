@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     const arrayBuffer = await file.arrayBuffer();
     const convert = (await import("heic-convert")).default;
     const outputBuffer = await convert({
-      buffer: Buffer.from(arrayBuffer),
+      buffer: Buffer.from(arrayBuffer) as any,
       format: "JPEG",
       quality: 0.9,
     });

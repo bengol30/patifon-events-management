@@ -216,29 +216,29 @@ export default function Dashboard() {
   const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [newNote, setNewNote] = useState("");
-const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-const [editingNoteText, setEditingNoteText] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
 
-const filteredVolunteers = useMemo(() => {
-  const query = volunteerSearch.trim().toLowerCase();
-  if (!query) return volunteersList;
-  return volunteersList.filter((vol) => {
-    const name = vol.name || "";
-    return name.toLowerCase().includes(query);
-  });
-}, [volunteerSearch, volunteersList]);
+  const filteredVolunteers = useMemo(() => {
+    const query = volunteerSearch.trim().toLowerCase();
+    if (!query) return volunteersList;
+    return volunteersList.filter((vol) => {
+      const name = vol.name || "";
+      return name.toLowerCase().includes(query);
+    });
+  }, [volunteerSearch, volunteersList]);
 
-const filteredRegistrants = useMemo(() => {
-  const query = registrantSearch.trim().toLowerCase();
-  if (!query) return registrantsList;
-  return registrantsList.filter((reg) => {
-    const name = (reg.name || "").toLowerCase();
-    const email = (reg.email || "").toLowerCase();
-    const phone = (reg.phone || "").toLowerCase();
-    const eventTitle = (reg.eventTitle || "").toLowerCase();
-    return name.includes(query) || email.includes(query) || phone.includes(query) || eventTitle.includes(query);
-  });
-}, [registrantSearch, registrantsList]);
+  const filteredRegistrants = useMemo(() => {
+    const query = registrantSearch.trim().toLowerCase();
+    if (!query) return registrantsList;
+    return registrantsList.filter((reg) => {
+      const name = (reg.name || "").toLowerCase();
+      const email = (reg.email || "").toLowerCase();
+      const phone = (reg.phone || "").toLowerCase();
+      const eventTitle = (reg.eventTitle || "").toLowerCase();
+      return name.includes(query) || email.includes(query) || phone.includes(query) || eventTitle.includes(query);
+    });
+  }, [registrantSearch, registrantsList]);
 
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
@@ -325,17 +325,17 @@ const filteredRegistrants = useMemo(() => {
     }
   };
 
-const isProjectTaskRef = (ref?: any) => {
-  if (!ref?.path) return false;
-  const path = ref.path.toString();
-  const marker = "/documents/";
-  const idx = path.indexOf(marker);
+  const isProjectTaskRef = (ref?: any) => {
+    if (!ref?.path) return false;
+    const path = ref.path.toString();
+    const marker = "/documents/";
+    const idx = path.indexOf(marker);
     if (idx !== -1) {
       const sub = path.slice(idx + marker.length);
       if (sub.startsWith("projects/")) return true;
     }
-  return path.startsWith("projects/") || path.includes("/projects/");
-};
+    return path.startsWith("projects/") || path.includes("/projects/");
+  };
 
   const handleRegisterGalleryUpload = async (file: File) => {
     if (!db || !storage || !isAdmin) return;
@@ -373,7 +373,7 @@ const isProjectTaskRef = (ref?: any) => {
   };
 
   const handleDeleteRegisterGallery = async (img: { id: string; storagePath?: string }) => {
-    if (!db || !isAdmin) return;
+    if (!db || !storage || !isAdmin) return;
     if (typeof window !== "undefined") {
       const ok = window.confirm("למחוק את התמונה מהגלריה?");
       if (!ok) return;
@@ -397,72 +397,72 @@ const isProjectTaskRef = (ref?: any) => {
     }
   };
 
-const toDateSafe = (val: any): Date | null => {
-  if (!val) return null;
-  if (val.toDate) {
-    try {
-      const d = val.toDate();
+  const toDateSafe = (val: any): Date | null => {
+    if (!val) return null;
+    if (val.toDate) {
+      try {
+        const d = val.toDate();
+        return isNaN(d.getTime()) ? null : d;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (val.seconds) {
+      const d = new Date(val.seconds * 1000);
       return isNaN(d.getTime()) ? null : d;
-    } catch {
-      /* ignore */
     }
-  }
-  if (val.seconds) {
-    const d = new Date(val.seconds * 1000);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  if (val instanceof Date) {
-    return isNaN(val.getTime()) ? null : val;
-  }
-  if (typeof val === "string") {
-    const d = new Date(val);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-};
-
-const computeNextOccurrence = (
-  baseDate: Date,
-  recurrence: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
-  recurrenceEnd?: Date | null
-) => {
-  if (!(baseDate instanceof Date) || isNaN(baseDate.getTime())) return baseDate;
-  if (recurrence === "NONE") return baseDate;
-  const now = Date.now();
-  let candidate = new Date(baseDate);
-  let guard = 0;
-  const addInterval = () => {
-    if (recurrence === "WEEKLY") candidate = new Date(candidate.getTime() + 7 * 24 * 60 * 60 * 1000);
-    else if (recurrence === "BIWEEKLY") candidate = new Date(candidate.getTime() + 14 * 24 * 60 * 60 * 1000);
-    else if (recurrence === "MONTHLY") {
-      const next = new Date(candidate);
-      next.setMonth(next.getMonth() + 1);
-      candidate = next;
+    if (val instanceof Date) {
+      return isNaN(val.getTime()) ? null : val;
     }
+    if (typeof val === "string") {
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    return null;
   };
-  while (candidate.getTime() < now && guard < 200) {
-    addInterval();
-    guard += 1;
-  }
-  if (recurrenceEnd && recurrenceEnd.getTime && recurrenceEnd.getTime() > 0) {
-    const endTs = recurrenceEnd.getTime();
-    if (candidate.getTime() > endTs) {
-      if (endTs >= now) candidate = new Date(endTs);
-    }
-  }
-  return candidate;
-};
 
-const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY" => {
-  const raw = (val || "").toString().toUpperCase().trim();
-  if (!raw || raw === "NONE") return "NONE";
-  if (raw.includes("BIWEEK") || raw.includes("2W") || raw.includes("FORTNIGHT") || (raw.includes("שבוע") && raw.includes("יים")) || raw.includes("שבועיים")) {
-    return "BIWEEKLY";
-  }
-  if (raw.includes("MONTH") || raw.includes("חודש")) return "MONTHLY";
-  if (raw.includes("WEEK") || raw.includes("שבוע")) return "WEEKLY";
-  return "NONE";
-};
+  const computeNextOccurrence = (
+    baseDate: Date,
+    recurrence: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
+    recurrenceEnd?: Date | null
+  ) => {
+    if (!(baseDate instanceof Date) || isNaN(baseDate.getTime())) return baseDate;
+    if (recurrence === "NONE") return baseDate;
+    const now = Date.now();
+    let candidate = new Date(baseDate);
+    let guard = 0;
+    const addInterval = () => {
+      if (recurrence === "WEEKLY") candidate = new Date(candidate.getTime() + 7 * 24 * 60 * 60 * 1000);
+      else if (recurrence === "BIWEEKLY") candidate = new Date(candidate.getTime() + 14 * 24 * 60 * 60 * 1000);
+      else if (recurrence === "MONTHLY") {
+        const next = new Date(candidate);
+        next.setMonth(next.getMonth() + 1);
+        candidate = next;
+      }
+    };
+    while (candidate.getTime() < now && guard < 200) {
+      addInterval();
+      guard += 1;
+    }
+    if (recurrenceEnd && recurrenceEnd.getTime && recurrenceEnd.getTime() > 0) {
+      const endTs = recurrenceEnd.getTime();
+      if (candidate.getTime() > endTs) {
+        if (endTs >= now) candidate = new Date(endTs);
+      }
+    }
+    return candidate;
+  };
+
+  const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY" => {
+    const raw = (val || "").toString().toUpperCase().trim();
+    if (!raw || raw === "NONE") return "NONE";
+    if (raw.includes("BIWEEK") || raw.includes("2W") || raw.includes("FORTNIGHT") || (raw.includes("שבוע") && raw.includes("יים")) || raw.includes("שבועיים")) {
+      return "BIWEEKLY";
+    }
+    if (raw.includes("MONTH") || raw.includes("חודש")) return "MONTHLY";
+    if (raw.includes("WEEK") || raw.includes("שבוע")) return "WEEKLY";
+    return "NONE";
+  };
 
   const fetchTasksForContainers = async ({
     eventIds = [],
@@ -1151,11 +1151,11 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 addVolunteer(volDoc, project.id, volData, projTitle, "project");
               });
             } catch (projectError) {
-                console.error(`Error loading volunteers for project ${project.id}:`, projectError);
+              console.error(`Error loading volunteers for project ${project.id}:`, projectError);
             }
           }
           console.log(`Loaded ${volunteersData.length} volunteers total after merging per-event/project fetches`);
-          
+
           // Sort by createdAt (newest first)
           const ts = (val: any) => {
             if (!val) return 0;
@@ -1165,13 +1165,13 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
             return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
           };
           volunteersData.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
-          
+
           setVolunteersList(volunteersData);
-      // Registrants (event guest registrations)
-      try {
-        const regsQuery = query(collectionGroup(db, "registrants"));
-        const regsSnap = await getDocs(regsQuery);
-        const regs: EventRegistrant[] = [];
+          // Registrants (event guest registrations)
+          try {
+            const regsQuery = query(collectionGroup(db, "registrants"));
+            const regsSnap = await getDocs(regsQuery);
+            const regs: EventRegistrant[] = [];
             regsSnap.forEach((rDoc) => {
               const data = rDoc.data() as any;
               const parentId = rDoc.ref.parent.parent?.id || "";
@@ -1187,57 +1187,22 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
               });
             });
             regs.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
-        setRegistrantsList(regs);
-      } catch (err) {
-        console.error("Error loading registrants", err);
-        setRegistrantsList([]);
-      }
-      setLoadingRegistrants(false);
+            setRegistrantsList(regs);
+          } catch (err) {
+            console.error("Error loading registrants", err);
+            setRegistrantsList([]);
+          }
+          setLoadingRegistrants(false);
 
-      // Load all events for register modal editing/selection
-      try {
-        const allEventsSnap = await getDocs(collection(db, "events"));
-        const allEv: any[] = [];
-        const byId = new Map<string, any>();
-          allEventsSnap.forEach(d => {
-            const data = d.data() as any;
-          const item = {
-            id: d.id,
-            title: data.title || "אירוע ללא שם",
-            description: data.description || data.goal || "",
-            location: data.location || "",
-            startTime: data.startTime,
-            officialFlyerUrl: data.officialFlyerUrl || data.previewImage || "",
-            createdBy: data.createdBy,
-            members: data.members || [],
-            team: data.team || [],
-          };
-          allEv.push(item);
-          byId.set(d.id, item);
-        });
-        // default selection if not saved
-        const cfgRef = doc(db, "settings", "public_register_events");
-        const cfgSnap = await getDoc(cfgRef);
-        const allowed: string[] = cfgSnap.exists() ? (cfgSnap.data() as any).allowedEventIds || [] : [];
-        const allowedSet = new Set<string>(allowed);
-        if (allowedSet.size === 0) {
-          allEv.forEach(ev => {
-            const hasAdmin =
-              (ev.createdBy === user.uid) ||
-              (Array.isArray(ev.members) && ev.members.includes(user.uid)) ||
-              ((ev.team || []).some((m: any) => (m.userId && m.userId === user.uid) || (m.email && m.email.toLowerCase() === (user.email || "").toLowerCase())));
-            if (hasAdmin) allowedSet.add(ev.id);
-          });
-        }
-        // Ensure allowed events are present even אם לא נטענו ברשימה
-        const missingAllowed = Array.from(allowedSet).filter(id => !byId.has(id));
-        for (const mid of missingAllowed) {
+          // Load all events for register modal editing/selection
           try {
-            const docSnap = await getDoc(doc(db, "events", mid));
-            if (docSnap.exists()) {
-              const data = docSnap.data() as any;
+            const allEventsSnap = await getDocs(collection(db, "events"));
+            const allEv: any[] = [];
+            const byId = new Map<string, any>();
+            allEventsSnap.forEach(d => {
+              const data = d.data() as any;
               const item = {
-                id: docSnap.id,
+                id: d.id,
                 title: data.title || "אירוע ללא שם",
                 description: data.description || data.goal || "",
                 location: data.location || "",
@@ -1248,17 +1213,52 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 team: data.team || [],
               };
               allEv.push(item);
-              byId.set(item.id, item);
+              byId.set(d.id, item);
+            });
+            // default selection if not saved
+            const cfgRef = doc(db, "settings", "public_register_events");
+            const cfgSnap = await getDoc(cfgRef);
+            const allowed: string[] = cfgSnap.exists() ? (cfgSnap.data() as any).allowedEventIds || [] : [];
+            const allowedSet = new Set<string>(allowed);
+            if (allowedSet.size === 0) {
+              allEv.forEach(ev => {
+                const hasAdmin =
+                  (ev.createdBy === user.uid) ||
+                  (Array.isArray(ev.members) && ev.members.includes(user.uid)) ||
+                  ((ev.team || []).some((m: any) => (m.userId && m.userId === user.uid) || (m.email && m.email.toLowerCase() === (user.email || "").toLowerCase())));
+                if (hasAdmin) allowedSet.add(ev.id);
+              });
             }
+            // Ensure allowed events are present even אם לא נטענו ברשימה
+            const missingAllowed = Array.from(allowedSet).filter(id => !byId.has(id));
+            for (const mid of missingAllowed) {
+              try {
+                const docSnap = await getDoc(doc(db, "events", mid));
+                if (docSnap.exists()) {
+                  const data = docSnap.data() as any;
+                  const item = {
+                    id: docSnap.id,
+                    title: data.title || "אירוע ללא שם",
+                    description: data.description || data.goal || "",
+                    location: data.location || "",
+                    startTime: data.startTime,
+                    officialFlyerUrl: data.officialFlyerUrl || data.previewImage || "",
+                    createdBy: data.createdBy,
+                    members: data.members || [],
+                    team: data.team || [],
+                  };
+                  allEv.push(item);
+                  byId.set(item.id, item);
+                }
+              } catch (err) {
+                console.warn("Failed loading allowed event", mid, err);
+              }
+            }
+            setRegisterEventsAll(allEv);
+            setRegisterEventsSelection(allowedSet);
           } catch (err) {
-            console.warn("Failed loading allowed event", mid, err);
+            console.error("Error loading events for register selection", err);
           }
-        }
-        setRegisterEventsAll(allEv);
-        setRegisterEventsSelection(allowedSet);
-      } catch (err) {
-        console.error("Error loading events for register selection", err);
-      }
 
         } catch (volunteersError) {
           console.error("Error loading volunteers:", volunteersError);
@@ -2245,7 +2245,7 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                 <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור שינויים</button>
               </div>
             </form>
-            </div>
+          </div>
         </div>
       )}
       {/* Status Edit Modal */}
@@ -2890,7 +2890,7 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                       <input
                         type="datetime-local"
                         className="w-full border rounded-lg px-2 py-1 text-sm"
-                        value={edit.startTime ?? (ev.startTime?.seconds ? new Date(ev.startTime.seconds * 1000).toISOString().slice(0,16) : (ev.startTime ? new Date(ev.startTime).toISOString().slice(0,16) : ""))}
+                        value={edit.startTime ?? (ev.startTime?.seconds ? new Date(ev.startTime.seconds * 1000).toISOString().slice(0, 16) : (ev.startTime ? new Date(ev.startTime).toISOString().slice(0, 16) : ""))}
                         onChange={(e) => setEventEdits(prev => ({ ...prev, [ev.id]: { ...prev[ev.id], startTime: e.target.value } }))}
                       />
                       <input
@@ -2936,8 +2936,8 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
                             if (draft.description !== undefined) updates.description = draft.description;
                             if (draft.location !== undefined) updates.location = draft.location;
                             if (draft.startTime !== undefined) {
-                                const d = draft.startTime ? new Date(draft.startTime) : null;
-                                if (d && !isNaN(d.getTime())) updates.startTime = d;
+                              const d = draft.startTime ? new Date(draft.startTime) : null;
+                              if (d && !isNaN(d.getTime())) updates.startTime = d;
                             }
                             if (draft.hero !== undefined) updates.officialFlyerUrl = draft.hero;
                             try {
@@ -3143,11 +3143,10 @@ const normalizeRecurrence = (val: any): "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHL
               <button
                 onClick={exportVolunteersToCsv}
                 disabled={!volunteersList.length}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
-                  volunteersList.length
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${volunteersList.length
                     ? "bg-white border-indigo-200 text-indigo-800 hover:bg-indigo-50"
                     : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
-                }`}
+                  }`}
                 title="ייצא את כל המתנדבים לטבלת אקסל"
               >
                 ייצוא לאקסל
