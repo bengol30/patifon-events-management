@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { collection, collectionGroup, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc, setDoc } from "firebase/firestore";
+import { collection, collectionGroup, doc, getDocs, query, where, updateDoc, onSnapshot, addDoc, serverTimestamp, deleteDoc, getDoc, setDoc, runTransaction } from "firebase/firestore";
 import { Calendar, MapPin, Users, Handshake, Clock, Target, AlertCircle, ArrowRight, CheckSquare, Square, UserCheck, Lock, Circle, CheckCircle2, MessageCircle, X } from "lucide-react";
 
 interface Task {
@@ -24,6 +24,8 @@ interface Task {
     createdBy?: string;
     ownerId?: string;
     contactPhone?: string;
+    requiredCompletions?: number | null;
+    remainingCompletions?: number | null;
 }
 interface CompletedLog {
     id: string;
@@ -43,6 +45,7 @@ interface CompletedTaskItem {
 }
 
 const ADMIN_EMAIL = "bengo0469@gmail.com";
+const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 type VolunteerSession = { volunteerId: string; name: string; email: string; phone?: string };
 
 interface EventData {
@@ -874,61 +877,91 @@ const totalAvailableVolunteerTasks = useMemo(() => {
             openAuth(eventId);
             return;
         }
+        const emailLower = sessionIdentity.email.toLowerCase();
+        if (!emailLower) {
+            alert("נדרש אימייל מתנדב כדי לבחור משימות");
+            return;
+        }
 
         try {
             setSaveStatus((prev) => ({ ...prev, [eventId]: "saving" }));
             const taskRef = doc(db, ...getTaskRefPath(scope, eventId, taskId));
-            const snap = await getDoc(taskRef);
-            if (!snap.exists()) {
-                setSaveStatus((prev) => ({ ...prev, [eventId]: "error" }));
-                return;
-            }
+            let updatedAssignees: any[] = [];
+            let updatedRemaining = 0;
+            let updatedRequired = 1;
 
-            const data = snap.data() as any;
-            const currentAssignees = Array.isArray(data.assignees) ? data.assignees : [];
-            const filtered = currentAssignees.filter((a: any) => (a?.email || "").toLowerCase() !== sessionIdentity.email);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(taskRef);
+                if (!snap.exists()) throw new Error("not_found");
+                const data = snap.data() as any;
+                const required = Math.max(1, Number(data.requiredCompletions) || 1);
+                const remaining = Math.max(0, Number(data.remainingCompletions != null ? data.remainingCompletions : required));
+                const lastClaims = (data.lastClaims || {}) as Record<string, number>;
+                const lastTs = emailLower ? Number(lastClaims[emailLower] || 0) : 0;
+                const now = Date.now();
+                const assigneesArr = Array.isArray(data.assignees) ? data.assignees : [];
+                const filtered = assigneesArr.filter((a: any) => (a?.email || "").toLowerCase() !== emailLower);
 
-            // Try to bind the assignee to an existing user for dashboard visibility
-            let assigneeIdPatch: any = {};
-            let enrichedAssignee: { name: string; email: string; userId?: string } | null = null;
-            if (select) {
-                try {
-                    const usersSnap = await getDocs(
-                        query(collection(db, "users"), where("email", "==", sessionIdentity.email))
-                    );
-                    const matchedUser = usersSnap.docs[0];
-                    if (matchedUser) {
-                        enrichedAssignee = {
-                            name: sessionIdentity.name,
-                            email: sessionIdentity.email.toLowerCase(),
-                            userId: matchedUser.id,
-                        };
-                        assigneeIdPatch = {
-                            assigneeId: matchedUser.id,
-                            assignee: sessionIdentity.name,
-                            assigneeEmail: sessionIdentity.email.toLowerCase(),
-                        };
-                    } else {
-                        enrichedAssignee = {
-                            name: sessionIdentity.name,
-                            email: sessionIdentity.email.toLowerCase(),
-                        };
-                        assigneeIdPatch = { assignee: sessionIdentity.name, assigneeId: "", assigneeEmail: sessionIdentity.email.toLowerCase() };
+                // Build assignee patch
+                let assigneeIdPatch: any = {};
+                let enrichedAssignee: { name: string; email: string; userId?: string } | null = null;
+                if (select) {
+                    if (remaining <= 0) throw new Error("no_slots");
+                    if (lastTs && now - lastTs < CLAIM_COOLDOWN_MS) throw new Error("cooldown");
+                    try {
+                        const usersSnap = await getDocs(
+                            query(collection(db, "users"), where("email", "==", sessionIdentity.email))
+                        );
+                        const matchedUser = usersSnap.docs[0];
+                        if (matchedUser) {
+                            enrichedAssignee = {
+                                name: sessionIdentity.name,
+                                email: emailLower,
+                                userId: matchedUser.id,
+                            };
+                            assigneeIdPatch = {
+                                assigneeId: matchedUser.id,
+                                assignee: sessionIdentity.name,
+                                assigneeEmail: emailLower,
+                            };
+                        } else {
+                            enrichedAssignee = {
+                                name: sessionIdentity.name,
+                                email: emailLower,
+                            };
+                            assigneeIdPatch = { assignee: sessionIdentity.name, assigneeId: "", assigneeEmail: emailLower };
+                        }
+                    } catch (lookupErr) {
+                        console.warn("user lookup failed", lookupErr);
+                        assigneeIdPatch = { assignee: sessionIdentity.name, assigneeEmail: emailLower };
+                        enrichedAssignee = { name: sessionIdentity.name, email: emailLower };
                     }
-                } catch (lookupErr) {
-                    console.warn("user lookup failed", lookupErr);
-                    assigneeIdPatch = { assignee: sessionIdentity.name, assigneeEmail: sessionIdentity.email.toLowerCase() };
-                    enrichedAssignee = { name: sessionIdentity.name, email: sessionIdentity.email.toLowerCase() };
+                    updatedAssignees = [...filtered, enrichedAssignee || { name: sessionIdentity.name, email: emailLower }];
+                    updatedRemaining = remaining - 1;
+                    updatedRequired = required;
+                    tx.update(taskRef, {
+                        assignees: updatedAssignees,
+                        remainingCompletions: updatedRemaining,
+                        requiredCompletions: required,
+                        lastClaims: { ...lastClaims, [emailLower]: now },
+                        ...assigneeIdPatch,
+                    });
+                } else {
+                    updatedAssignees = filtered;
+                    updatedRequired = required;
+                    updatedRemaining = Math.min(required, remaining + (assigneesArr.length !== filtered.length ? 1 : 0));
+                    const assigneePatch = filtered.length === 0 ? { assignee: "", assigneeId: "", assigneeEmail: "" } : {};
+                    const nextClaims = { ...lastClaims };
+                    delete nextClaims[emailLower];
+                    tx.update(taskRef, {
+                        assignees: updatedAssignees,
+                        remainingCompletions: updatedRemaining,
+                        requiredCompletions: required,
+                        lastClaims: nextClaims,
+                        ...assigneePatch,
+                    });
                 }
-            } else if (filtered.length === 0) {
-                assigneeIdPatch = { assignee: "", assigneeId: "", assigneeEmail: "" };
-            }
-
-            const updatedAssignees = select
-                ? [...filtered, enrichedAssignee || { name: sessionIdentity.name, email: sessionIdentity.email.toLowerCase() }]
-                : filtered;
-
-            await updateDoc(taskRef, { assignees: updatedAssignees, ...assigneeIdPatch });
+            });
 
             // Update local selections
             setSelectedTasksByEvent((prev) => {
@@ -942,7 +975,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
 
             setTasksByEvent((prev) => {
                 const current = prev[eventId] || [];
-                const updated = current.map((t) => (t.id === taskId ? { ...t, assignees: updatedAssignees } : t));
+                const updated = current.map((t) => (t.id === taskId ? { ...t, assignees: updatedAssignees, remainingCompletions: updatedRemaining, requiredCompletions: updatedRequired } : t));
                 return { ...prev, [eventId]: updated };
             });
 
@@ -953,7 +986,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                         ? {
                             ...ev,
                             tasks: (ev.tasks || []).map((t) =>
-                                t.id === taskId ? { ...t, assignees: updatedAssignees } : t
+                                t.id === taskId ? { ...t, assignees: updatedAssignees, remainingCompletions: updatedRemaining, requiredCompletions: updatedRequired } : t
                             ),
                         }
                         : ev
@@ -962,7 +995,11 @@ const totalAvailableVolunteerTasks = useMemo(() => {
 
             setSaveStatus((prev) => ({ ...prev, [eventId]: "saved" }));
         } catch (err) {
-            console.error("Error saving volunteer tasks", err);
+            const msg = (err as any)?.message || "";
+            if (msg === "no_slots") alert("כל המשבצות במשימה הזו נתפסו כרגע.");
+            else if (msg === "cooldown") alert("כבר לקחת את המשימה הזו. אפשר לבחור אותה שוב רק אחרי 24 שעות.");
+            else if (msg === "not_found") alert("המשימה לא נמצאה.");
+            else console.error("Error saving volunteer tasks", err);
             setSaveStatus((prev) => ({ ...prev, [eventId]: "error" }));
         }
     };
@@ -1335,8 +1372,10 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                 if (task.status === "DONE") return false;
                                 const assignees = (task.assignees || []).map(a => (a.email || "").toLowerCase()).filter(Boolean);
                                 const assignedToMe = assignees.includes(sessionIdentity.email);
-                                const assignedToOthers = assignees.length > 0 && !assignedToMe;
-                                return !assignedToOthers || assignedToMe;
+                                const required = (task as any).requiredCompletions != null ? Number((task as any).requiredCompletions) : 1;
+                                const remaining = (task as any).remainingCompletions != null ? Number((task as any).remainingCompletions) : required;
+                                const hasSlots = remaining > 0 || assignedToMe;
+                                return hasSlots;
                             });
                             const hasTasks = eventTasksAvailable.length > 0;
                             
@@ -1395,7 +1434,9 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                                 const isSelected = selectedSet.has(task.id);
                                                 const assignedEmails = (task.assignees || []).map((a) => (a.email || "").toLowerCase()).filter(Boolean);
                                                 const assignedToMe = assignedEmails.includes(sessionIdentity.email);
-                                                const assignedToOthers = assignedEmails.length > 0 && !assignedToMe;
+                                                const required = (task as any).requiredCompletions != null ? Number((task as any).requiredCompletions) : 1;
+                                                const remaining = (task as any).remainingCompletions != null ? Number((task as any).remainingCompletions) : required;
+                                                const hasSlots = remaining > 0 || assignedToMe;
                                                 const creatorId = (task as any).createdBy || (task as any).ownerId || "";
                                                 const cachedMeta = creatorId ? userMetaCache[creatorId] : undefined;
                                                 const creatorName =
@@ -1420,6 +1461,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                                         <button
                                                             onClick={() => setTaskSelectionImmediate(event.id, task.id, !isSelected, event.scope || "event")}
                                                             className="shrink-0"
+                                                            disabled={!hasSlots && !isSelected}
                                                         >
                                                             {isSelected ? <CheckSquare className="text-indigo-600" size={18} /> : <Square className="text-gray-400" size={18} />}
                                                         </button>
@@ -1446,8 +1488,13 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                                                 {task.lastApprovalDecision === "REJECTED" && (
                                                                     <span className="px-2 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-700">נדחה</span>
                                                                 )}
+                                                                {required > 1 && (
+                                                                    <span className="px-2 py-0.5 rounded-full border text-indigo-700 border-indigo-200 bg-indigo-50">
+                                                                        {Math.max(remaining, 0)} / {required} פנויים
+                                                                    </span>
+                                                                )}
                                                                 {assignedToMe && <span className="text-emerald-700">שמור עבורך</span>}
-                                                                {assignedToOthers && <span className="text-amber-700">שמור למתנדב אחר</span>}
+                                                                {!hasSlots && !assignedToMe && <span className="text-red-500">אין משבצות פנויות</span>}
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-2 text-xs">

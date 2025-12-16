@@ -6,7 +6,7 @@ import TaskCard from "@/components/TaskCard";
 import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat } from "lucide-react";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { db, storage } from "@/lib/firebase";
-import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc, where } from "firebase/firestore";
+import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc, where, collectionGroup } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import TaskChat from "@/components/TaskChat";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -74,6 +74,8 @@ interface Task {
     specialType?: string;
     eventTitle?: string;
     eventId?: string;
+    requiredCompletions?: number | null;
+    remainingCompletions?: number | null;
 }
 
 interface BudgetItem {
@@ -224,6 +226,7 @@ export default function EventDetailsPage() {
         priority: "NORMAL",
         isVolunteerTask: false,
         volunteerHours: null as number | null,
+        requiredCompletions: 1,
     });
     const [saveNewTaskToLibrary, setSaveNewTaskToLibrary] = useState(false);
     const newTaskFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -586,14 +589,58 @@ export default function EventDetailsPage() {
         // 2) email
         if (assignee.email) {
             try {
+                // Volunteers registered to this event
+                if (id) {
+                    const volByEmail = query(
+                        collection(db!, "events", id, "volunteers"),
+                        where("email", "==", assignee.email.toLowerCase())
+                    );
+                    const volRes = await getDocs(volByEmail);
+                    const volData = volRes.docs[0]?.data() as any;
+                    if (volData?.phone || volData?.phoneNormalized) return volData.phone || volData.phoneNormalized;
+                }
                 const q = query(collection(db!, "users"), where("email", "==", assignee.email.toLowerCase()));
                 const res = await getDocs(q);
                 const data = res.docs[0]?.data() as any;
                 if (data?.phone) return data.phone;
             } catch { /* ignore */ }
+            try {
+                const cg = query(collectionGroup(db!, "volunteers"), where("email", "==", assignee.email.toLowerCase()));
+                const cgRes = await getDocs(cg);
+                const cgData = cgRes.docs[0]?.data() as any;
+                if (cgData?.phoneNormalized || cgData?.phone) return cgData.phoneNormalized || cgData.phone;
+            } catch { /* ignore */ }
         }
         return "";
     };
+
+    const normalizePhoneNumber = (raw?: string) => {
+        if (!raw) return "";
+        const digits = raw.replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("0")) return `972${digits.replace(/^0+/, "")}`;
+        return digits;
+    };
+
+    const toggleVolunteerSelection = (key: string) => {
+        setVolunteerSelections(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    };
+
+    const selectAllVolunteers = () => {
+        const next = new Set<string>();
+        combinedVolunteers.forEach(v => {
+            const key = (v.email || v.id || v.name || "").toLowerCase();
+            if (key) next.add(key);
+        });
+        setVolunteerSelections(next);
+    };
+
+    const clearVolunteerSelection = () => setVolunteerSelections(new Set());
 
     const dedupeAssignees = (arr: Assignee[]) => {
         const seen = new Set<string>();
@@ -788,6 +835,52 @@ export default function EventDetailsPage() {
     const [volunteers, setVolunteers] = useState<EventVolunteer[]>([]);
     const [loadingVolunteers, setLoadingVolunteers] = useState(true);
     const [volunteerBusyId, setVolunteerBusyId] = useState<string | null>(null);
+    const [showVolunteerMessage, setShowVolunteerMessage] = useState(false);
+    const [volunteerSelections, setVolunteerSelections] = useState<Set<string>>(new Set());
+    const [sendingVolunteerMsg, setSendingVolunteerMsg] = useState(false);
+    const volunteerMessageRef = useRef<string>("");
+    const volunteerPhoneMap = useMemo(() => {
+        const map = new Map<string, string>();
+        volunteers.forEach(v => {
+            const key = (v.email || v.id || v.name || "").toLowerCase();
+            const phone = (v as any).phoneNormalized || v.phone;
+            if (key && phone) map.set(key, phone);
+        });
+        return map;
+    }, [volunteers]);
+    const combinedVolunteers = useMemo(() => {
+        const map = new Map<string, { id?: string; name?: string; email?: string; phone?: string }>();
+        volunteers.forEach(v => {
+            const key = (v.email || v.id || v.name || "").toLowerCase();
+            if (!key) return;
+            map.set(key, { id: v.id, name: v.name || v.email, email: v.email, phone: v.phone || (v as any).phoneNormalized });
+        });
+        tasks
+            .filter(t => t.isVolunteerTask || t.volunteerHours != null)
+            .forEach(t => {
+                (t.assignees || []).forEach(a => {
+                    const key = (a.email || a.userId || a.name || "").toLowerCase();
+                    if (!key) return;
+                    const phoneFromEvent = volunteerPhoneMap.get(key);
+                    if (!map.has(key)) {
+                        map.set(key, { id: a.userId, name: a.name || a.email, email: a.email, phone: a.phone || phoneFromEvent });
+                    } else if (!map.get(key)?.phone && (a.phone || phoneFromEvent)) {
+                        const existing = map.get(key)!;
+                        map.set(key, { ...existing, phone: a.phone || phoneFromEvent });
+                    }
+                });
+            });
+        return Array.from(map.values());
+    }, [tasks, volunteers, volunteerPhoneMap]);
+
+    useEffect(() => {
+        const next = new Set<string>();
+        combinedVolunteers.forEach(v => {
+            const key = (v.email || v.id || v.name || "").toLowerCase();
+            if (key) next.add(key);
+        });
+        setVolunteerSelections(next);
+    }, [combinedVolunteers, volunteers]);
     const [creatorName, setCreatorName] = useState("");
     const [showSpecialModal, setShowSpecialModal] = useState(false);
     const [creatingSpecialTask, setCreatingSpecialTask] = useState(false);
@@ -877,6 +970,80 @@ export default function EventDetailsPage() {
         } catch (err) {
             console.error("Error updating info block:", err);
             alert("שגיאה בעדכון הסעיף");
+        }
+    };
+
+    const handleSendVolunteerBroadcast = async () => {
+        if (!db) return;
+        const cfg = await fetchWhatsappConfig();
+        if (!cfg) {
+            alert("לא הוגדר אינטגרציית וואטסאפ לשליחה");
+            return;
+        }
+        const list = combinedVolunteers.filter(v => {
+            const key = (v.email || v.id || v.name || "").toLowerCase();
+            return key && volunteerSelections.has(key);
+        });
+        if (!list.length) {
+            alert("בחר לפחות מתנדב אחד לשליחה");
+            return;
+        }
+        const volunteerMessage = volunteerMessageRef.current || "";
+        if (!volunteerMessage.trim()) {
+            alert("כתוב הודעה לפני שליחה");
+            return;
+        }
+        setSendingVolunteerMsg(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+            const origin = getPublicBaseUrl(cfg.baseUrl);
+            const link = origin ? `${origin}/events/${id}` : "";
+            const sent: string[] = [];
+            const skippedNoPhone: string[] = [];
+            const failed: string[] = [];
+            for (const v of list) {
+                const key = (v.email || v.id || v.name || "").toLowerCase();
+                const phoneRaw =
+                    v.phone ||
+                    volunteerPhoneMap.get(key) ||
+                    (await getUserPhone({ name: v.name, email: v.email, userId: v.id } as any));
+                const phone = normalizePhoneNumber(phoneRaw);
+                if (!phone) {
+                    skippedNoPhone.push(v.name || v.email || "מתנדב");
+                    continue;
+                }
+                const lines = [
+                    `היי ${v.name || "מתנדב/ת"},`,
+                    volunteerMessage.trim(),
+                    event?.title ? `אירוע: ${event.title}` : "",
+                    link ? `דף האירוע: ${link}` : "",
+                ].filter(Boolean);
+                const message = lines.join("\n");
+                await ensureGlobalRateLimit();
+                const res = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
+                }).catch(err => {
+                    console.warn("send wa failed", err);
+                    return null;
+                });
+                if (res && res.ok) {
+                    sent.push(v.name || v.email || phone);
+                } else {
+                    failed.push(v.name || v.email || phone);
+                }
+            }
+            const parts = [];
+            if (sent.length) parts.push(`נשלחו ${sent.length} הודעות`);
+            if (failed.length) parts.push(`נכשלו ${failed.length} (בדוק קונפיגורציה/חיבור)`);
+            if (skippedNoPhone.length) parts.push(`דילגנו על ${skippedNoPhone.length} ללא מספר`);
+            alert(parts.join(" | "));
+        } catch (err) {
+            console.error("שגיאה בשליחת הודעה למתנדבים", err);
+            alert("לא הצלחנו לשלוח הודעות למתנדבים");
+        } finally {
+            setSendingVolunteerMsg(false);
         }
     };
 
@@ -1054,9 +1221,13 @@ export default function EventDetailsPage() {
             const updates: { taskId: string; dueDate: string }[] = [];
             querySnapshot.forEach((doc) => {
                 const data = doc.data() as any;
+                const required = data.requiredCompletions != null ? Number(data.requiredCompletions) : 1;
+                const remaining = data.remainingCompletions != null ? Number(data.remainingCompletions) : required;
                 let taskRecord: Task = {
                     id: doc.id,
                     ...data,
+                    requiredCompletions: required,
+                    remainingCompletions: remaining,
                     assignee: data.assignee || (data.assignees && data.assignees[0]?.name) || "",
                     assignees: data.assignees || (data.assignee ? [{ name: data.assignee, userId: data.assigneeId }] : []),
                     previewImage: data.previewImage || "",
@@ -1340,6 +1511,7 @@ export default function EventDetailsPage() {
         if (!db || !user) return;
 
         try {
+            const required = Math.max(1, Number(newTask.requiredCompletions) || 1);
             if (newTask.isVolunteerTask) {
                 const hours = newTask.volunteerHours;
                 if (hours == null || Number(hours) <= 0 || Number.isNaN(Number(hours))) {
@@ -1366,6 +1538,8 @@ export default function EventDetailsPage() {
                 volunteerHours: newTask.isVolunteerTask
                     ? (newTask.volunteerHours != null ? Number(newTask.volunteerHours) : null)
                     : null,
+                requiredCompletions: required,
+                remainingCompletions: required,
                 dueDate: dueDateValue,
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
@@ -1397,7 +1571,7 @@ export default function EventDetailsPage() {
                 dueDate: dueDateValue,
             } as Task).catch(() => { /* כבר טופל בלוג */ });
             setShowNewTask(false);
-            setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false, volunteerHours: null });
+            setNewTask({ title: "", description: "", assignee: "", assigneeId: "", assignees: [], dueDate: "", priority: "NORMAL", isVolunteerTask: false, volunteerHours: null, requiredCompletions: 1 });
             setNewTaskDueMode("event_day");
             setNewTaskOffsetDays("0");
             setNewTaskTime(extractTimeString(getEventStartDate() || new Date()));
@@ -1412,10 +1586,12 @@ export default function EventDetailsPage() {
     const startEditingTask = (task: Task) => {
         const meta = deriveEditDueState(task.dueDate);
         const ensuredDue = task.dueDate || computeDueDateFromMode(meta.mode, parseOffset(meta.offset) ?? 0, meta.time);
+        const required = task.requiredCompletions != null ? Number(task.requiredCompletions) : 1;
+        const remaining = task.remainingCompletions != null ? Number(task.remainingCompletions) : required;
         setEditTaskDueMode(meta.mode);
         setEditTaskOffsetDays(meta.offset);
         setEditTaskTime(meta.time);
-        setEditingTask({ ...task, dueDate: ensuredDue });
+        setEditingTask({ ...task, dueDate: ensuredDue, requiredCompletions: required, remainingCompletions: remaining });
         setEditTaskSearch("");
         setSaveEditTaskToLibrary(false);
     };
@@ -1432,6 +1608,9 @@ export default function EventDetailsPage() {
                     return;
                 }
             }
+            const required = Math.max(1, Number(editingTask.requiredCompletions) || 1);
+            const remainingRaw = editingTask.remainingCompletions;
+            const remaining = remainingRaw == null ? required : Math.max(0, Math.min(required, Number(remainingRaw)));
             const taskRef = doc(db, "events", id, "tasks", editingTask.id);
             const cleanAssignees = sanitizeAssigneesForWrite(editingTask.assignees || []);
             const offsetParsed = parseOffset(editTaskOffsetDays);
@@ -1453,6 +1632,8 @@ export default function EventDetailsPage() {
                     : null,
                 createdByEmail: (editingTask as any).createdByEmail || user?.email || "",
                 createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
+                requiredCompletions: required,
+                remainingCompletions: remaining,
             };
             await updateDoc(taskRef, updateData);
             if (saveEditTaskToLibrary) {
@@ -1529,12 +1710,55 @@ export default function EventDetailsPage() {
             if (!ok) return;
             sendSpecialDoneMessage(task).catch(() => { /* logged inside */ });
         }
+        const required = task.requiredCompletions != null ? Math.max(1, Number(task.requiredCompletions)) : 1;
+        const remaining = task.remainingCompletions != null ? Math.max(0, Number(task.remainingCompletions)) : required;
+        const isVolunteer = !!task.isVolunteerTask;
+        if (!isVolunteer && newStatus === "DONE" && required > 1) {
+            const nextRemaining = Math.max(remaining - 1, 0);
+            const nextStatus = nextRemaining > 0 ? "IN_PROGRESS" : "DONE";
+            try {
+                await updateDoc(doc(db, "events", id, "tasks", task.id), {
+                    status: nextStatus,
+                    remainingCompletions: nextRemaining,
+                });
+                if (nextRemaining > 0) {
+                    alert(`סימנת ביצוע. נותרו עוד ${nextRemaining} מתוך ${required}.`);
+                }
+            } catch (err) {
+                console.error("Error updating status with completions:", err);
+            }
+            return;
+        }
         try {
             await updateDoc(doc(db, "events", id, "tasks", task.id), {
                 status: newStatus
             });
         } catch (err) {
             console.error("Error updating status:", err);
+        }
+    };
+
+    const handleUpdateCompletions = async (task: Task) => {
+        if (!db) return;
+        const currentRequired = task.requiredCompletions != null ? Number(task.requiredCompletions) : 1;
+        const input = typeof window !== "undefined" ? window.prompt("כמה פעמים צריך לבצע את המשימה?", String(currentRequired > 0 ? currentRequired : 1)) : null;
+        if (input == null) return;
+        const parsed = parseInt(input, 10);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+            alert("יש להזין מספר גדול מאפס");
+            return;
+        }
+        const newRequired = parsed;
+        const newRemaining = newRequired;
+        try {
+            await updateDoc(doc(db, "events", id, "tasks", task.id), {
+                requiredCompletions: newRequired,
+                remainingCompletions: newRemaining,
+                status: task.status === "DONE" && newRemaining > 0 ? "IN_PROGRESS" : task.status,
+            });
+        } catch (err) {
+            console.error("Error updating completions", err);
+            alert("שגיאה בעדכון מספר החזרות");
         }
     };
 
@@ -1838,6 +2062,19 @@ export default function EventDetailsPage() {
         return lines.join("\n");
     };
 
+    const buildStoryTaskDescription = () => {
+        const tagsList = (event?.officialInstagramTags || officialInstaTagsList || []).map(t => t.trim()).filter(Boolean);
+        const tagLine = tagsList.length ? `יש לתייג את האנשים הבאים: ${tagsList.join(" ")}` : "יש לתייג את כל מי שמופיע בתוכן ומדיה.";
+        const lines = [
+            "הנחיות סטורי:",
+            "1. השתמש/י בפלייר הרשמי המצורף והעלה/י סטורי.",
+            tagLine,
+            "2. הוסף/י מוזיקה בסטורי (שיר שקשור לאירוע).",
+            "3. לאחר העלאה שלח/י צילום מסך ליוצר המשימה.",
+        ].filter(Boolean);
+        return lines.join("\n");
+    };
+
     const handleCreateSpecialMarketingTask = async () => {
         if (!db || !id) return;
         setCreatingSpecialTask(true);
@@ -1856,6 +2093,8 @@ export default function EventDetailsPage() {
                 eventTitle: event?.title || "",
                 eventId: id,
                 previewImage: officialFlyerUrl || "",
+                requiredCompletions: 1,
+                remainingCompletions: 1,
             };
             const start = getEventStartDate();
             const due = inferSmartDueDate(taskPayload as Task, start);
@@ -1888,6 +2127,62 @@ export default function EventDetailsPage() {
         } catch (err) {
             console.error("שגיאה ביצירת משימה מיוחדת", err);
             alert("לא הצלחנו ליצור את המשימה המיוחדת");
+        } finally {
+            setCreatingSpecialTask(false);
+        }
+    };
+
+    const handleCreateSpecialStoryTask = async () => {
+        if (!db || !id) return;
+        setCreatingSpecialTask(true);
+        try {
+            const taskPayload: Partial<Task> = {
+                title: "להעלות סטורי ולתייג",
+                description: buildStoryTaskDescription(),
+                priority: "HIGH",
+                status: "TODO",
+                assignee: "",
+                assigneeId: "",
+                assignees: [],
+                isVolunteerTask: true,
+                volunteerHours: 0.5,
+                specialType: "story_tag" as any,
+                eventTitle: event?.title || "",
+                eventId: id,
+                previewImage: officialFlyerUrl || "",
+                requiredCompletions: 1,
+                remainingCompletions: 1,
+            };
+            const start = getEventStartDate();
+            const due = inferSmartDueDate(taskPayload as Task, start);
+            const docRef = await addDoc(collection(db, "events", id, "tasks"), {
+                ...taskPayload,
+                dueDate: due,
+                filesCount: officialFlyerUrl ? 1 : 0,
+                createdAt: serverTimestamp(),
+                createdBy: user?.uid || null,
+                createdByName: user?.displayName || user?.email || "",
+            });
+            if (officialFlyerUrl) {
+                try {
+                    await addDoc(collection(db, "events", id, "tasks", docRef.id, "files"), {
+                        name: "פלייר האירוע",
+                        originalName: "official-flyer",
+                        url: officialFlyerUrl,
+                        storagePath: "",
+                        createdAt: serverTimestamp(),
+                        createdBy: user?.uid || null,
+                        createdByName: user?.displayName || user?.email || "משתמש",
+                    });
+                } catch (fileErr) {
+                    console.warn("שגיאה בשמירת הפלייר על משימת סטורי", fileErr);
+                }
+            }
+            alert("משימת סטורי נוצרה ונוספה למשימות האירוע");
+            setShowSpecialModal(false);
+        } catch (err) {
+            console.error("שגיאה ביצירת משימת סטורי", err);
+            alert("לא הצלחנו ליצור את משימת הסטורי");
         } finally {
             setCreatingSpecialTask(false);
         }
@@ -2288,6 +2583,7 @@ export default function EventDetailsPage() {
         const filesFromTemplate: { name?: string; url?: string; storagePath?: string; originalName?: string }[] = Array.isArray(template.files)
             ? template.files.filter((f: any) => f && f.url)
             : [];
+        const required = template.requiredCompletions != null ? Math.max(1, Number(template.requiredCompletions)) : 1;
         try {
             const docRef = await addDoc(collection(db, "events", id, "tasks"), {
                 title: template.title || t.title,
@@ -2301,6 +2597,8 @@ export default function EventDetailsPage() {
                 isVolunteerTask: !!template.isVolunteerTask,
                 volunteerHours: template.isVolunteerTask ? (template.volunteerHours ?? null) : null,
                 filesCount: filesFromTemplate.length || 0,
+                requiredCompletions: required,
+                remainingCompletions: required,
                 createdAt: serverTimestamp(),
                 createdBy: user.uid,
                 createdByEmail: user.email || "",
@@ -2748,6 +3046,26 @@ export default function EventDetailsPage() {
                                     value={editingTask.description || ""}
                                     onChange={e => setEditingTask({ ...editingTask, description: e.target.value })}
                                 />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">כמה פעמים צריך לבצע?</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        value={editingTask.requiredCompletions ?? 1}
+                                        onChange={(e) => {
+                                            const val = parseInt(e.target.value, 10);
+                                            const req = Number.isFinite(val) && val > 0 ? val : 1;
+                                            setEditingTask(prev => ({ ...prev, requiredCompletions: req }));
+                                        }}
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">ברירת מחדל: פעם אחת. ניתן להגדיר מספר חזרות.</p>
+                                    <p className="text-xs text-indigo-600 mt-1">
+                                        נותרו: {Math.max(editingTask.remainingCompletions ?? editingTask.requiredCompletions ?? 1, 0)}
+                                    </p>
+                                </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -3588,6 +3906,22 @@ export default function EventDetailsPage() {
                                         onChange={e => setNewTask({ ...newTask, description: e.target.value })}
                                     />
                                 </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">כמה פעמים צריך לבצע?</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            value={newTask.requiredCompletions ?? 1}
+                                            onChange={(e) => {
+                                                const val = parseInt(e.target.value, 10);
+                                                setNewTask(prev => ({ ...prev, requiredCompletions: Number.isFinite(val) && val > 0 ? val : 1 }));
+                                            }}
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">ברירת מחדל: פעם אחת. ניתן להגדיר מספר חזרות.</p>
+                                    </div>
+                                </div>
                                 <div className="space-y-2">
                                     <p className="text-sm font-medium text-gray-700 mb-1">דחיפות</p>
                                     <div className="grid grid-cols-3 gap-2">
@@ -3730,6 +4064,9 @@ export default function EventDetailsPage() {
                                                     eventTitle={event?.title}
                                                     scope={task.scope}
                                                     specialType={(task as any).specialType}
+                                                    requiredCompletions={(task as any).requiredCompletions}
+                                                    remainingCompletions={(task as any).remainingCompletions}
+                                                    onUpdateCompletions={() => handleUpdateCompletions(task)}
                                                     createdByName={task.createdByName}
                                                     onEdit={() => { startEditingTask(task); }}
                                                     onDelete={() => confirmDeleteTask(task.id)}
@@ -3756,7 +4093,7 @@ export default function EventDetailsPage() {
                                         משימות למתנדבים
                                         <span className="text-xs text-gray-500">({tasks.filter(t => t.isVolunteerTask).length})</span>
                                     </h3>
-                                    <div className="space-y-3">
+                                    <div className="space-y-3 bg-amber-50/60 border border-amber-100 rounded-xl p-3">
                                         {tasks.filter(t => t.isVolunteerTask).map((task) => {
                                             const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
                                             return (
@@ -3776,6 +4113,9 @@ export default function EventDetailsPage() {
                                                     eventTitle={event?.title}
                                                     scope={task.scope}
                                                     specialType={(task as any).specialType}
+                                                    requiredCompletions={(task as any).requiredCompletions}
+                                                    remainingCompletions={(task as any).remainingCompletions}
+                                                    onUpdateCompletions={() => handleUpdateCompletions(task)}
                                                     createdByName={task.createdByName}
                                                     onEdit={() => { startEditingTask(task); }}
                                                     onDelete={() => confirmDeleteTask(task.id)}
@@ -4025,7 +4365,7 @@ export default function EventDetailsPage() {
                                     </h3>
                                     {event.volunteersCount && (
                                         <span className="text-xs text-gray-500">
-                                            {volunteers.length} / {event.volunteersCount}
+                                            {combinedVolunteers.length} / {event.volunteersCount}
                                         </span>
                                     )}
                                 </div>
@@ -4034,10 +4374,10 @@ export default function EventDetailsPage() {
                                     <div className="flex items-center justify-center py-8">
                                         <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-indigo-500"></div>
                                     </div>
-                                ) : volunteers.length > 0 ? (
+                                ) : combinedVolunteers.length > 0 ? (
                                     <div className="space-y-4">
-                                        {volunteers.map((volunteer) => (
-                                            <div key={volunteer.id} className="flex items-center gap-3 justify-between">
+                                        {combinedVolunteers.map((volunteer, idx) => (
+                                            <div key={volunteer.id || idx} className="flex items-center gap-3 justify-between">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
                                                         {(volunteer.name || volunteer.email || "?").substring(0, 2)}
@@ -4052,10 +4392,10 @@ export default function EventDetailsPage() {
                                                         )}
                                                     </div>
                                                 </div>
-                                                {canManageTeam && (
+                                                {canManageTeam && volunteers.find(v => v.email === volunteer.email || v.id === volunteer.id) && (
                                                     <button
                                                         onClick={() => {
-                                                            if (confirm("האם אתה בטוח שברצונך להסיר את המתנדב?")) {
+                                                            if (volunteer.id && confirm("האם אתה בטוח שברצונך להסיר את המתנדב?")) {
                                                                 handleDeleteVolunteer(volunteer.id);
                                                             }
                                                         }}
@@ -4070,6 +4410,91 @@ export default function EventDetailsPage() {
                                     </div>
                                 ) : (
                                     <p className="text-sm text-gray-500">עדיין אין מתנדבים שנרשמו</p>
+                                )}
+
+                                {combinedVolunteers.length > 0 && (
+                                    <div className="mt-4 border-t pt-4 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm font-semibold text-gray-800">שליחת הודעת וואטסאפ למתנדבים</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowVolunteerMessage(prev => !prev)}
+                                                className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                title="פתח שליחת הודעה"
+                                            >
+                                                <MessageCircle size={16} />
+                                            </button>
+                                        </div>
+                                        {showVolunteerMessage && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={selectAllVolunteers}
+                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                        >
+                                                            בחר הכל
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={clearVolunteerSelection}
+                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                        >
+                                                            נקה
+                                                        </button>
+                                                    </div>
+                                                    <span className="text-gray-500">נבחרו {volunteerSelections.size}</span>
+                                                </div>
+                                                <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
+                                                    {combinedVolunteers.map((vol, idx) => {
+                                                        const key = (vol.email || vol.id || vol.name || "").toLowerCase();
+                                                        const checked = volunteerSelections.has(key);
+                                                        const phoneDisplay = vol.phone || volunteerPhoneMap.get(key);
+                                                        return (
+                                                            <label key={vol.id || idx} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
+                                                                <div className="flex items-center gap-2">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        className="accent-indigo-600"
+                                                                        checked={checked}
+                                                                        onChange={() => toggleVolunteerSelection(key)}
+                                                                    />
+                                                                    <div className="flex flex-col">
+                                                                        <span className="font-medium text-gray-800">{vol.name || vol.email || "מתנדב"}</span>
+                                                                        <span className="text-xs text-gray-500">{vol.email || vol.phone || phoneDisplay || ""}</span>
+                                                                    </div>
+                                                                </div>
+                                                                <span className="text-[11px] text-gray-500">{phoneDisplay ? "טלפון זמין" : "אין טלפון"}</span>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <textarea
+                                                    className="w-full border rounded-lg p-3 text-sm"
+                                                    rows={3}
+                                                    placeholder="כתוב את ההודעה שתרצה לשלוח לכל המתנדבים שנבחרו"
+                                                    defaultValue=""
+                                                    onChange={(e) => {
+                                                        volunteerMessageRef.current = e.target.value;
+                                                    }}
+                                                />
+                                                <div className="flex justify-end">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSendVolunteerBroadcast}
+                                                        disabled={sendingVolunteerMsg}
+                                                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                                                    >
+                                                        {sendingVolunteerMsg ? "שולח..." : "שלח הודעה לוואטסאפ"}
+                                                    </button>
+                                                </div>
+                                                <p className="text-xs text-gray-500">
+                                                    השליחה מתבצעת לנבחרים בלבד, עם הפרש של 5 שניות בין הודעה להודעה.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -4352,33 +4777,43 @@ export default function EventDetailsPage() {
                                 <X size={20} />
                             </button>
                         </div>
-                        <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800">
-                            יוצרת משימת "שיווק והפצה בקבוצות" עם המלל והפלייר הרשמי, כדי שהמתנדב יפרסם ב-5 קבוצות וואטסאפ (30+ אנשים) ויעלה צילום מסך כהוכחה.
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800 flex flex-col gap-2">
+                                <div>
+                                    <p className="font-semibold text-gray-900 mb-1">שיווק והפצה בקבוצות</p>
+                                    <p>יוצר משימת שיווק עם המלל והפלייר הרשמי, לפרסום ב-5 קבוצות וואטסאפ (30+ אנשים) והעלאת צילומי מסך כהוכחה.</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleCreateSpecialMarketingTask}
+                                    disabled={creatingSpecialTask}
+                                    className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                                >
+                                    {creatingSpecialTask ? "יוצר..." : "הוסף משימת שיווק"}
+                                </button>
+                            </div>
+                            <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm text-amber-800 flex flex-col gap-2">
+                                <div>
+                                    <p className="font-semibold text-gray-900 mb-1">להעלות סטורי ולתייג</p>
+                                    <p>יוצר משימת סטורי למתנדבים עם הפלייר הרשמי, תיוגי אינסטגרם מהתוכן והמדיה, והנחיה להוסיף מוזיקה ולהעלות צילום מסך.</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleCreateSpecialStoryTask}
+                                    disabled={creatingSpecialTask}
+                                    className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-amber-500 hover:bg-amber-600"}`}
+                                >
+                                    {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
+                                </button>
+                            </div>
                         </div>
-                        <div className="space-y-2 text-sm">
-                            <p className="font-semibold text-gray-800">מה נשלח במשימה:</p>
-                            <ul className="list-disc list-inside text-gray-700 space-y-1">
-                                <li>מלל רשמי לפוסט</li>
-                                <li>קישור לפלייר (אם קיים)</li>
-                                <li>הנחיה לפרסם ב-5 קבוצות (30+)</li>
-                                <li>דרישה להעלות צילומי מסך כהוכחה</li>
-                            </ul>
-                        </div>
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end">
                             <button
                                 type="button"
                                 onClick={() => setShowSpecialModal(false)}
                                 className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
                             >
-                                ביטול
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleCreateSpecialMarketingTask}
-                                disabled={creatingSpecialTask}
-                                className={`px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
-                            >
-                                {creatingSpecialTask ? "יוצר..." : "צור משימה מיוחדת"}
+                                סגור
                             </button>
                         </div>
                     </div>

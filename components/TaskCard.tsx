@@ -31,6 +31,9 @@ interface TaskProps {
     onOpen?: () => void;
     scope?: "event" | "project";
     specialType?: string;
+    requiredCompletions?: number | null;
+    remainingCompletions?: number | null;
+    onUpdateCompletions?: () => void;
 }
 
 export default function TaskCard({
@@ -61,6 +64,9 @@ export default function TaskCard({
     onOpen,
     scope,
     specialType,
+    requiredCompletions,
+    remainingCompletions,
+    onUpdateCompletions,
 }: TaskProps) {
     const router = useRouter();
 
@@ -132,7 +138,7 @@ export default function TaskCard({
             onKeyDown={handleKeyActivate}
             role="button"
             tabIndex={0}
-            className={`bg-white p-4 rounded-xl shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative overflow-hidden`}
+            className={`p-4 rounded-xl shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative overflow-hidden`}
         >
             <div className="flex items-start justify-between gap-3 w-full mb-3">
                 <button
@@ -173,15 +179,35 @@ export default function TaskCard({
                         </span>
                     ))}
                 </div>
-                <div
-                    className="flex items-center gap-1 hover:bg-gray-50 px-2 py-1 rounded-lg transition z-10 text-xs sm:text-sm border border-gray-100"
-                    onClick={handleDateClick}
-                    title="לחץ לשינוי תאריך"
-                >
-                    <Clock size={14} />
-                    <span className="font-medium">{dueDate ? new Date(dueDate).toLocaleDateString('he-IL') : '-'}</span>
+                <div className="flex items-center gap-2">
+                    <div
+                        className="flex items-center gap-1 hover:bg-gray-50 px-2 py-1 rounded-lg transition z-10 text-xs sm:text-sm border border-gray-100"
+                        onClick={handleDateClick}
+                        title="לחץ לשינוי תאריך"
+                    >
+                        <Clock size={14} />
+                        <span className="font-medium">{dueDate ? new Date(dueDate).toLocaleDateString('he-IL') : '-'}</span>
+                    </div>
+                    {onUpdateCompletions && (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onUpdateCompletions(); }}
+                            className="p-1.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition"
+                            title="עדכן מספר ביצועים"
+                        >
+                            <span className="text-[10px] font-bold leading-none">+1</span>
+                        </button>
+                    )}
                 </div>
             </div>
+
+            {(requiredCompletions || remainingCompletions) && (requiredCompletions || 0) > 1 && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-indigo-800">
+                    <span className="px-2 py-1 rounded-full bg-indigo-50 border border-indigo-200 font-semibold">
+                        {Math.max(remainingCompletions ?? requiredCompletions ?? 0, 0)} / {requiredCompletions ?? 0} נותרו
+                    </span>
+                </div>
+            )}
 
             <div className="mt-3 flex items-center gap-2 justify-end text-sm text-gray-500">
                 {onManageAssignees && (
