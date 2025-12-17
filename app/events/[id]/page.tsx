@@ -216,6 +216,7 @@ export default function EventDetailsPage() {
         priority: "NORMAL"
     });
     const [savingLibraryTask, setSavingLibraryTask] = useState(false);
+    const [deletingLibraryTaskId, setDeletingLibraryTaskId] = useState<string | null>(null);
 
     // New Task State
     const [showNewTask, setShowNewTask] = useState(false);
@@ -2758,6 +2759,28 @@ export default function EventDetailsPage() {
         }
     };
 
+    const handleDeleteLibraryTask = async (task: { id: string; title?: string }) => {
+        if (!db || !task.id) return;
+        const ok = typeof window !== "undefined" ? window.confirm("למחוק את המשימה מהמאגר?") : true;
+        if (!ok) return;
+        setDeletingLibraryTaskId(task.id);
+        try {
+            await deleteDoc(doc(db, "default_tasks", task.id));
+            const key = normalizeTaskKey(task.title || "");
+            if (key) {
+                await deleteDoc(doc(db, "repeat_tasks", key)).catch(() => { });
+            }
+            if (libraryForm.id === task.id) {
+                setLibraryForm({ id: "", title: "", description: "", priority: "NORMAL" });
+            }
+        } catch (err) {
+            console.error("Failed deleting library task", err);
+            alert("שגיאה במחיקת המשימה מהמאגר");
+        } finally {
+            setDeletingLibraryTaskId(null);
+        }
+    };
+
     const handleAddLibraryTaskToEvent = async (t: any) => {
         if (!db || !user || !id) return;
         const template = t.template || t;
@@ -2766,7 +2789,18 @@ export default function EventDetailsPage() {
         const filesFromTemplate: { name?: string; url?: string; storagePath?: string; originalName?: string }[] = Array.isArray(template.files)
             ? template.files.filter((f: any) => f && f.url)
             : [];
-        const required = template.requiredCompletions != null ? Math.max(1, Number(template.requiredCompletions)) : 1;
+        let required = template.requiredCompletions != null ? Math.max(1, Number(template.requiredCompletions)) : 1;
+        if (typeof window !== "undefined") {
+            const input = window.prompt("כמה פעמים צריך לבצע את המשימה?", String(required));
+            if (input != null) {
+                const parsed = parseInt(input, 10);
+                if (!Number.isFinite(parsed) || parsed < 1) {
+                    alert("יש להזין מספר גדול מאפס");
+                    return;
+                }
+                required = parsed;
+            }
+        }
         try {
             const docRef = await addDoc(collection(db, "events", id, "tasks"), {
                 title: template.title || t.title,
@@ -2835,6 +2869,15 @@ export default function EventDetailsPage() {
 
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
     const partnersLabel = Array.isArray(event.partners) ? event.partners.join(", ") : (event.partners || "");
+    const specialTasks = tasks.filter((task) => {
+        const type = (task as any).specialType || "";
+        return (
+            type === "marketing_distribution"
+            || type === "story_tag"
+            || task.title.includes("שיווק והפצה בקבוצות")
+            || task.title.includes("להעלות סטורי")
+        );
+    });
 
     return (
         <div className="min-h-screen bg-gray-50 p-6 relative">
@@ -3912,6 +3955,13 @@ export default function EventDetailsPage() {
                                                             className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
                                                         >
                                                             ערוך
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteLibraryTask(t)}
+                                                            disabled={deletingLibraryTaskId === t.id}
+                                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                                                        >
+                                                            {deletingLibraryTaskId === t.id ? "מוחק..." : "מחק"}
                                                         </button>
                                                     </div>
                                                 </div>
@@ -5118,6 +5168,32 @@ export default function EventDetailsPage() {
                                     {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
                                 </button>
                             </div>
+                        </div>
+                        <div className="border-t pt-4">
+                            <h4 className="text-sm font-semibold text-gray-800 mb-2">משימות מיוחדות קיימות</h4>
+                            {specialTasks.length === 0 ? (
+                                <p className="text-xs text-gray-500">אין משימות מיוחדות קיימות כרגע.</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {specialTasks.map((task) => (
+                                        <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-semibold text-gray-900 truncate">{task.title}</p>
+                                                <p className="text-xs text-gray-500">
+                                                    סטטוס: {task.status === "DONE" ? "בוצע" : task.status === "IN_PROGRESS" ? "בתהליך" : task.status === "STUCK" ? "תקוע" : "פתוח"}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => confirmDeleteTask(task.id)}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
+                                            >
+                                                מחק
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                         <div className="flex justify-end">
                             <button
