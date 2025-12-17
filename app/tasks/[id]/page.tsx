@@ -805,7 +805,10 @@ export default function TaskDetailPage() {
                 return;
             }
             await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), { status: newStatus });
-            setTask(prev => prev ? { ...prev, status: newStatus } : prev);
+            setTask(prev => {
+                if (!prev) return null;
+                return { ...prev, status: newStatus as Task["status"] };
+            });
         } catch (err) {
             console.error("Error updating status:", err);
         }
