@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { db, storage } from "@/lib/firebase";
+import { DEFAULT_INSTAGRAM_TAGS } from "@/lib/instagram";
 import { doc, getDoc, updateDoc, serverTimestamp, addDoc, collection } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { AlertTriangle, Calendar, CheckCircle, Image as ImageIcon, Loader2, MapPin, Send, Tag, Type } from "lucide-react";
@@ -15,6 +16,7 @@ interface EventData {
     description?: string;
     officialPostText?: string;
     officialInstagramTags?: string[];
+    instagramTags?: string[];
     officialFlyerUrl?: string;
 }
 
@@ -52,10 +54,14 @@ export default function ContentFormPage() {
                         ...prev,
                         officialText: data.officialPostText || "",
                     }));
-                    const initialTags = (data.officialInstagramTags || [])
+                    const rawTags = Array.isArray(data.officialInstagramTags)
+                        ? data.officialInstagramTags
+                        : (Array.isArray(data.instagramTags) ? data.instagramTags : []);
+                    const cleanedTags = (rawTags || [])
                         .map((t) => t?.replace(/^@+/, ""))
                         .filter(Boolean);
-                    setTagsList(initialTags);
+                    const initialTags = cleanedTags.length ? cleanedTags : DEFAULT_INSTAGRAM_TAGS;
+                    setTagsList([...initialTags]);
                     setTagInput("");
                 }
             } catch (err) {

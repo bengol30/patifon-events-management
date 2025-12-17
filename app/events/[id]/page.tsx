@@ -6,6 +6,7 @@ import TaskCard from "@/components/TaskCard";
 import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat, PauseCircle } from "lucide-react";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { db, storage } from "@/lib/firebase";
+import { DEFAULT_INSTAGRAM_TAGS } from "@/lib/instagram";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc, where, collectionGroup } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import TaskChat from "@/components/TaskChat";
@@ -829,23 +830,11 @@ export default function EventDetailsPage() {
     const [infoBlockDraft, setInfoBlockDraft] = useState<InfoBlock | null>(null);
     const [showAdvancedActions, setShowAdvancedActions] = useState(false);
     const [showPostModal, setShowPostModal] = useState(false);
-    const defaultInstagramTags = [
-        "patiphongallery",
-        "bengolano",
-        "nagomi_art_by_yael",
-        "roi_guetta1",
-        "youngis_k8",
-        "roniegol",
-        "bar_ztulker",
-        "matnasks8",
-        "tozeret_k8",
-    ];
-
     const [postContent, setPostContent] = useState("");
     const [flyerLink, setFlyerLink] = useState("");
     const [showContentModal, setShowContentModal] = useState(false);
     const [officialPostText, setOfficialPostText] = useState("");
-    const [officialInstaTagsList, setOfficialInstaTagsList] = useState<string[]>(defaultInstagramTags);
+    const [officialInstaTagsList, setOfficialInstaTagsList] = useState<string[]>(DEFAULT_INSTAGRAM_TAGS);
     const [instaTagInput, setInstaTagInput] = useState("");
     const [officialFlyerUrl, setOfficialFlyerUrl] = useState("");
     const [officialFlyerFile, setOfficialFlyerFile] = useState<File | null>(null);
@@ -1284,7 +1273,7 @@ export default function EventDetailsPage() {
                     ? (data as any).officialInstagramTags
                     : (Array.isArray((data as any).instagramTags) ? (data as any).instagramTags : []);
                 const cleanedTags = (tags || []).map((t: string) => t?.replace(/^@+/, "")).filter(Boolean);
-                setOfficialInstaTagsList(cleanedTags.length ? cleanedTags : defaultInstagramTags);
+                setOfficialInstaTagsList(cleanedTags.length ? cleanedTags : DEFAULT_INSTAGRAM_TAGS);
                 setOfficialFlyerUrl((data as any).officialFlyerUrl || "");
                 setSelectedProject((data as any).projectId || "");
                 // fetch creator name (prefers user profile by UID/email)
@@ -1325,13 +1314,28 @@ export default function EventDetailsPage() {
         const unsubscribeTasks = onSnapshot(qTasks, (querySnapshot) => {
             const tasksData: Task[] = [];
             const updates: { taskId: string; dueDate: string }[] = [];
+            const fixes: { taskId: string; data: Record<string, any> }[] = [];
             querySnapshot.forEach((doc) => {
                 const data = doc.data() as any;
-                const required = data.requiredCompletions != null ? Number(data.requiredCompletions) : 1;
-                const remaining = data.remainingCompletions != null ? Number(data.remainingCompletions) : required;
+                const required = data.requiredCompletions != null ? Math.max(1, Number(data.requiredCompletions)) : 1;
+                const remainingRaw = data.remainingCompletions != null ? Number(data.remainingCompletions) : required;
+                const remaining = Math.max(0, Math.min(required, remainingRaw));
+                let status: Task["status"] = data.status || "TODO";
+                const fix: Record<string, any> = {};
+                if (remaining !== remainingRaw && data.remainingCompletions != null) {
+                    fix.remainingCompletions = remaining;
+                }
+                if (status === "DONE" && required > 1 && remaining > 0) {
+                    status = "IN_PROGRESS";
+                    fix.status = "IN_PROGRESS";
+                }
+                if (Object.keys(fix).length) {
+                    fixes.push({ taskId: doc.id, data: fix });
+                }
                 let taskRecord: Task = {
                     id: doc.id,
                     ...data,
+                    status,
                     requiredCompletions: required,
                     remainingCompletions: remaining,
                     assignee: data.assignee || (data.assignees && data.assignees[0]?.name) || "",
@@ -1353,6 +1357,13 @@ export default function EventDetailsPage() {
                     await updateDoc(doc(db!, "events", id, "tasks", u.taskId), { dueDate: u.dueDate });
                 } catch (err) {
                     console.warn("Failed to auto-assign due date", u, err);
+                }
+            });
+            fixes.forEach(async (fix) => {
+                try {
+                    await updateDoc(doc(db!, "events", id, "tasks", fix.taskId), fix.data);
+                } catch (err) {
+                    console.warn("Failed to normalize task status", fix, err);
                 }
             });
         });
@@ -1840,16 +1851,16 @@ export default function EventDetailsPage() {
         }
         const required = task.requiredCompletions != null ? Math.max(1, Number(task.requiredCompletions)) : 1;
         const remaining = task.remainingCompletions != null ? Math.max(0, Number(task.remainingCompletions)) : required;
-        const isVolunteer = !!task.isVolunteerTask;
-        if (!isVolunteer && newStatus === "DONE" && required > 1) {
-            const nextRemaining = Math.max(remaining - 1, 0);
+        if (newStatus === "DONE" && required > 1) {
+            const nextRemaining = task.isVolunteerTask ? remaining : Math.max(remaining - 1, 0);
             const nextStatus = nextRemaining > 0 ? "IN_PROGRESS" : "DONE";
             try {
-                await updateDoc(doc(db, "events", id, "tasks", task.id), {
-                    status: nextStatus,
-                    remainingCompletions: nextRemaining,
-                });
-                if (nextRemaining > 0) {
+                const updateData: any = { status: nextStatus };
+                if (!task.isVolunteerTask) {
+                    updateData.remainingCompletions = nextRemaining;
+                }
+                await updateDoc(doc(db, "events", id, "tasks", task.id), updateData);
+                if (!task.isVolunteerTask && nextRemaining > 0) {
                     alert(`סימנת ביצוע. נותרו עוד ${nextRemaining} מתוך ${required}.`);
                 }
             } catch (err) {

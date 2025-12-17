@@ -268,12 +268,43 @@ export default function VolunteerEventsPage() {
                     );
                     const unsubTask = onSnapshot(tasksQuery, (tasksSnap) => {
                         const tasks: Task[] = [];
+                        const fixes: { ref: ReturnType<typeof doc>; data: Record<string, any> }[] = [];
                         tasksSnap.forEach((taskDoc) => {
-                            const taskData = { id: taskDoc.id, ...taskDoc.data(), scope: "event" } as Task;
+                            const raw = taskDoc.data() as any;
+                            const required = raw.requiredCompletions != null ? Math.max(1, Number(raw.requiredCompletions)) : 1;
+                            const remainingRaw = raw.remainingCompletions != null ? Number(raw.remainingCompletions) : required;
+                            const remaining = Math.max(0, Math.min(required, remainingRaw));
+                            let status: Task["status"] = raw.status || "TODO";
+                            const fix: Record<string, any> = {};
+                            if (remaining !== remainingRaw && raw.remainingCompletions != null) {
+                                fix.remainingCompletions = remaining;
+                            }
+                            if (status === "DONE" && required > 1 && remaining > 0) {
+                                status = "IN_PROGRESS";
+                                fix.status = "IN_PROGRESS";
+                            }
+                            if (Object.keys(fix).length) {
+                                fixes.push({ ref: taskDoc.ref, data: fix });
+                            }
+                            const taskData = {
+                                id: taskDoc.id,
+                                ...raw,
+                                status,
+                                requiredCompletions: required,
+                                remainingCompletions: remaining,
+                                scope: "event",
+                            } as Task;
                             tasks.push(taskData);
                         });
                         setTasksByEvent((prev) => ({ ...prev, [evId]: tasks }));
                         setTasksReady(true);
+                        fixes.forEach(async (fix) => {
+                            try {
+                                await updateDoc(fix.ref, fix.data);
+                            } catch (err) {
+                                console.warn("Failed to normalize volunteer task status", fix, err);
+                            }
+                        });
                     });
                     taskUnsubs.set(evId, unsubTask);
                 }
@@ -329,12 +360,43 @@ export default function VolunteerEventsPage() {
                     );
                     const unsubTask = onSnapshot(tasksQuery, (tasksSnap) => {
                         const tasks: Task[] = [];
+                        const fixes: { ref: ReturnType<typeof doc>; data: Record<string, any> }[] = [];
                         tasksSnap.forEach((taskDoc) => {
-                            const taskData = { id: taskDoc.id, ...taskDoc.data(), scope: "project" } as Task;
+                            const raw = taskDoc.data() as any;
+                            const required = raw.requiredCompletions != null ? Math.max(1, Number(raw.requiredCompletions)) : 1;
+                            const remainingRaw = raw.remainingCompletions != null ? Number(raw.remainingCompletions) : required;
+                            const remaining = Math.max(0, Math.min(required, remainingRaw));
+                            let status: Task["status"] = raw.status || "TODO";
+                            const fix: Record<string, any> = {};
+                            if (remaining !== remainingRaw && raw.remainingCompletions != null) {
+                                fix.remainingCompletions = remaining;
+                            }
+                            if (status === "DONE" && required > 1 && remaining > 0) {
+                                status = "IN_PROGRESS";
+                                fix.status = "IN_PROGRESS";
+                            }
+                            if (Object.keys(fix).length) {
+                                fixes.push({ ref: taskDoc.ref, data: fix });
+                            }
+                            const taskData = {
+                                id: taskDoc.id,
+                                ...raw,
+                                status,
+                                requiredCompletions: required,
+                                remainingCompletions: remaining,
+                                scope: "project",
+                            } as Task;
                             tasks.push(taskData);
                         });
                         setTasksByEvent((prev) => ({ ...prev, [pid]: tasks }));
                         setTasksReady(true);
+                        fixes.forEach(async (fix) => {
+                            try {
+                                await updateDoc(fix.ref, fix.data);
+                            } catch (err) {
+                                console.warn("Failed to normalize volunteer task status", fix, err);
+                            }
+                        });
                     });
                     taskUnsubs.set(pid, unsubTask);
                 }

@@ -63,6 +63,8 @@ interface Task {
   lastMessageMentions?: { name?: string; userId?: string; email?: string }[];
   pendingApproval?: boolean;
   volunteerHours?: number | null;
+  requiredCompletions?: number | null;
+  remainingCompletions?: number | null;
 }
 
 interface TeamNote {
@@ -647,7 +649,9 @@ export default function Dashboard() {
               lastMessageTime: taskData.lastMessageTime || null,
               lastMessageBy: taskData.lastMessageBy || "",
               readBy: taskData.readBy || {},
-              lastMessageMentions: (taskData.lastMessageMentions as any) || []
+              lastMessageMentions: (taskData.lastMessageMentions as any) || [],
+              requiredCompletions: taskData.requiredCompletions != null ? Number(taskData.requiredCompletions) : null,
+              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null
             } as Task);
           }
         });
@@ -915,7 +919,9 @@ export default function Dashboard() {
               lastMessageBy: taskData.lastMessageBy || "",
               readBy: taskData.readBy || {},
               lastMessageMentions: mentionsArr,
-              lastMessageText: taskData.lastMessageText || ""
+              lastMessageText: taskData.lastMessageText || "",
+              requiredCompletions: taskData.requiredCompletions != null ? Number(taskData.requiredCompletions) : null,
+              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null
             } as Task);
           }
 
@@ -952,7 +958,9 @@ export default function Dashboard() {
               lastMessageTime: taskData.lastMessageTime || null,
               lastMessageBy: taskData.lastMessageBy || "",
               readBy: taskData.readBy || {},
-              lastMessageText: taskData.lastMessageText || ""
+              lastMessageText: taskData.lastMessageText || "",
+              requiredCompletions: taskData.requiredCompletions != null ? Number(taskData.requiredCompletions) : null,
+              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null
             } as Task);
           }
         });
@@ -1451,6 +1459,25 @@ export default function Dashboard() {
       const taskRef = taskToComplete.scope === "project"
         ? doc(db, "projects", taskToComplete.eventId, "tasks", deletingTaskId)
         : doc(db, "events", taskToComplete.eventId, "tasks", deletingTaskId);
+      const required = taskToComplete.requiredCompletions != null
+        ? Math.max(1, Number(taskToComplete.requiredCompletions))
+        : 1;
+      const remaining = taskToComplete.remainingCompletions != null
+        ? Math.max(0, Number(taskToComplete.remainingCompletions))
+        : required;
+      if (required > 1) {
+        const nextRemaining = Math.max(remaining - 1, 0);
+        const nextStatus = nextRemaining > 0 ? "IN_PROGRESS" : "DONE";
+        await updateDoc(taskRef, { status: nextStatus, remainingCompletions: nextRemaining });
+        setMyTasks(prev => nextStatus === "DONE"
+          ? prev.filter(t => t.id !== deletingTaskId)
+          : prev.map(t => t.id === deletingTaskId ? { ...t, status: nextStatus, remainingCompletions: nextRemaining } : t));
+        if (nextRemaining > 0) {
+          alert(`סימנת ביצוע. נותרו עוד ${nextRemaining} מתוך ${required}.`);
+        }
+        setDeletingTaskId(null);
+        return;
+      }
       await updateDoc(taskRef, { status: "DONE" });
 
       // Remove from local view (DONE tasks are hidden)
@@ -1469,9 +1496,28 @@ export default function Dashboard() {
       const taskRef = task.scope === "project"
         ? doc(db, "projects", task.eventId, "tasks", task.id)
         : doc(db, "events", task.eventId, "tasks", task.id);
-      await updateDoc(taskRef, {
-        status: "DONE"
-      });
+      const required = task.requiredCompletions != null
+        ? Math.max(1, Number(task.requiredCompletions))
+        : 1;
+      const remaining = task.remainingCompletions != null
+        ? Math.max(0, Number(task.remainingCompletions))
+        : required;
+      if (required > 1) {
+        const nextRemaining = Math.max(remaining - 1, 0);
+        const nextStatus = nextRemaining > 0 ? "IN_PROGRESS" : "DONE";
+        await updateDoc(taskRef, {
+          status: nextStatus,
+          remainingCompletions: nextRemaining,
+        });
+        if (nextStatus === "DONE") {
+          setMyTasks(prev => prev.filter(t => t.id !== task.id));
+        } else {
+          setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: nextStatus, remainingCompletions: nextRemaining } : t));
+          alert(`סימנת ביצוע. נותרו עוד ${nextRemaining} מתוך ${required}.`);
+        }
+        return;
+      }
+      await updateDoc(taskRef, { status: "DONE" });
 
       // Remove from local state (since we filter out DONE tasks)
       setMyTasks(prev => prev.filter(t => t.id !== task.id));
@@ -2002,11 +2048,45 @@ export default function Dashboard() {
       await updateDoc(requestRef, { status: approve ? "APPROVED" : "REJECTED", respondedAt: serverTimestamp() });
       if (!approve) {
         if (!isManualRequest && taskRef) {
-          await updateDoc(taskRef, { status: "TODO", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "REJECTED" });
+          const taskSnap = await getDoc(taskRef);
+          const taskData = taskSnap.exists() ? (taskSnap.data() as any) : {};
+          const required = taskData.requiredCompletions != null ? Math.max(1, Number(taskData.requiredCompletions)) : 1;
+          const completionsSnap = await getDocs(query(
+            collection(db, "volunteer_completions"),
+            where("taskId", "==", req.taskId)
+          ));
+          const completedCount = completionsSnap.docs.filter((docSnap) => {
+            const data = docSnap.data() as any;
+            return data.eventId === req.eventId;
+          }).length;
+          const nextStatus = completedCount >= required ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
+          await updateDoc(taskRef, {
+            status: nextStatus,
+            pendingApproval: false,
+            pendingApprovalRequestId: "",
+            lastApprovalDecision: "REJECTED",
+          });
         }
       } else {
         if (!isManualRequest && taskRef) {
-          await updateDoc(taskRef, { status: "DONE", pendingApproval: false, pendingApprovalRequestId: "", lastApprovalDecision: "APPROVED" });
+          const taskSnap = await getDoc(taskRef);
+          const taskData = taskSnap.exists() ? (taskSnap.data() as any) : {};
+          const required = taskData.requiredCompletions != null ? Math.max(1, Number(taskData.requiredCompletions)) : 1;
+          const completionsSnap = await getDocs(query(
+            collection(db, "volunteer_completions"),
+            where("taskId", "==", req.taskId)
+          ));
+          const completedCount = completionsSnap.docs.filter((docSnap) => {
+            const data = docSnap.data() as any;
+            return data.eventId === req.eventId;
+          }).length + 1;
+          const nextStatus = completedCount >= required ? "DONE" : "IN_PROGRESS";
+          await updateDoc(taskRef, {
+            status: nextStatus,
+            pendingApproval: false,
+            pendingApprovalRequestId: "",
+            lastApprovalDecision: "APPROVED",
+          });
         }
         const completionData: any = {
           email: req.volunteerEmail,

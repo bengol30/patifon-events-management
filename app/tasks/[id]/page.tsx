@@ -32,6 +32,8 @@ interface Task {
     eventTitle?: string;
     isVolunteerTask?: boolean;
     volunteerHours?: number | null;
+    requiredCompletions?: number | null;
+    remainingCompletions?: number | null;
     createdByName?: string;
     createdByPhone?: string;
     createdBy?: string | null;
@@ -497,12 +499,22 @@ export default function TaskDetailPage() {
                     const eventDoc = await getDoc(doc(db, "events", eventId));
                     if (!eventDoc.exists()) return null;
                     const eventData = eventDoc.data();
-                    const taskData = taskSnap.data();
+                    const taskData = taskSnap.data() as any;
+                    const required = taskData.requiredCompletions != null ? Math.max(1, Number(taskData.requiredCompletions)) : 1;
+                    const remainingRaw = taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : required;
+                    const remaining = Math.max(0, Math.min(required, remainingRaw));
+                    let status: Task["status"] = taskData.status || "TODO";
+                    if (status === "DONE" && required > 1 && remaining > 0) {
+                        status = "IN_PROGRESS";
+                    }
                     const start = (eventData as any)?.startTime;
                     return {
                         task: {
                             id: taskSnap.id,
                             ...taskData,
+                            status,
+                            requiredCompletions: required,
+                            remainingCompletions: remaining,
                             assignee: taskData.assignee || normalizeAssignees(taskData)[0]?.name || "",
                             assignees: normalizeAssignees(taskData),
                             createdByName: (taskData as any).createdByName || (taskData as any).createdBy || "",
@@ -532,7 +544,14 @@ export default function TaskDetailPage() {
                     const projectDoc = await getDoc(doc(db, "projects", projectId));
                     if (!projectDoc.exists()) return null;
                     const projectData = projectDoc.data();
-                    const taskData = taskSnap.data();
+                    const taskData = taskSnap.data() as any;
+                    const required = taskData.requiredCompletions != null ? Math.max(1, Number(taskData.requiredCompletions)) : 1;
+                    const remainingRaw = taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : required;
+                    const remaining = Math.max(0, Math.min(required, remainingRaw));
+                    let status: Task["status"] = taskData.status || "TODO";
+                    if (status === "DONE" && required > 1 && remaining > 0) {
+                        status = "IN_PROGRESS";
+                    }
 
                     // Fetch all users for project tasks so we can tag anyone
                     let allUsers: EventTeamMember[] = [];
@@ -557,6 +576,9 @@ export default function TaskDetailPage() {
                         task: {
                             id: taskSnap.id,
                             ...taskData,
+                            status,
+                            requiredCompletions: required,
+                            remainingCompletions: remaining,
                             assignee: taskData.assignee || normalizeAssignees(taskData)[0]?.name || "",
                             assignees: normalizeAssignees(taskData),
                             createdByName: (taskData as any).createdByName || (taskData as any).createdBy || "",
@@ -765,9 +787,25 @@ export default function TaskDetailPage() {
         if (!db || !task) return;
         try {
             const collectionName = task.scope === "project" ? "projects" : "events";
-            await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), {
-                status: newStatus
-            });
+            const required = task.requiredCompletions != null ? Math.max(1, Number(task.requiredCompletions)) : 1;
+            const remaining = task.remainingCompletions != null ? Math.max(0, Number(task.remainingCompletions)) : required;
+            if (newStatus === "DONE" && required > 1) {
+                const nextRemaining = task.isVolunteerTask ? remaining : Math.max(remaining - 1, 0);
+                const nextStatus = nextRemaining > 0 ? "IN_PROGRESS" : "DONE";
+                const updateData: any = { status: nextStatus };
+                if (!task.isVolunteerTask) {
+                    updateData.remainingCompletions = nextRemaining;
+                }
+                await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), updateData);
+                setTask(prev => prev ? {
+                    ...prev,
+                    status: nextStatus,
+                    ...(task.isVolunteerTask ? {} : { remainingCompletions: nextRemaining }),
+                } : prev);
+                return;
+            }
+            await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), { status: newStatus });
+            setTask(prev => prev ? { ...prev, status: newStatus } : prev);
         } catch (err) {
             console.error("Error updating status:", err);
         }
