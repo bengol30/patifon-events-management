@@ -3,10 +3,11 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, storage } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc, getDoc, setDoc, getDocs, where, collectionGroup, limit } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar } from "lucide-react";
 import Link from "next/link";
 import ImportantDocuments from "@/components/ImportantDocuments";
 const ADMIN_EMAIL = "bengo0469@gmail.com";
@@ -116,7 +117,7 @@ export default function SettingsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user, loading: authLoading } = useAuth();
-    const validTabs = ["defaultTasks", "documents", "account", "whatsapp"] as const;
+    const validTabs = ["defaultTasks", "documents", "account", "whatsapp", "metricool", "instagram"] as const;
     const getInitialTab = () => {
         const tabParam = searchParams.get("tab");
         // Start on WhatsApp tab only after auth check; default to main tab on first render
@@ -143,6 +144,28 @@ export default function SettingsPage() {
     const [savingWaRules, setSavingWaRules] = useState(false);
     const [loadingWhatsapp, setLoadingWhatsapp] = useState(true);
     const [savingWhatsapp, setSavingWhatsapp] = useState(false);
+
+    const [metricoolConfig, setMetricoolConfig] = useState<{ userToken: string; userId: string }>({
+        userToken: "",
+        userId: ""
+    });
+    const [loadingMetricool, setLoadingMetricool] = useState(true);
+    const [savingMetricool, setSavingMetricool] = useState(false);
+
+    const [instagramConfig, setInstagramConfig] = useState<{ accessToken: string; accountId: string }>({
+        accessToken: "",
+        accountId: ""
+    });
+    const [loadingInstagram, setLoadingInstagram] = useState(true);
+    const [savingInstagram, setSavingInstagram] = useState(false);
+
+    // Instagram Publish State
+    const [igPostType, setIgPostType] = useState<"IMAGE" | "VIDEO" | "STORY">("IMAGE");
+    const [igCaption, setIgCaption] = useState("");
+    const [igTags, setIgTags] = useState("");
+    const [igFile, setIgFile] = useState<File | null>(null);
+    const [igScheduleTime, setIgScheduleTime] = useState("");
+    const [igPublishing, setIgPublishing] = useState(false);
 
     // UI State
     const [showSeedModal, setShowSeedModal] = useState(false);
@@ -210,7 +233,7 @@ export default function SettingsPage() {
         const tabParam = searchParams.get("tab");
         const normalized = validTabs.includes((tabParam || "") as (typeof validTabs)[number]) ? (tabParam as (typeof validTabs)[number]) : null;
         if (!normalized) return;
-        if (normalized === "whatsapp" && !isAdmin) {
+        if ((normalized === "whatsapp" || normalized === "instagram" || normalized === "metricool") && !isAdmin) {
             handleTabChange("defaultTasks");
             return;
         }
@@ -220,8 +243,8 @@ export default function SettingsPage() {
     }, [searchParams, activeTab, isAdmin]);
 
     const handleTabChange = (tab: (typeof validTabs)[number]) => {
-        if (tab === "whatsapp" && !isAdmin) {
-            setMessage({ text: "גישה ללשונית וואטסאפ מותרת רק לאדמין", type: "error" });
+        if ((tab === "whatsapp" || tab === "metricool" || tab === "instagram") && !isAdmin) {
+            setMessage({ text: "גישה ללשונית זו מותרת רק לאדמין", type: "error" });
             return;
         }
         setActiveTab(tab);
@@ -286,6 +309,54 @@ export default function SettingsPage() {
                 setMessage({ text: "שגיאה בטעינת הגדרות וואטסאפ", type: "error" });
             })
             .finally(() => setLoadingWhatsapp(false));
+    }, [db, user, isAdmin]);
+
+    useEffect(() => {
+        if (!db || !user || !isAdmin) {
+            setLoadingMetricool(false);
+            return;
+        }
+
+        const ref = doc(db, "integrations", "metricool");
+        getDoc(ref)
+            .then((snap) => {
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    setMetricoolConfig({
+                        userToken: data.userToken || "",
+                        userId: data.userId || ""
+                    });
+                }
+            })
+            .catch((err) => {
+                console.error("Failed loading Metricool config", err);
+                setMessage({ text: "שגיאה בטעינת הגדרות Metricool", type: "error" });
+            })
+            .finally(() => setLoadingMetricool(false));
+    }, [db, user, isAdmin]);
+
+    useEffect(() => {
+        if (!db || !user || !isAdmin) {
+            setLoadingInstagram(false);
+            return;
+        }
+
+        const ref = doc(db, "integrations", "instagram");
+        getDoc(ref)
+            .then((snap) => {
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    setInstagramConfig({
+                        accessToken: data.accessToken || "",
+                        accountId: data.accountId || ""
+                    });
+                }
+            })
+            .catch((err) => {
+                console.error("Failed loading Instagram config", err);
+                setMessage({ text: "שגיאה בטעינת הגדרות Instagram", type: "error" });
+            })
+            .finally(() => setLoadingInstagram(false));
     }, [db, user, isAdmin]);
 
     useEffect(() => {
@@ -567,6 +638,132 @@ export default function SettingsPage() {
         }
     };
 
+    const handleSaveMetricool = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !user) return;
+        setSavingMetricool(true);
+        try {
+            await setDoc(
+                doc(db, "integrations", "metricool"),
+                {
+                    userToken: metricoolConfig.userToken.trim(),
+                    userId: metricoolConfig.userId.trim(),
+                    updatedAt: serverTimestamp(),
+                    updatedBy: user.uid,
+                    updatedByEmail: user.email || ""
+                },
+                { merge: true }
+            );
+            setMessage({ text: "הגדרות Metricool נשמרו בהצלחה", type: "success" });
+        } catch (err) {
+            console.error("Failed saving Metricool config", err);
+            setMessage({ text: "שגיאה בשמירת הגדרות Metricool", type: "error" });
+        } finally {
+            setSavingMetricool(false);
+        }
+    };
+
+    const handleSaveInstagram = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !user) return;
+        setSavingInstagram(true);
+        try {
+            await setDoc(
+                doc(db, "integrations", "instagram"),
+                {
+                    accessToken: instagramConfig.accessToken.trim(),
+                    accountId: instagramConfig.accountId.trim(),
+                    updatedAt: serverTimestamp(),
+                    updatedBy: user.uid,
+                    updatedByEmail: user.email || ""
+                },
+                { merge: true }
+            );
+            setMessage({ text: "הגדרות Instagram נשמרו בהצלחה", type: "success" });
+        } catch (err) {
+            console.error("Failed saving Instagram config", err);
+            setMessage({ text: "שגיאה בשמירת הגדרות Instagram", type: "error" });
+        } finally {
+            setSavingInstagram(false);
+        }
+    };
+
+    const handleInstagramPublish = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!igFile) {
+            alert("יש לבחור קובץ (תמונה או וידאו)");
+            return;
+        }
+        if (!instagramConfig.accessToken || !instagramConfig.accountId) {
+            alert("יש להגדיר תחילה את פרטי החיבור לאינסטגרם");
+            return;
+        }
+
+        setIgPublishing(true);
+        try {
+            if (!storage || !db) throw new Error("Firebase not initialized");
+            // 1. Upload file to Firebase Storage
+            const storageRef = ref(storage, `instagram_uploads/${Date.now()}_${igFile.name}`);
+            const uploadRes = await uploadBytes(storageRef, igFile);
+            const downloadUrl = await getDownloadURL(uploadRes.ref);
+
+            // 2. Call API Route or Schedule Internally
+            let scheduleTimestamp: number | null = null;
+            if (igScheduleTime) {
+                scheduleTimestamp = Math.floor(new Date(igScheduleTime).getTime() / 1000);
+            }
+
+            if (scheduleTimestamp) {
+                // Internal Scheduling: Save to Firestore
+                await addDoc(collection(db, "scheduled_posts"), {
+                    accessToken: instagramConfig.accessToken,
+                    accountId: instagramConfig.accountId,
+                    imageUrl: igPostType !== "VIDEO" ? downloadUrl : null,
+                    videoUrl: igPostType === "VIDEO" ? downloadUrl : null,
+                    caption: igCaption,
+                    type: igPostType,
+                    scheduleTime: scheduleTimestamp,
+                    taggedUsers: igTags.split(",").map(t => t.trim().replace("@", "")).filter(Boolean),
+                    status: "pending",
+                    createdAt: serverTimestamp()
+                });
+                setMessage({ text: "הפוסט תוזמן בהצלחה (ישמר במערכת ויפורסם בזמן)!", type: "success" });
+            } else {
+                // Immediate Publish via API
+                const res = await fetch("/api/instagram/publish", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        accessToken: instagramConfig.accessToken,
+                        accountId: instagramConfig.accountId,
+                        imageUrl: igPostType !== "VIDEO" ? downloadUrl : undefined,
+                        videoUrl: igPostType === "VIDEO" ? downloadUrl : undefined,
+                        caption: igCaption,
+                        type: igPostType,
+                        scheduleTime: null, // Always null for immediate
+                        taggedUsers: igTags.split(",").map(t => t.trim().replace("@", "")).filter(Boolean)
+                    })
+                });
+
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    throw new Error(data.error || "Failed to publish");
+                }
+                setMessage({ text: "הפוסט פורסם בהצלחה!", type: "success" });
+            }
+
+            setIgCaption("");
+            setIgFile(null);
+            setIgScheduleTime("");
+
+        } catch (err: any) {
+            console.error("Instagram publish error", err);
+            setMessage({ text: `שגיאה בפרסום: ${err.message}`, type: "error" });
+        } finally {
+            setIgPublishing(false);
+        }
+    };
+
     const normalizePhone = (value: string) => {
         const digits = (value || "").replace(/\D/g, "");
         if (!digits) return "";
@@ -638,7 +835,7 @@ export default function SettingsPage() {
             setWaPhoneInput(match.phone);
         }
         if (match?.fullName && (!waMessageText || waMessageText.trim() === "היי, רצינו לעדכן אותך :)")) {
-            setWaMessageText(`היי ${match.fullName}, רצינו לעדכן אותך :)`);
+            setWaMessageText(`היי ${match.fullName}, רצינו לעדכן אותך : )`);
         }
     };
 
@@ -1573,16 +1770,38 @@ export default function SettingsPage() {
                                 מסמכים חשובים
                             </button>
                             {isAdmin && (
-                                <button
-                                    onClick={() => handleTabChange("whatsapp")}
-                                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "whatsapp"
-                                        ? "bg-indigo-50 text-indigo-700"
-                                        : "text-gray-600 hover:bg-gray-50"
-                                        }`}
-                                >
-                                    <MessageCircle size={18} />
-                                    וואטסאפ (Green API)
-                                </button>
+                                <>
+                                    <button
+                                        onClick={() => handleTabChange("whatsapp")}
+                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "whatsapp"
+                                            ? "bg-indigo-50 text-indigo-700"
+                                            : "text-gray-600 hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <MessageCircle size={18} />
+                                        וואטסאפ (Green API)
+                                    </button>
+                                    <button
+                                        onClick={() => handleTabChange("metricool")}
+                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "metricool"
+                                            ? "bg-indigo-50 text-indigo-700"
+                                            : "text-gray-600 hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <Share2 size={18} />
+                                        Metricool
+                                    </button>
+                                    <button
+                                        onClick={() => handleTabChange("instagram")}
+                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "instagram"
+                                            ? "bg-indigo-50 text-indigo-700"
+                                            : "text-gray-600 hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <Instagram size={18} />
+                                        אינסטגרם (ישיר)
+                                    </button>
+                                </>
                             )}
                             <button
                                 onClick={() => handleTabChange("account")}
@@ -1831,7 +2050,7 @@ export default function SettingsPage() {
                                                 </button>
                                                 <span className="text-xs text-gray-500">השמירה מתבצעת ב-Firestore ותהיה זמינה לכלי שליחה.</span>
                                             </div>
-                        </form>
+                                        </form>
                                     )}
                                 </div>
 
@@ -2207,6 +2426,250 @@ export default function SettingsPage() {
                                         <p className="font-semibold">טיפ אבטחה</p>
                                         <p>האסימון נשמר ב-Firestore ונגיש רק למנהלי מערכת. אם שינית את האסימון ב-Green API, עדכן אותו כאן.</p>
                                     </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "metricool" && isAdmin && (
+                            <div className="space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <Share2 size={20} className="text-indigo-500" />
+                                                <h2 className="text-xl font-bold text-gray-900">חיבור Metricool</h2>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mt-1">
+                                                הזן את פרטי החיבור ל-Metricool כדי לאפשר אוטומציה של פוסטים וסטורים.
+                                            </p>
+                                        </div>
+                                        <a
+                                            href="https://metricool.com/"
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-sm text-indigo-600 hover:text-indigo-800 underline"
+                                        >
+                                            לאתר Metricool
+                                        </a>
+                                    </div>
+
+                                    {loadingMetricool ? (
+                                        <div className="mt-4 text-gray-500 text-sm">טוען הגדרות...</div>
+                                    ) : (
+                                        <form className="space-y-4 mt-6" onSubmit={handleSaveMetricool}>
+                                            <div className="grid sm:grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="text-sm text-gray-600">User ID</label>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        value={metricoolConfig.userId}
+                                                        onChange={(e) => setMetricoolConfig(prev => ({ ...prev, userId: e.target.value }))}
+                                                        placeholder="מזהה משתמש ב-Metricool"
+                                                        required
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-sm text-gray-600">API Token</label>
+                                                    <input
+                                                        type="password"
+                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        value={metricoolConfig.userToken}
+                                                        onChange={(e) => setMetricoolConfig(prev => ({ ...prev, userToken: e.target.value }))}
+                                                        placeholder="Token מ-Metricool"
+                                                        required
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    type="submit"
+                                                    disabled={savingMetricool}
+                                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
+                                                >
+                                                    {savingMetricool ? "שומר..." : "שמור הגדרות"}
+                                                </button>
+                                                <span className="text-xs text-gray-500">השמירה מתבצעת ב-Firestore.</span>
+                                            </div>
+                                        </form>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "instagram" && isAdmin && (
+                            <div className="space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <Instagram size={20} className="text-pink-600" />
+                                                <h2 className="text-xl font-bold text-gray-900">חיבור אינסטגרם (Graph API)</h2>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mt-1">
+                                                הגדר את פרטי החיבור ל-Instagram Graph API כדי להעלות ולתזמן פוסטים וסטורים ישירות מהמערכת.
+                                            </p>
+                                        </div>
+                                        <a
+                                            href="https://developers.facebook.com/tools/explorer/"
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-sm text-indigo-600 hover:text-indigo-800 underline"
+                                        >
+                                            Graph API Explorer
+                                        </a>
+                                    </div>
+
+                                    {loadingInstagram ? (
+                                        <div className="mt-4 text-gray-500 text-sm">טוען הגדרות...</div>
+                                    ) : (
+                                        <form className="space-y-4 mt-6" onSubmit={handleSaveInstagram}>
+                                            <div className="grid sm:grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="text-sm text-gray-600">Access Token (Long Lived)</label>
+                                                    <input
+                                                        type="password"
+                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        value={instagramConfig.accessToken}
+                                                        onChange={(e) => setInstagramConfig(prev => ({ ...prev, accessToken: e.target.value }))}
+                                                        placeholder="EAAG..."
+                                                        required
+                                                    />
+                                                    <p className="text-xs text-gray-400">יש להפיק טוקן עם הרשאות: instagram_content_publish, instagram_basic</p>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-sm text-gray-600">Instagram Business Account ID</label>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        value={instagramConfig.accountId}
+                                                        onChange={(e) => setInstagramConfig(prev => ({ ...prev, accountId: e.target.value }))}
+                                                        placeholder="1784..."
+                                                        required
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    type="submit"
+                                                    disabled={savingInstagram}
+                                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
+                                                >
+                                                    {savingInstagram ? "שומר..." : "שמור הגדרות"}
+                                                </button>
+                                            </div>
+                                        </form>
+                                    )}
+                                </div>
+
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <UploadCloud size={20} className="text-indigo-500" />
+                                        <h3 className="text-lg font-bold text-gray-900">העלאה ותזמון תוכן</h3>
+                                    </div>
+
+                                    <form onSubmit={handleInstagramPublish} className="space-y-4">
+                                        <div className="grid sm:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">סוג פוסט</label>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIgPostType("IMAGE")}
+                                                        className={`flex-1 py-2 rounded-lg text-sm font-medium border ${igPostType === "IMAGE" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                                                    >
+                                                        תמונה
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIgPostType("VIDEO")}
+                                                        className={`flex-1 py-2 rounded-lg text-sm font-medium border ${igPostType === "VIDEO" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                                                    >
+                                                        וידאו
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIgPostType("STORY")}
+                                                        className={`flex-1 py-2 rounded-lg text-sm font-medium border ${igPostType === "STORY" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                                                    >
+                                                        סטורי
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">קובץ מדיה</label>
+                                                <input
+                                                    type="file"
+                                                    accept={igPostType === "VIDEO" ? "video/*" : "image/*"}
+                                                    onChange={(e) => setIgFile(e.target.files?.[0] || null)}
+                                                    className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                                                    required
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">תיוג משתמשים (אופציונלי)</label>
+                                            <input
+                                                type="text"
+                                                className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-left ${igPostType === "STORY" ? "bg-gray-100 text-gray-400 cursor-not-allowed" : ""}`}
+                                                value={igTags}
+                                                onChange={(e) => setIgTags(e.target.value)}
+                                                placeholder="@username1, @username2"
+                                                dir="ltr"
+                                                disabled={igPostType === "STORY"}
+                                            />
+                                            <p className={`text-xs mt-1 ${igPostType === "STORY" ? "text-amber-600 font-medium" : "text-gray-500"}`}>
+                                                {igPostType === "STORY"
+                                                    ? "שים לב: תיוג משתמשים בסטורי אינו נתמך דרך ה-API של אינסטגרם."
+                                                    : "מופרד בפסיקים. המערכת תנסה לתייג אותם בפוסט."}
+                                            </p>
+                                        </div>
+
+                                        {igPostType !== "STORY" && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">כיתוב (Caption)</label>
+                                                <textarea
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    rows={3}
+                                                    value={igCaption}
+                                                    onChange={(e) => setIgCaption(e.target.value)}
+                                                    placeholder="כתוב משהו..."
+                                                />
+                                            </div>
+                                        )}
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">תזמון (אופציונלי)</label>
+                                            <div className="relative">
+                                                <input
+                                                    type="datetime-local"
+                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    value={igScheduleTime}
+                                                    onChange={(e) => setIgScheduleTime(e.target.value)}
+                                                />
+                                                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">השאר ריק לפרסום מיידי. שים לב: תזמון סטורי עשוי לא נתמך בכל החשבונות דרך ה-API.</p>
+                                        </div>
+
+                                        <div className="flex justify-end">
+                                            <button
+                                                type="submit"
+                                                disabled={igPublishing}
+                                                className="bg-pink-600 text-white px-6 py-2.5 rounded-lg hover:bg-pink-700 transition font-medium shadow-sm disabled:opacity-60 flex items-center gap-2"
+                                            >
+                                                {igPublishing ? (
+                                                    <>Processing...</>
+                                                ) : (
+                                                    <>
+                                                        <UploadCloud size={18} />
+                                                        {igScheduleTime ? "תזמן פוסט" : "פרסם עכשיו"}
+                                                    </>
+                                                )}
+                                            </button>
+                                        </div>
+                                    </form>
                                 </div>
                             </div>
                         )}

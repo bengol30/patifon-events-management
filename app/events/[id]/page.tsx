@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat, PauseCircle } from "lucide-react";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { db, storage } from "@/lib/firebase";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc, where, collectionGroup } from "firebase/firestore";
@@ -161,6 +161,8 @@ interface EventData {
     recurrenceEndDate?: any;
     needsVolunteers?: boolean;
     volunteersCount?: number | null;
+    volunteerTasksPaused?: boolean;
+    teamTasksPaused?: boolean;
     contactPerson?: {
         name?: string;
         phone?: string;
@@ -170,6 +172,7 @@ interface EventData {
     projectName?: string | null;
     customSections?: CustomSection[];
     infoBlocks?: InfoBlock[];
+    officialInstagramTags?: string[];
 }
 
 interface ProjectOption {
@@ -393,6 +396,14 @@ export default function EventDetailsPage() {
         return digits;
     };
 
+    const buildVolunteerKey = (vol?: { email?: string; id?: string; userId?: string; name?: string }) => {
+        const email = (vol?.email || "").toString().trim().toLowerCase();
+        if (email) return email;
+        const uid = (vol?.userId || vol?.id || "").toString().trim().toLowerCase();
+        if (uid) return uid;
+        return (vol?.name || "").toString().trim().toLowerCase();
+    };
+
     const getPublicBaseUrl = (preferred?: string) => {
         const cleanPreferred = (preferred || "").trim().replace(/\/$/, "");
         if (cleanPreferred) return cleanPreferred;
@@ -610,6 +621,12 @@ export default function EventDetailsPage() {
                 const cgData = cgRes.docs[0]?.data() as any;
                 if (cgData?.phoneNormalized || cgData?.phone) return cgData.phoneNormalized || cgData.phone;
             } catch { /* ignore */ }
+            try {
+                const general = query(collection(db!, "general_volunteers"), where("email", "==", assignee.email.toLowerCase()));
+                const generalRes = await getDocs(general);
+                const gData = generalRes.docs[0]?.data() as any;
+                if (gData?.phoneNormalized || gData?.phone) return gData.phoneNormalized || gData.phone;
+            } catch { /* ignore */ }
         }
         return "";
     };
@@ -619,6 +636,18 @@ export default function EventDetailsPage() {
         const digits = raw.replace(/\D/g, "");
         if (!digits) return "";
         if (digits.startsWith("0")) return `972${digits.replace(/^0+/, "")}`;
+        return digits;
+    };
+
+    const formatPhoneForDisplay = (raw?: string) => {
+        if (!raw) return "";
+        const digits = raw.replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("972")) {
+            const local = digits.slice(3);
+            return local ? `0${local}` : digits;
+        }
+        if (!digits.startsWith("0") && digits.length === 9) return `0${digits}`;
         return digits;
     };
 
@@ -832,6 +861,8 @@ export default function EventDetailsPage() {
     const [importantDocs, setImportantDocs] = useState<ImportantDoc[]>([]);
     const [eventFiles, setEventFiles] = useState<EventFileThumb[]>([]);
     const [copiedVolunteersLink, setCopiedVolunteersLink] = useState(false);
+    const [copiedContentFormLink, setCopiedContentFormLink] = useState(false);
+    const [baseUrl, setBaseUrl] = useState("");
     const [volunteers, setVolunteers] = useState<EventVolunteer[]>([]);
     const [loadingVolunteers, setLoadingVolunteers] = useState(true);
     const [volunteerBusyId, setVolunteerBusyId] = useState<string | null>(null);
@@ -839,27 +870,42 @@ export default function EventDetailsPage() {
     const [volunteerSelections, setVolunteerSelections] = useState<Set<string>>(new Set());
     const [sendingVolunteerMsg, setSendingVolunteerMsg] = useState(false);
     const volunteerMessageRef = useRef<string>("");
+    const [showControlCenter, setShowControlCenter] = useState(false);
+    const [controlSaving, setControlSaving] = useState(false);
+    const [volunteerSharePaused, setVolunteerSharePaused] = useState(false);
+    const [teamSharePaused, setTeamSharePaused] = useState(false);
+    const [volunteerPhoneCache, setVolunteerPhoneCache] = useState<Map<string, string>>(new Map());
     const volunteerPhoneMap = useMemo(() => {
         const map = new Map<string, string>();
+        // cached phones from lookups
+        volunteerPhoneCache.forEach((val, key) => {
+            if (key && val) map.set(key, val);
+        });
         volunteers.forEach(v => {
-            const key = (v.email || v.id || v.name || "").toLowerCase();
+            const key = buildVolunteerKey({ email: v.email, id: v.id, name: v.name, userId: (v as any).userId });
             const phone = (v as any).phoneNormalized || v.phone;
             if (key && phone) map.set(key, phone);
         });
         return map;
-    }, [volunteers]);
+    }, [volunteers, volunteerPhoneCache]);
     const combinedVolunteers = useMemo(() => {
         const map = new Map<string, { id?: string; name?: string; email?: string; phone?: string }>();
         volunteers.forEach(v => {
-            const key = (v.email || v.id || v.name || "").toLowerCase();
+            const key = buildVolunteerKey({ email: v.email, id: v.id, name: v.name, userId: (v as any).userId });
             if (!key) return;
-            map.set(key, { id: v.id, name: v.name || v.email, email: v.email, phone: v.phone || (v as any).phoneNormalized });
+            const normalized = (v as any).phoneNormalized ? normalizePhone((v as any).phoneNormalized) : "";
+            map.set(key, {
+                id: v.id,
+                name: v.name || v.email,
+                email: v.email,
+                phone: normalized || v.phone || (v as any).phoneNormalized || volunteerPhoneMap.get(key),
+            });
         });
         tasks
             .filter(t => t.isVolunteerTask || t.volunteerHours != null)
             .forEach(t => {
                 (t.assignees || []).forEach(a => {
-                    const key = (a.email || a.userId || a.name || "").toLowerCase();
+                    const key = buildVolunteerKey({ email: a.email, id: a.userId, name: a.name, userId: a.userId });
                     if (!key) return;
                     const phoneFromEvent = volunteerPhoneMap.get(key);
                     if (!map.has(key)) {
@@ -876,7 +922,7 @@ export default function EventDetailsPage() {
     useEffect(() => {
         const next = new Set<string>();
         combinedVolunteers.forEach(v => {
-            const key = (v.email || v.id || v.name || "").toLowerCase();
+            const key = buildVolunteerKey({ email: v.email, id: v.id, name: v.name });
             if (key) next.add(key);
         });
         setVolunteerSelections(next);
@@ -897,6 +943,65 @@ export default function EventDetailsPage() {
             setTagSelection(taggingTask.assignees || []);
         }
     }, [taggingTask]);
+
+    useEffect(() => {
+        const fillMissingPhones = async () => {
+            if (!db) return;
+            const missing = combinedVolunteers.filter(v => {
+                const key = buildVolunteerKey({ email: v.email, id: v.id, name: v.name });
+                return key && !v.phone && !volunteerPhoneMap.get(key);
+            });
+            if (!missing.length) return;
+            const updates = new Map<string, string>();
+            for (const v of missing) {
+                const key = buildVolunteerKey({ email: v.email, id: v.id, name: v.name });
+                if (!key) continue;
+                const phone = await getUserPhone({ name: v.name || "", email: v.email || "", userId: v.id });
+                const normalized = normalizePhone(phone || "");
+                if (normalized) updates.set(key, normalized);
+            }
+            if (updates.size) {
+                setVolunteerPhoneCache(prev => {
+                    const next = new Map(prev);
+                    updates.forEach((val, key) => next.set(key, val));
+                    return next;
+                });
+            }
+        };
+        fillMissingPhones();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [combinedVolunteers, db]);
+
+    useEffect(() => {
+        const hydrateFromGeneralVolunteers = async () => {
+            if (!db) return;
+            const missingEmails = combinedVolunteers
+                .map(v => (v.email || "").toLowerCase())
+                .filter(email => email && !volunteerPhoneMap.get(email));
+            if (!missingEmails.length) return;
+            const updates = new Map<string, string>();
+            for (const email of missingEmails) {
+                try {
+                    const q = query(collection(db, "general_volunteers"), where("email", "==", email));
+                    const res = await getDocs(q);
+                    const data = res.docs[0]?.data() as any;
+                    const phone = data?.phoneNormalized || data?.phone;
+                    const normalized = normalizePhone(phone || "");
+                    if (normalized) updates.set(email, normalized);
+                } catch (err) {
+                    console.warn("hydrateFromGeneralVolunteers lookup failed", err);
+                }
+            }
+            if (updates.size) {
+                setVolunteerPhoneCache(prev => {
+                    const next = new Map(prev);
+                    updates.forEach((val, key) => next.set(key, val));
+                    return next;
+                });
+            }
+        };
+        hydrateFromGeneralVolunteers();
+    }, [combinedVolunteers, db, volunteerPhoneMap]);
 
     // Load recurring/default tasks library for modal
     useEffect(() => {
@@ -981,7 +1086,7 @@ export default function EventDetailsPage() {
             return;
         }
         const list = combinedVolunteers.filter(v => {
-            const key = (v.email || v.id || v.name || "").toLowerCase();
+            const key = buildVolunteerKey({ email: v.email, id: v.id, name: v.name });
             return key && volunteerSelections.has(key);
         });
         if (!list.length) {
@@ -1002,7 +1107,7 @@ export default function EventDetailsPage() {
             const skippedNoPhone: string[] = [];
             const failed: string[] = [];
             for (const v of list) {
-                const key = (v.email || v.id || v.name || "").toLowerCase();
+                const key = buildVolunteerKey({ email: v.email, id: v.id, name: v.name });
                 const phoneRaw =
                     v.phone ||
                     volunteerPhoneMap.get(key) ||
@@ -1290,10 +1395,23 @@ export default function EventDetailsPage() {
         const qVolunteers = query(collection(db, "events", id, "volunteers"), orderBy("createdAt", "desc"));
         const unsubscribeVolunteers = onSnapshot(qVolunteers, (querySnapshot) => {
             const vols: EventVolunteer[] = [];
+            const phoneUpdates = new Map<string, string>();
             querySnapshot.forEach((doc) => {
-                vols.push({ id: doc.id, ...doc.data() } as EventVolunteer);
+                const data = doc.data() as any;
+                const key = buildVolunteerKey({ email: data.email, id: doc.id, name: data.name, userId: (data as any).userId });
+                const phone = data.phoneNormalized || data.phone;
+                const normalizedPhone = phone ? normalizePhone(phone) : "";
+                if (key && phone) phoneUpdates.set(key, normalizePhone(phone));
+                vols.push({ id: doc.id, ...data, phoneNormalized: normalizedPhone } as EventVolunteer);
             });
             setVolunteers(dedupeById(vols));
+            if (phoneUpdates.size) {
+                setVolunteerPhoneCache(prev => {
+                    const next = new Map(prev);
+                    phoneUpdates.forEach((val, key) => next.set(key, val));
+                    return next;
+                });
+            }
             setLoadingVolunteers(false);
         });
 
@@ -1402,6 +1520,11 @@ export default function EventDetailsPage() {
     }, [db, user]);
 
     useEffect(() => {
+        setVolunteerSharePaused(!!event?.volunteerTasksPaused);
+        setTeamSharePaused(!!event?.teamTasksPaused);
+    }, [event?.volunteerTasksPaused, event?.teamTasksPaused]);
+
+    useEffect(() => {
         if (!event) return;
 
         const toInputValue = (value: any) => {
@@ -1432,6 +1555,10 @@ export default function EventDetailsPage() {
             customSections: event.customSections || [],
         });
     }, [event]);
+
+    useEffect(() => {
+        setBaseUrl(getPublicBaseUrl());
+    }, []);
 
     const uploadTaskFiles = async (taskId: string, taskTitle: string, files: File[]) => {
         if (!storage || !db || files.length === 0) return [];
@@ -1884,13 +2011,15 @@ export default function EventDetailsPage() {
     };
 
     const buildRegisterLink = () => {
-        if (typeof window === "undefined") return "";
-        return `${window.location.origin}/events/${id}/register`;
+        const origin = baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+        if (!origin) return "";
+        return `${origin}/events/${id}/register`;
     };
 
     const buildVolunteerLink = () => {
-        if (typeof window === "undefined") return "";
-        return `${window.location.origin}/events/${id}/volunteers`;
+        const origin = baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+        if (!origin) return "";
+        return `${origin}/events/${id}/volunteers`;
     };
 
     const buildPostContent = () => {
@@ -2402,7 +2531,12 @@ export default function EventDetailsPage() {
 
     const copyInviteLink = async () => {
         try {
-            const inviteLink = `${window.location.origin}/events/${id}/join`;
+            const origin = baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+            const inviteLink = origin ? `${origin}/events/${id}/join` : "";
+            if (!inviteLink) {
+                alert("לא הצלחנו ליצור קישור הזמנה");
+                return;
+            }
             await navigator.clipboard.writeText(inviteLink);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
@@ -2414,7 +2548,12 @@ export default function EventDetailsPage() {
 
     const copyRegisterLink = async () => {
         try {
-            const registerLink = `${window.location.origin}/events/${id}/register`;
+            const origin = baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+            const registerLink = origin ? `${origin}/events/${id}/register` : "";
+            if (!registerLink) {
+                alert("לא הצלחנו ליצור קישור הרשמה");
+                return;
+            }
             await navigator.clipboard.writeText(registerLink);
             setCopiedRegister(true);
             setTimeout(() => setCopiedRegister(false), 2000);
@@ -2426,13 +2565,35 @@ export default function EventDetailsPage() {
 
     const copyVolunteerLink = async () => {
         try {
-            const volunteerLink = `${window.location.origin}/events/${id}/volunteers/register`;
+            const origin = baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+            const volunteerLink = origin ? `${origin}/events/${id}/volunteers/register` : "";
+            if (!volunteerLink) {
+                alert("לא הצלחנו ליצור קישור מתנדבים");
+                return;
+            }
             await navigator.clipboard.writeText(volunteerLink);
             setCopiedVolunteersLink(true);
             setTimeout(() => setCopiedVolunteersLink(false), 2000);
         } catch (err) {
             console.error("Failed to copy volunteer link:", err);
             alert("לא הצלחנו להעתיק את הקישור להרשמת מתנדבים.");
+        }
+    };
+
+    const copyContentFormLink = async () => {
+        try {
+            const origin = baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+            const link = origin ? `${origin}/events/${id}/content-form` : "";
+            if (!link) {
+                alert("לא הצלחנו ליצור קישור לטופס התוכן");
+                return;
+            }
+            await navigator.clipboard.writeText(link);
+            setCopiedContentFormLink(true);
+            setTimeout(() => setCopiedContentFormLink(false), 2000);
+        } catch (err) {
+            console.error("Failed to copy content form link:", err);
+            alert("לא הצלחנו להעתיק את הקישור לטופס התוכן.");
         }
     };
 
@@ -2452,6 +2613,28 @@ export default function EventDetailsPage() {
         } catch (err) {
             console.error("Error updating volunteer count:", err);
             alert("שגיאה בעדכון כמות המתנדבים");
+        }
+    };
+
+    const handleSaveControlCenter = async () => {
+        if (!canManageTeam || !db) {
+            alert("אין לך הרשאה לשנות את מצב האירוע.");
+            return;
+        }
+        setControlSaving(true);
+        try {
+            await updateDoc(doc(db, "events", id), {
+                volunteerTasksPaused: volunteerSharePaused,
+                teamTasksPaused: teamSharePaused,
+                updatedAt: serverTimestamp(),
+            });
+            setEvent(prev => prev ? { ...prev, volunteerTasksPaused: volunteerSharePaused, teamTasksPaused: teamSharePaused } : prev);
+            setShowControlCenter(false);
+        } catch (err) {
+            console.error("Failed to update control center", err);
+            alert("שגיאה בשמירת מרכז הבקרה");
+        } finally {
+            setControlSaving(false);
         }
     };
 
@@ -3058,7 +3241,7 @@ export default function EventDetailsPage() {
                                         onChange={(e) => {
                                             const val = parseInt(e.target.value, 10);
                                             const req = Number.isFinite(val) && val > 0 ? val : 1;
-                                            setEditingTask(prev => ({ ...prev, requiredCompletions: req }));
+                                            setEditingTask(prev => prev ? ({ ...prev, requiredCompletions: req } as Task) : null);
                                         }}
                                     />
                                     <p className="text-xs text-gray-500 mt-1">ברירת מחדל: פעם אחת. ניתן להגדיר מספר חזרות.</p>
@@ -4447,28 +4630,34 @@ export default function EventDetailsPage() {
                                                     <span className="text-gray-500">נבחרו {volunteerSelections.size}</span>
                                                 </div>
                                                 <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
-                                                    {combinedVolunteers.map((vol, idx) => {
-                                                        const key = (vol.email || vol.id || vol.name || "").toLowerCase();
-                                                        const checked = volunteerSelections.has(key);
-                                                        const phoneDisplay = vol.phone || volunteerPhoneMap.get(key);
-                                                        return (
-                                                            <label key={vol.id || idx} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
-                                                                <div className="flex items-center gap-2">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        className="accent-indigo-600"
-                                                                        checked={checked}
-                                                                        onChange={() => toggleVolunteerSelection(key)}
-                                                                    />
-                                                                    <div className="flex flex-col">
-                                                                        <span className="font-medium text-gray-800">{vol.name || vol.email || "מתנדב"}</span>
-                                                                        <span className="text-xs text-gray-500">{vol.email || vol.phone || phoneDisplay || ""}</span>
-                                                                    </div>
-                                                                </div>
-                                                                <span className="text-[11px] text-gray-500">{phoneDisplay ? "טלפון זמין" : "אין טלפון"}</span>
-                                                            </label>
-                                                        );
-                                                    })}
+                {combinedVolunteers.map((vol, idx) => {
+                    const key = buildVolunteerKey({ email: vol.email, id: vol.id, name: vol.name });
+                    const checked = volunteerSelections.has(key);
+                    const phoneDisplay = vol.phone || volunteerPhoneMap.get(key);
+                    return (
+                        <label key={vol.id || idx} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    className="accent-indigo-600"
+                                    checked={checked}
+                                    onChange={() => toggleVolunteerSelection(key)}
+                                />
+                                <div className="flex flex-col">
+                                    <span className="font-medium text-gray-800">{vol.name || vol.email || "מתנדב"}</span>
+                                    <span className="text-xs text-gray-500">
+                                        {vol.email || ""}
+                                        {(vol.email && (vol.phone || phoneDisplay)) ? " • " : ""}
+                                        {(vol.phone || phoneDisplay) ? formatPhoneForDisplay(vol.phone || phoneDisplay) : ""}
+                                    </span>
+                                </div>
+                            </div>
+                            <span className="text-[11px] text-gray-500">
+                                {phoneDisplay ? formatPhoneForDisplay(phoneDisplay) : "אין טלפון"}
+                            </span>
+                        </label>
+                    );
+                })}
                                                 </div>
                                                 <textarea
                                                     className="w-full border rounded-lg p-3 text-sm"
@@ -4613,6 +4802,129 @@ export default function EventDetailsPage() {
                 </div>
             </div>
 
+            <div className="mt-8">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-full bg-indigo-50 text-indigo-700">
+                            <PauseCircle size={20} />
+                        </div>
+                        <div className="space-y-1">
+                            <p className="text-sm font-semibold text-gray-900">מרכז בקרה לאירוע</p>
+                            <p className="text-xs text-gray-600">
+                                עצור/הפעל שיתוף משימות עם מתנדבים והגדר מצבי אירוע מיוחדים.
+                            </p>
+                            {event.volunteerTasksPaused && (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                    <PauseCircle size={14} />
+                                    שיתוף המשימות למתנדבים מושהה
+                                </span>
+                            )}
+                            {event.teamTasksPaused && (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                    <PauseCircle size={14} />
+                                    משימות הצוות בהשהיה
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {!canManageTeam && (
+                            <span className="text-[11px] text-gray-500">
+                                רק יוצר האירוע או צוות מורשה יכולים לשנות את מצב האירוע
+                            </span>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setShowControlCenter(true)}
+                            disabled={!canManageTeam}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 vinyl-shadow transition ${canManageTeam
+                                    ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                                    : "bg-gray-200 text-gray-500 cursor-not-allowed"
+                                }`}
+                        >
+                            <PauseCircle size={18} />
+                            פתח מרכז בקרה
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {showControlCenter && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 space-y-5">
+                        <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-full bg-indigo-50 text-indigo-700">
+                                    <PauseCircle size={22} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-bold">מרכז בקרה לאירוע</h3>
+                                    <p className="text-sm text-gray-600">הגדר מצבי השהיה והפעלה לאירוע.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowControlCenter(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-sm font-semibold text-gray-900">הפסקת שיתוף המשימות עם מתנדבים</p>
+                                    <p className="text-xs text-gray-600">
+                                        מסתיר מהמתנדבים את המשימות הפתוחות של האירוע באזור האישי שלהם עד לחידוש השיתוף.
+                                    </p>
+                                </div>
+                                <label className="inline-flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={volunteerSharePaused}
+                                        onChange={(e) => setVolunteerSharePaused(e.target.checked)}
+                                    />
+                                    <span className="text-sm font-semibold text-gray-800">{volunteerSharePaused ? "מושבת" : "פעיל"}</span>
+                                </label>
+                            </div>
+                            <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-sm font-semibold text-gray-900">השהיית משימות צוות</p>
+                                    <p className="text-xs text-gray-600">
+                                        משימות צוות יישארו בדף ניהול האירוע, אך לא יופיעו ברשימת המשימות האישיות של חברי הצוות.
+                                    </p>
+                                </div>
+                                <label className="inline-flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={teamSharePaused}
+                                        onChange={(e) => setTeamSharePaused(e.target.checked)}
+                                    />
+                                    <span className="text-sm font-semibold text-gray-800">{teamSharePaused ? "מושבת" : "פעיל"}</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowControlCenter(false)}
+                                className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
+                            >
+                                סגור
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveControlCenter}
+                                disabled={controlSaving || !canManageTeam}
+                                className={`px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2 ${controlSaving ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                            >
+                                {controlSaving ? "שומר..." : "שמור הגדרות"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Event File Upload Modal */}
             {showEventFileModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -4733,12 +5045,12 @@ export default function EventDetailsPage() {
                                 <div className="bg-gray-50 rounded-lg p-4">
                                     <p className="text-sm font-medium text-gray-700 mb-2">קישור הרשמה למתנדבים:</p>
                                     <div className="flex items-center gap-2">
-                                        <input
-                                            type="text"
-                                            readOnly
-                                            value={`${typeof window !== 'undefined' ? window.location.origin : ''}/events/${id}/volunteers/register`}
-                                            className="flex-1 rounded-lg border-gray-300 border p-2 text-sm bg-white"
-                                        />
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={baseUrl ? `${baseUrl}/events/${id}/volunteers/register` : ""}
+                                        className="flex-1 rounded-lg border-gray-300 border p-2 text-sm bg-white"
+                                    />
                                         <button
                                             type="button"
                                             onClick={copyVolunteerLink}
@@ -4831,6 +5143,38 @@ export default function EventDetailsPage() {
                             </button>
                         </div>
                         <div className="space-y-3">
+                            <div className="p-3 rounded-lg border border-indigo-100 bg-indigo-50">
+                                <p className="text-sm font-semibold text-indigo-900 mb-1">שיתוף טופס למלל ותמונה רשמית</p>
+                                <p className="text-xs text-indigo-800 mb-2">
+                                    שלח לכל אחד קישור לטופס שמאפשר להזין מלל רשמי, תיוגים ולצרף תמונה. המידע יישמר אוטומטית באירוע.
+                                </p>
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={baseUrl ? `${baseUrl}/events/${id}/content-form` : ""}
+                                        className="flex-1 rounded-lg border-gray-300 border p-2 text-xs bg-white"
+                                    />
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={copyContentFormLink}
+                                            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 ${copiedContentFormLink ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                        >
+                                            <Copy size={14} />
+                                            {copiedContentFormLink ? "הועתק" : "העתק קישור"}
+                                        </button>
+                                        <a
+                                            href={`/events/${id}/content-form`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="px-3 py-2 rounded-lg text-xs font-semibold border border-indigo-200 text-indigo-700 hover:bg-indigo-50 flex items-center gap-2"
+                                        >
+                                            פתח
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">מלל רשמי לפוסט</label>
                                 <textarea

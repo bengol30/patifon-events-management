@@ -76,14 +76,15 @@ const connectEmulators = () => {
   emulatorsConnected = true;
 };
 
-// Check if we're in the browser (not during build)
-if (typeof window !== "undefined") {
-  try {
-    app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-    storage = getStorage(app);
+// Initialize Firebase (works on both client and server)
+try {
+  app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  storage = getStorage(app);
 
+  // Client-side specific logic (emulators, auto-login)
+  if (typeof window !== "undefined") {
     if (useEmulators) {
       connectEmulators();
       console.log("Firebase emulators connected");
@@ -103,9 +104,9 @@ if (typeof window !== "undefined") {
         });
       }
     }
-  } catch (error) {
-    console.error("Firebase initialization failed:", error);
   }
+} catch (error) {
+  console.error("Firebase initialization failed:", error);
 }
 
 export { app, auth, db, storage };

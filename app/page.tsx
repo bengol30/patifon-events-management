@@ -25,6 +25,8 @@ interface Event {
   partners?: string | string[];
   members?: string[];
   team?: { name: string; role: string; email?: string; userId?: string }[];
+  volunteerTasksPaused?: boolean;
+  teamTasksPaused?: boolean;
 }
 
 interface JoinRequest {
@@ -90,6 +92,7 @@ interface VolunteerRecord {
   lastName?: string;
   email?: string;
   phone?: string;
+  phoneNormalized?: string;
   eventId: string;
   eventTitle?: string;
   createdAt?: any;
@@ -337,33 +340,35 @@ export default function Dashboard() {
     return path.startsWith("projects/") || path.includes("/projects/");
   };
 
-  const handleRegisterGalleryUpload = async (file: File) => {
+  const handleRegisterGalleryUpload = async (files: File[]) => {
     if (!db || !storage || !isAdmin) return;
     setUploadingRegisterGallery(true);
     try {
-      let uploadFile = file;
-      if (isHeicFile(file)) {
-        const converted = await convertHeicToJpeg(file) || await convertHeicServerSide(file);
-        if (converted) {
-          uploadFile = converted;
-        } else {
-          alert("לא הצלחנו להמיר HEIC. אנא המר/י ל-JPG או PNG והעלה שוב כדי לראות תצוגה מקדימה.");
-          setUploadingRegisterGallery(false);
-          return;
+      const uploadQueue = files.filter(Boolean);
+      for (const file of uploadQueue) {
+        let uploadFile = file;
+        if (isHeicFile(file)) {
+          const converted = await convertHeicToJpeg(file) || await convertHeicServerSide(file);
+          if (converted) {
+            uploadFile = converted;
+          } else {
+            alert(`לא הצלחנו להמיר HEIC עבור "${file.name}". אנא העלה JPG/PNG.`);
+            continue;
+          }
         }
-      }
 
-      const path = `register_gallery/${Date.now()}-${uploadFile.name}`;
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, uploadFile);
-      const url = await getDownloadURL(storageRef);
-      const docRef = await addDoc(collection(db, "register_gallery"), {
-        name: uploadFile.name,
-        url,
-        storagePath: path,
-        createdAt: serverTimestamp(),
-      });
-      setRegisterGallery(prev => [{ id: docRef.id, name: uploadFile.name, url, storagePath: path }, ...prev]);
+        const path = `register_gallery/${Date.now()}-${uploadFile.name}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, uploadFile);
+        const url = await getDownloadURL(storageRef);
+        const docRef = await addDoc(collection(db, "register_gallery"), {
+          name: uploadFile.name,
+          url,
+          storagePath: path,
+          createdAt: serverTimestamp(),
+        });
+        setRegisterGallery(prev => [{ id: docRef.id, name: uploadFile.name, url, storagePath: path }, ...prev]);
+      }
     } catch (err) {
       console.error("Error uploading register gallery image", err);
       alert("שגיאה בהעלאת תמונה לגלריה");
@@ -611,6 +616,9 @@ export default function Dashboard() {
           if (!isProjectTask && (!event || isEventDeletedFlag(event))) {
             return;
           }
+          const isVolunteerTask = taskData.isVolunteerTask === true || taskData.volunteerHours != null;
+          const teamPaused = !isProjectTask && (event as any)?.teamTasksPaused;
+          if (teamPaused && !isVolunteerTask) return;
 
           const match = matchAssignee({
             taskData,
@@ -870,6 +878,9 @@ export default function Dashboard() {
           }
           if (!container) return;
           if (!isProjectTask && isEventDeletedFlag(container)) return;
+          const isVolunteerTask = taskData.isVolunteerTask === true || taskData.volunteerHours != null;
+          const teamPaused = !isProjectTask && (container as any)?.teamTasksPaused;
+          if (teamPaused && !isVolunteerTask) return;
           if (scope === "event" && myEventIds.has(eventId)) {
             tasksInMyEvents += 1;
           }
@@ -1018,6 +1029,7 @@ export default function Dashboard() {
             lastName: target.lastName || src.lastName,
             email: target.email || src.email,
             phone: target.phone || src.phone,
+            phoneNormalized: target.phoneNormalized || src.phoneNormalized || normalizePhone(src.phone),
             program: target.program || src.program,
             year: target.year || src.year,
             idNumber: target.idNumber || src.idNumber,
@@ -1060,6 +1072,7 @@ export default function Dashboard() {
               lastName: volData.lastName || "",
               email: volData.email || "",
               phone: volData.phone || "",
+              phoneNormalized: normalizePhone(volData.phone),
               eventId: eventId,
               eventTitle: eventTitleMap.get(eventId) || projectTitleMap.get(eventId) || eventTitle || (scope === "project" ? "פרויקט ללא שם" : "אירוע ללא שם"),
               createdAt: volData.createdAt,
@@ -2367,65 +2380,67 @@ export default function Dashboard() {
               {myTasks.length === 0 ? "אין משימות פתוחות כרגע." : "אין משימות התואמות לסינון."}
             </div>
           ) : (
-            <div className="space-y-3">
-              {filteredTasks.map((task) => {
-                const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
-                return (
-                  <TaskCard
-                    key={task.id}
-                    id={task.id}
-                    title={task.title}
-                    description={task.description}
-                    assignee={task.assignee || "לא משויך"}
-                    assignees={task.assignees}
-                    status={task.status}
-                    dueDate={task.dueDate}
-                    priority={task.priority}
-                    currentStatus={task.currentStatus}
-                    nextStep={task.nextStep}
-                    eventId={task.eventId}
-                    eventTitle={task.eventTitle}
-                    scope={task.scope}
-                    onEdit={() => setEditingTask(task)}
-                    onDelete={() => setDeletingTaskId(task.id)}
-                    onStatusChange={async (newStatus) => {
-                      if (newStatus === "DONE") {
-                        handleCompleteTask(task);
-                      } else {
-                        // Update status for other transitions
-                        if (!db) return;
-                        try {
-                          const taskRef = task.scope === "project"
-                            ? doc(db, "projects", task.eventId, "tasks", task.id)
-                            : doc(db, "events", task.eventId, "tasks", task.id);
-                          await updateDoc(taskRef, { status: newStatus });
-                          setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
-                        } catch (err) {
-                          console.error("Error updating status:", err);
+            <div className="max-h-96 overflow-y-auto pr-1">
+              <div className="space-y-3">
+                {filteredTasks.map((task) => {
+                  const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                  return (
+                    <TaskCard
+                      key={task.id}
+                      id={task.id}
+                      title={task.title}
+                      description={task.description}
+                      assignee={task.assignee || "לא משויך"}
+                      assignees={task.assignees}
+                      status={task.status}
+                      dueDate={task.dueDate}
+                      priority={task.priority}
+                      currentStatus={task.currentStatus}
+                      nextStep={task.nextStep}
+                      eventId={task.eventId}
+                      eventTitle={task.eventTitle}
+                      scope={task.scope}
+                      onEdit={() => setEditingTask(task)}
+                      onDelete={() => setDeletingTaskId(task.id)}
+                      onStatusChange={async (newStatus) => {
+                        if (newStatus === "DONE") {
+                          handleCompleteTask(task);
+                        } else {
+                          // Update status for other transitions
+                          if (!db) return;
+                          try {
+                            const taskRef = task.scope === "project"
+                              ? doc(db, "projects", task.eventId, "tasks", task.id)
+                              : doc(db, "events", task.eventId, "tasks", task.id);
+                            await updateDoc(taskRef, { status: newStatus });
+                            setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+                          } catch (err) {
+                            console.error("Error updating status:", err);
+                          }
                         }
-                      }
-                    }}
-                    onChat={() => setChatTask(task)}
-                    hasUnreadMessages={hasUnread}
-                    onEditStatus={(t) => setEditingStatusTask({
-                      ...t,
-                      eventId: t.eventId || "",
-                      eventTitle: t.eventTitle || "",
-                      scope: task.scope
-                    } as Task)}
-                    onEditDate={(t) => setEditingDateTask({
-                      ...t,
-                      eventId: t.eventId || "",
-                      eventTitle: t.eventTitle || "",
-                      scope: task.scope
-                    } as Task)}
-                    onManageAssignees={() => {
-                      // מוביל למסך פרטי המשימה עם רמז אירוע כדי לאפשר תיוג גם במובייל
-                      router.push(`/tasks/${task.id}?eventId=${task.eventId}&focus=assignees`);
-                    }}
-                  />
-                );
-              })}
+                      }}
+                      onChat={() => setChatTask(task)}
+                      hasUnreadMessages={hasUnread}
+                      onEditStatus={(t) => setEditingStatusTask({
+                        ...t,
+                        eventId: t.eventId || "",
+                        eventTitle: t.eventTitle || "",
+                        scope: task.scope
+                      } as Task)}
+                      onEditDate={(t) => setEditingDateTask({
+                        ...t,
+                        eventId: t.eventId || "",
+                        eventTitle: t.eventTitle || "",
+                        scope: task.scope
+                      } as Task)}
+                      onManageAssignees={() => {
+                        // מוביל למסך פרטי המשימה עם רמז אירוע כדי לאפשר תיוג גם במובייל
+                        router.push(`/tasks/${task.id}?eventId=${task.eventId}&focus=assignees`);
+                      }}
+                    />
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -2728,11 +2743,12 @@ export default function Dashboard() {
                     ref={registerGalleryInputRef}
                     type="file"
                     accept="image/*"
+                    multiple
                     className="hidden"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        handleRegisterGalleryUpload(file);
+                      const files = e.target.files ? Array.from(e.target.files) : [];
+                      if (files.length) {
+                        handleRegisterGalleryUpload(files);
                       }
                       if (e.target) {
                         e.target.value = "";
@@ -2745,7 +2761,7 @@ export default function Dashboard() {
                     disabled={!isAdmin || uploadingRegisterGallery}
                     className="px-3 py-1 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
                   >
-                    {uploadingRegisterGallery ? "מעלה..." : "העלה תמונה לגלריה"}
+                    {uploadingRegisterGallery ? "מעלה..." : "העלה תמונות לגלריה"}
                   </button>
                 </div>
               </div>

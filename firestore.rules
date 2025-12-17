@@ -30,9 +30,20 @@ service cloud.firestore {
     }
 
     // חיבורי אינטגרציה (כמו Green API) - אדמין כותב, כל משתמש מחובר קורא כדי לאפשר שליחה אוטומטית
-    match /integrations/{docId} {
+    // חיבורי אינטגרציה
+    
+    // וואטסאפ - נדרש לקריאה ע"י משתמשים לשליחת הודעות
+    match /integrations/whatsapp {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+    }
+
+    // אינסטגרם ומטריקול - רק אדמין
+    match /integrations/instagram {
+      allow read, write: if isAdmin();
+    }
+    match /integrations/metricool {
+      allow read, write: if isAdmin();
     }
 
     // מגבלת קצב שליחת וואטסאפ - כל משתמש מחובר יכול לעדכן חותמת זמן

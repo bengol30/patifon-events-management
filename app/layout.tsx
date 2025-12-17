@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import FloatingRequestButton from "@/components/FloatingRequestButton";
+import CronScheduler from "@/components/CronScheduler";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,6 +33,7 @@ export default function RootLayout({
       >
         <AuthProvider>
           <FloatingRequestButton />
+          <CronScheduler />
           {children}
         </AuthProvider>
       </body>

@@ -62,6 +62,7 @@ interface EventData {
     contactName?: string;
     createdBy?: string;
     createdByEmail?: string;
+    volunteerTasksPaused?: boolean;
     ownerId?: string;
     ownerEmail?: string;
 }
@@ -156,6 +157,7 @@ export default function VolunteerEventsPage() {
         if (!currentEmail || !isAuthed) return [] as { eventId: string; eventTitle?: string; task: Task }[];
         const res: { eventId: string; eventTitle?: string; task: Task }[] = [];
         events.forEach(ev => {
+            if (ev.volunteerTasksPaused) return;
             const tasks = tasksByEvent[ev.id] || [];
             tasks.forEach(t => {
                 const selected = getSelectedForEvent(ev.id).has(t.id);
@@ -195,9 +197,23 @@ export default function VolunteerEventsPage() {
         }, 0);
     }, [completedTasks]);
 
-const totalAvailableVolunteerTasks = useMemo(() => {
-    return Object.values(tasksByEvent).reduce((acc, arr) => acc + (arr?.length || 0), 0);
-}, [tasksByEvent]);
+    const totalAvailableVolunteerTasks = useMemo(() => {
+        return events.reduce((acc, ev) => {
+            if (ev.volunteerTasksPaused) return acc;
+            const tasks = tasksByEvent[ev.id] || [];
+            const available = tasks.filter((t) => {
+                const isVolunteerLike = t.isVolunteerTask === true || t.volunteerHours != null;
+                if (!isVolunteerLike || t.status === "DONE") return false;
+                const required = (t as any).requiredCompletions != null ? Number((t as any).requiredCompletions) : 1;
+                const remaining = (t as any).remainingCompletions != null ? Number((t as any).remainingCompletions) : required;
+                const assignees = (t.assignees || []).map(a => (a.email || "").toLowerCase()).filter(Boolean);
+                const assignedToMe = assignees.includes(sessionIdentity.email);
+                const hasSlots = remaining > 0 || assignedToMe;
+                return hasSlots;
+            });
+            return acc + available.length;
+        }, 0);
+    }, [events, tasksByEvent, sessionIdentity.email]);
 
     const visibleMyTasks = useMemo(() => {
         return showPendingOnly ? myTasks.filter(({ task }) => task.status !== "DONE") : myTasks;
@@ -221,9 +237,9 @@ const totalAvailableVolunteerTasks = useMemo(() => {
     useEffect(() => {
         if (!db) return;
         setLoading(true);
-    const taskUnsubs = new Map<string, () => void>();
-    const eventsQuery = collection(db!, "events");
-    const projectsQuery = collection(db!, "projects");
+        const taskUnsubs = new Map<string, () => void>();
+        const eventsQuery = collection(db!, "events");
+        const projectsQuery = collection(db!, "projects");
         const eventsPoolRef = { current: [] as EventData[] };
 
         const unsubEvents = onSnapshot(eventsQuery, (eventsSnap) => {
@@ -231,18 +247,19 @@ const totalAvailableVolunteerTasks = useMemo(() => {
             const seen = new Set<string>();
 
             eventsSnap.forEach((eventDoc) => {
-                    const eventData = eventDoc.data() as EventData;
-                    const evId = eventDoc.id;
-                    seen.add(evId);
-                        eventsData.push({
-                            ...eventData,
-                            id: evId,
-                            scope: "event",
-                            createdBy: (eventData as any).createdBy,
-                            createdByEmail: (eventData as any).createdByEmail,
-                            contactPhone: (eventData as any)?.contactPerson?.phone || (eventData as any)?.contactPhone || "",
-                            contactName: (eventData as any)?.contactPerson?.name || "",
-                        });
+                const eventData = eventDoc.data() as EventData;
+                const evId = eventDoc.id;
+                seen.add(evId);
+                eventsData.push({
+                    ...eventData,
+                    id: evId,
+                    scope: "event",
+                    createdBy: (eventData as any).createdBy,
+                    createdByEmail: (eventData as any).createdByEmail,
+                    contactPhone: (eventData as any)?.contactPerson?.phone || (eventData as any)?.contactPhone || "",
+                    contactName: (eventData as any)?.contactPerson?.name || "",
+                    volunteerTasksPaused: !!(eventData as any)?.volunteerTasksPaused,
+                });
 
                 // attach task listener if not exists
                 if (!taskUnsubs.has(evId)) {
@@ -288,22 +305,23 @@ const totalAvailableVolunteerTasks = useMemo(() => {
         const unsubProjects = onSnapshot(projectsQuery, (projectsSnap) => {
             const projectData: EventData[] = [];
             const seen = new Set<string>();
-                projectsSnap.forEach((projDoc) => {
-                    const data = projDoc.data() as any;
-                    const pid = projDoc.id;
-                    seen.add(pid);
-                    projectData.push({
-                        id: pid,
-                        title: data.name || data.title || "פרויקט ללא שם",
-                        location: data.location || "",
-                        startTime: data.dueDate || data.updatedAt,
-                        description: data.summary || data.description || "",
-                        needsVolunteers: true, // מאפשר הצגת המשימות כמאגר
-                        volunteersCount: null,
-                        scope: "project",
-                        createdBy: data.ownerId,
-                        createdByEmail: data.ownerEmail,
-                    });
+            projectsSnap.forEach((projDoc) => {
+                const data = projDoc.data() as any;
+                const pid = projDoc.id;
+                seen.add(pid);
+                projectData.push({
+                    id: pid,
+                    title: data.name || data.title || "פרויקט ללא שם",
+                    location: data.location || "",
+                    startTime: data.dueDate || data.updatedAt,
+                    description: data.summary || data.description || "",
+                    needsVolunteers: true, // מאפשר הצגת המשימות כמאגר
+                    volunteersCount: null,
+                    scope: "project",
+                    createdBy: data.ownerId,
+                    createdByEmail: data.ownerEmail,
+                    volunteerTasksPaused: false,
+                });
 
                 if (!taskUnsubs.has(pid)) {
                     const tasksQuery = query(
@@ -767,27 +785,27 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                 setAutoAuthTried(true);
                 return;
             }
-                setAutoAuthInProgress(true);
-                // Optimistically mark as authed to avoid jump to login while we verify
-                setIsAuthed(true);
-                (async () => {
-                    const { matched, matchedIds } = await performAuthWithHash(parsed.email!, parsed.passwordHash!);
-                    if (matchedIds.length > 0) {
-                        const emailLower = parsed.email!.trim().toLowerCase();
-                        applyAuthResult(matched, matchedIds, emailLower);
-                    } else {
-                        // fallback: clear optimistic auth if no match
-                        setIsAuthed(false);
-                        localStorage.removeItem(LOCAL_AUTH_KEY);
-                    }
-                    setAutoAuthTried(true);
-                    setAutoAuthInProgress(false);
-                })();
-            } catch (err) {
-                console.warn("Auto auth parse failed", err);
+            setAutoAuthInProgress(true);
+            // Optimistically mark as authed to avoid jump to login while we verify
+            setIsAuthed(true);
+            (async () => {
+                const { matched, matchedIds } = await performAuthWithHash(parsed.email!, parsed.passwordHash!);
+                if (matchedIds.length > 0) {
+                    const emailLower = parsed.email!.trim().toLowerCase();
+                    applyAuthResult(matched, matchedIds, emailLower);
+                } else {
+                    // fallback: clear optimistic auth if no match
+                    setIsAuthed(false);
+                    localStorage.removeItem(LOCAL_AUTH_KEY);
+                }
                 setAutoAuthTried(true);
                 setAutoAuthInProgress(false);
-            }
+            })();
+        } catch (err) {
+            console.warn("Auto auth parse failed", err);
+            setAutoAuthTried(true);
+            setAutoAuthInProgress(false);
+        }
     }, [db, events.length, isAuthed, autoAuthTried]);
 
     const handleAuth = async () => {
@@ -909,6 +927,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                     if (remaining <= 0) throw new Error("no_slots");
                     if (lastTs && now - lastTs < CLAIM_COOLDOWN_MS) throw new Error("cooldown");
                     try {
+                        if (!db) throw new Error("No DB");
                         const usersSnap = await getDocs(
                             query(collection(db, "users"), where("email", "==", sessionIdentity.email))
                         );
@@ -1136,18 +1155,18 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                             </button>
                         </div>
                     </div>
-                    
-                {!isAuthed && (
-                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
-                        <h2 className="font-semibold text-indigo-900 mb-2">איך זה עובד?</h2>
-                        <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
-                            <li>נרשמים פעם אחת לאירוע (דרך טופס ההרשמה)</li>
-                            <li>מתחברים כאן עם אימייל+סיסמה שבחרתם, בוחרים משימות למתנדבים ומשריינים אותן</li>
-                            <li>כל משימה כוללת תיאור ותאריך יעד (דד ליין)</li>
-                            <li>ניתן לבחור מספר משימות ולעדכן סטטוס באזור האישי</li>
-                        </ul>
-                    </div>
-                )}
+
+                    {!isAuthed && (
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
+                            <h2 className="font-semibold text-indigo-900 mb-2">איך זה עובד?</h2>
+                            <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
+                                <li>נרשמים פעם אחת לאירוע (דרך טופס ההרשמה)</li>
+                                <li>מתחברים כאן עם אימייל+סיסמה שבחרתם, בוחרים משימות למתנדבים ומשריינים אותן</li>
+                                <li>כל משימה כוללת תיאור ותאריך יעד (דד ליין)</li>
+                                <li>ניתן לבחור מספר משימות ולעדכן סטטוס באזור האישי</li>
+                            </ul>
+                        </div>
+                    )}
                 </div>
 
                 {!isAuthed ? (
@@ -1176,12 +1195,12 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                 />
                             </div>
                         </div>
-                                {authError && <p className="text-sm text-red-600 mt-2">{authError}</p>}
-                            <div className="flex items-center gap-3 mt-4">
-                                <button
-                                    onClick={() => handleAuth()}
-                                    disabled={authing}
-                                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm font-semibold disabled:opacity-70"
+                        {authError && <p className="text-sm text-red-600 mt-2">{authError}</p>}
+                        <div className="flex items-center gap-3 mt-4">
+                            <button
+                                onClick={() => handleAuth()}
+                                disabled={authing}
+                                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm font-semibold disabled:opacity-70"
                             >
                                 {authing ? "מתחבר..." : "כניסה לאזור האישי"}
                             </button>
@@ -1234,21 +1253,21 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                                     <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">בוצע</span>
                                                 </div>
                                             </div>
-                                    );
-                                })}
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </div>
-                    )}
-                    {isAuthed && (
-                        <div className="flex justify-end">
-                            <button
-                                onClick={() => setManualRequestModalOpen(true)}
-                                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
-                            >
-                                דיווח על שעות/משימות שלא נרשמו
-                            </button>
-                        </div>
-                    )}
+                        )}
+                        {isAuthed && (
+                            <div className="flex justify-end">
+                                <button
+                                    onClick={() => setManualRequestModalOpen(true)}
+                                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+                                >
+                                    דיווח על שעות/משימות שלא נרשמו
+                                </button>
+                            </div>
+                        )}
                         {isAuthed && totalAvailableVolunteerTasks === 0 && (
                             <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 text-center text-gray-700">
                                 <p className="text-lg font-semibold mb-1">אין כרגע משימות פנויות למתנדבים.</p>
@@ -1270,11 +1289,10 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                     </div>
                                     <button
                                         onClick={() => setShowPendingOnly((v) => !v)}
-                                        className={`text-xs px-3 py-2 rounded-lg border font-semibold transition ${
-                                            showPendingOnly
+                                        className={`text-xs px-3 py-2 rounded-lg border font-semibold transition ${showPendingOnly
                                                 ? "bg-indigo-50 text-indigo-700 border-indigo-200"
                                                 : "bg-white text-gray-700 border-gray-200"
-                                        }`}
+                                            }`}
                                     >
                                         {showPendingOnly ? "הצג הכל" : "הצג רק משימות פתוחות"}
                                     </button>
@@ -1366,6 +1384,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                             </div>
                         )}
                         {events.map((event) => {
+                            if (event.volunteerTasksPaused) return null;
                             const eventTasks = (tasksByEvent[event.id] || []).filter((t) => t.isVolunteerTask === true || (t.isVolunteerTask === undefined && t.volunteerHours != null));
                             const eventDate = event.startTime?.seconds ? new Date(event.startTime.seconds * 1000) : (event.startTime ? new Date(event.startTime) : null);
                             const eventTasksAvailable = eventTasks.filter((task) => {
@@ -1378,7 +1397,7 @@ const totalAvailableVolunteerTasks = useMemo(() => {
                                 return hasSlots;
                             });
                             const hasTasks = eventTasksAvailable.length > 0;
-                            
+
                             if (!hasTasks) return null;
                             return (
                                 <div key={event.id} className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
