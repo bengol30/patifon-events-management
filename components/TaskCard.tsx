@@ -8,7 +8,7 @@ interface TaskProps {
     title: string;
     description?: string;
     assignee: string;
-    assignees?: { name?: string; userId?: string; email?: string }[];
+    assignees?: { name?: string; userId?: string; email?: string; phone?: string }[];
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
@@ -34,6 +34,7 @@ interface TaskProps {
     requiredCompletions?: number | null;
     remainingCompletions?: number | null;
     onUpdateCompletions?: () => void;
+    onAssigneeClick?: (assignee: { name?: string; userId?: string; email?: string; phone?: string }) => void;
 }
 
 export default function TaskCard({
@@ -52,6 +53,7 @@ export default function TaskCard({
     onStatusChange,
     onChat,
     onManageAssignees,
+    onAssigneeClick,
     hasUnreadMessages,
     currentStatus,
     nextStep,
@@ -173,11 +175,24 @@ export default function TaskCard({
             <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
                 <div className="flex items-center gap-2 flex-wrap max-w-full">
                     <span className="text-xs text-gray-500">אחראי:</span>
-                    {(assignees && assignees.length > 0 ? assignees : [{ name: assignee }]).map((a, idx) => (
-                        <span key={idx} className="px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs border border-gray-200">
-                            {a.name || 'לא משויך'}
-                        </span>
-                    ))}
+                    {(assignees && assignees.length > 0 ? assignees : [{ name: assignee }]).map((a, idx) => {
+                        const label = a.name || 'לא משויך';
+                        return (
+                            <button
+                                key={idx}
+                                type="button"
+                                onClick={(e) => {
+                                    // Always stop navigation; optionally open modal/handler
+                                    e.stopPropagation();
+                                    onAssigneeClick?.(a);
+                                }}
+                                className="px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs border border-gray-200 hover:border-indigo-200 hover:text-indigo-700"
+                                title="שליחת הודעת מערכת למשתמש"
+                            >
+                                {label}
+                            </button>
+                        );
+                    })}
                 </div>
                 <div className="flex items-center gap-2">
                     <div

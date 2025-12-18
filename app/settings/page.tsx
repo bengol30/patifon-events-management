@@ -47,6 +47,14 @@ interface UserDirectory {
     phone?: string;
 }
 
+interface VolunteerDirectory {
+    id: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    source?: string;
+}
+
 const PREDEFINED_TASKS = [
     {
         title: "פתיחת ספק במערכת",
@@ -176,13 +184,17 @@ export default function SettingsPage() {
     const isAdmin = (user?.email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const [usersDirectory, setUsersDirectory] = useState<UserDirectory[]>([]);
     const [loadingUsersDirectory, setLoadingUsersDirectory] = useState(false);
+    const [volunteersDirectory, setVolunteersDirectory] = useState<VolunteerDirectory[]>([]);
+    const [loadingVolunteersDirectory, setLoadingVolunteersDirectory] = useState(false);
     const [waSelectedUserId, setWaSelectedUserId] = useState("");
     const [waPhoneInput, setWaPhoneInput] = useState("");
     const [waMessageText, setWaMessageText] = useState("היי, רצינו לעדכן אותך :)");
     const [waSearch, setWaSearch] = useState("");
     const [waSending, setWaSending] = useState(false);
+    const [bulkAudience, setBulkAudience] = useState<"users" | "volunteers">("users");
     const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
-    const [bulkTemplate, setBulkTemplate] = useState<"openTasks" | "upcomingEvents">("openTasks");
+    const [bulkTemplate, setBulkTemplate] = useState<"openTasks" | "upcomingEvents" | "custom">("openTasks");
+    const [bulkCustomMessage, setBulkCustomMessage] = useState("");
     const [bulkSending, setBulkSending] = useState(false);
     const [groups, setGroups] = useState<{ id: string; name: string; chatId: string }[]>([]);
     const [loadingGroups, setLoadingGroups] = useState(false);
@@ -193,29 +205,10 @@ export default function SettingsPage() {
     const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
     const [groupSendMode, setGroupSendMode] = useState<"custom" | "event">("custom");
     const [groupMessage, setGroupMessage] = useState("");
+    const [groupMediaFile, setGroupMediaFile] = useState<File | null>(null);
     const [groupEventId, setGroupEventId] = useState("");
     const [sendingGroupsMsg, setSendingGroupsMsg] = useState(false);
     const [eventsOptions, setEventsOptions] = useState<{ id: string; title?: string; startTime?: any; location?: string }[]>([]);
-    const resolveEventDate = (raw: any): Date | null => {
-        if (!raw) return null;
-        if (raw.toDate) {
-            try {
-                const d = raw.toDate();
-                return isNaN(d.getTime()) ? null : d;
-            } catch {
-                return null;
-            }
-        }
-        if (raw instanceof Date) {
-            return isNaN(raw.getTime()) ? null : raw;
-        }
-        if (typeof raw === "string") {
-            const parsed = new Date(raw);
-            return isNaN(parsed.getTime()) ? null : parsed;
-        }
-        return null;
-    };
-
     // Selection State
     const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
 
@@ -383,6 +376,64 @@ export default function SettingsPage() {
                 setMessage({ text: "שגיאה בטעינת משתמשים", type: "error" });
             })
             .finally(() => setLoadingUsersDirectory(false));
+    }, [db, isAdmin, activeTab]);
+
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "whatsapp") {
+            setLoadingVolunteersDirectory(false);
+            return;
+        }
+        const normalizePhoneLocal = (value: string) => {
+            const digits = (value || "").replace(/\D/g, "");
+            if (!digits) return "";
+            if (digits.startsWith("972")) return digits;
+            if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+            return digits;
+        };
+        const normalizeLowerLocal = (val?: string) => (val || "").toString().trim().toLowerCase();
+        const mergeVolunteer = (arr: VolunteerDirectory[], idxMap: Map<string, number>, id: string, data: any, source: string) => {
+            const name = (data.name || data.fullName || `${data.firstName || ""} ${data.lastName || ""}` || "").trim() || (data.email ? data.email.split("@")[0] : "מתנדב");
+            const email = (data.email || "").trim();
+            const phone = (data.phone || "").trim();
+            const phoneNorm = normalizePhoneLocal(phone);
+            const key = phoneNorm || normalizeLowerLocal(email) || `${source}-${id}`;
+            if (idxMap.has(key)) {
+                const idx = idxMap.get(key)!;
+                arr[idx] = {
+                    ...arr[idx],
+                    name: arr[idx].name || name,
+                    email: arr[idx].email || email,
+                    phone: arr[idx].phone || phone,
+                    source: arr[idx].source || source,
+                };
+                return;
+            }
+            idxMap.set(key, arr.length);
+            arr.push({ id, name, email, phone, source });
+        };
+
+        const loadVolunteers = async () => {
+            setLoadingVolunteersDirectory(true);
+            const merged: VolunteerDirectory[] = [];
+            const idxMap = new Map<string, number>();
+            try {
+                const cg = await getDocs(collectionGroup(db, "volunteers"));
+                cg.forEach((docSnap) => {
+                    mergeVolunteer(merged, idxMap, docSnap.id, docSnap.data(), "volunteer");
+                });
+            } catch (err) {
+                console.warn("Failed loading volunteers collectionGroup", err);
+            }
+            try {
+                const general = await getDocs(collection(db, "general_volunteers"));
+                general.forEach((docSnap) => mergeVolunteer(merged, idxMap, docSnap.id, docSnap.data(), "general"));
+            } catch (err) {
+                console.warn("Failed loading general volunteers", err);
+            }
+            setVolunteersDirectory(merged);
+            setLoadingVolunteersDirectory(false);
+        };
+        loadVolunteers();
     }, [db, isAdmin, activeTab]);
 
     useEffect(() => {
@@ -951,18 +1002,27 @@ export default function SettingsPage() {
         }
     };
 
-    const buildEventInviteText = (ev?: { id: string; title?: string; startTime?: any; location?: string }, dateTextOverride?: string) => {
-        if (!ev) return "";
-        const origin = getPublicBaseUrl(whatsappConfig.baseUrl);
-        const resolvedDate = resolveEventDate(ev.startTime);
-        const date = dateTextOverride || (resolvedDate ? resolvedDate.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "");
-        const link = origin ? `${origin}/events/${ev.id}/register` : "";
-        return [
-            ev.title ? `הצטרפו אלינו לאירוע: ${ev.title}` : "הצטרפו אלינו לאירוע!",
-            date ? `📅 תאריך: ${date}` : "",
-            ev.location ? `📍 מיקום: ${ev.location}` : "",
-            link ? `🔗 הרשמה: ${link}` : "",
-        ].filter(Boolean).join("\n");
+    const fileNameFromUrl = (url: string) => {
+        try {
+            const clean = url.split("?")[0];
+            const last = clean.split("/").pop() || "media.jpg";
+            return last || "media.jpg";
+        } catch {
+            return "media.jpg";
+        }
+    };
+
+    const fileToBase64 = (file: File) => {
+        return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const res = reader.result as string;
+                const base64 = res.includes(",") ? res.split(",")[1] : res;
+                resolve(base64 || "");
+            };
+            reader.onerror = () => reject(reader.error || new Error("file read error"));
+            reader.readAsDataURL(file);
+        });
     };
 
     const handleSendGroupsMessage = async () => {
@@ -977,50 +1037,132 @@ export default function SettingsPage() {
             return;
         }
         let textToSend = groupMessage.trim();
+        let mediaUrl = "";
+        let mediaFile: File | null = null;
+
         if (groupSendMode === "event") {
-            const ev = eventsOptions.find((e) => e.id === groupEventId);
-            if (!ev) {
+            if (!groupEventId) {
                 setMessage({ text: "בחר אירוע להזמנה", type: "error" });
-                setSendingGroupsMsg(false);
                 return;
             }
-            const hasDate = !!resolveEventDate(ev.startTime);
-            let dateText: string | undefined;
-            if (!hasDate) {
-                const manualDate = typeof window !== "undefined" ? window.prompt("לא הוגדר תאריך לאירוע. הזן תאריך/שעה שיופיע בהודעה (לדוגמה: 12.03.25 20:00):") : "";
-                if (!manualDate) {
-                    setMessage({ text: "לא הוזן תאריך, ההודעה לא נשלחה", type: "error" });
-                    setSendingGroupsMsg(false);
-                    return;
-                }
-                dateText = manualDate;
+            const eventSnap = await getDoc(doc(db, "events", groupEventId));
+            if (!eventSnap.exists()) {
+                setMessage({ text: "האירוע לא נמצא", type: "error" });
+                return;
             }
-            textToSend = buildEventInviteText(ev, dateText);
+            const eventData = eventSnap.data() as any;
+            textToSend = (eventData.officialPostText || "").trim();
+            mediaUrl = (eventData.officialFlyerUrl || "").trim();
+            if (!textToSend) {
+                setMessage({ text: "אין מלל רשמי לאירוע. עדכן בתוכן ומדיה.", type: "error" });
+                return;
+            }
+            if (!mediaUrl) {
+                setMessage({ text: "אין תמונה רשמית לאירוע. עדכן בתוכן ומדיה.", type: "error" });
+                return;
+            }
+        } else {
+            if (groupMediaFile) {
+                mediaFile = groupMediaFile;
+            }
         }
-        if (!textToSend) {
+
+        if (!textToSend && !mediaUrl && !mediaFile) {
             setMessage({ text: "אין תוכן לשלוח", type: "error" });
             return;
         }
+
         setSendingGroupsMsg(true);
         try {
-            const endpoint = `https://api.green-api.com/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
-            for (const g of selected) {
-                await ensureGlobalRateLimit();
-                const res = await fetch(endpoint, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ chatId: g.chatId, message: textToSend }),
-                });
-                if (!res.ok) {
-                    console.warn("Failed sending to group", g, await res.text());
+            const baseApi = (whatsappConfig.baseUrl || "https://api.green-api.com").replace(/\/$/, "");
+            const messageEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
+            const fileUploadEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByUpload/${whatsappConfig.apiTokenInstance.trim()}`;
+            const fileUrlEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByUrl/${whatsappConfig.apiTokenInstance.trim()}`;
+            const fileBase64Endpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByBase64/${whatsappConfig.apiTokenInstance.trim()}`;
+            const errors: string[] = [];
+            let mediaBase64 = "";
+            const mediaFileName = mediaFile?.name || "media";
+            if (mediaFile) {
+                try {
+                    mediaBase64 = await fileToBase64(mediaFile);
+                } catch (err) {
+                    console.error("Failed reading media file", err);
+                    setMessage({ text: "שגיאה בקריאת הקובץ לפני שליחה", type: "error" });
+                    setSendingGroupsMsg(false);
+                    return;
                 }
             }
-            setMessage({ text: "ההודעה נשלחה לקבוצות שנבחרו", type: "success" });
+
+            for (const g of selected) {
+                await ensureGlobalRateLimit();
+                if (groupSendMode === "event" && mediaUrl) {
+                    const res = await fetch(fileUrlEndpoint, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            chatId: g.chatId,
+                            urlFile: mediaUrl,
+                            fileName: fileNameFromUrl(mediaUrl),
+                            caption: textToSend,
+                        }),
+                    });
+                    const body = await res.text();
+                    if (!res.ok) {
+                        errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
+                    }
+                    continue;
+                }
+
+                if (mediaFile) {
+                    // Prefer base64 endpoint to avoid storage or fetch failures
+                    const res = await fetch(fileBase64Endpoint, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            chatId: g.chatId,
+                            file: mediaBase64,
+                            fileName: mediaFileName,
+                            caption: textToSend,
+                        }),
+                    });
+                    const body = await res.text();
+                    if (!res.ok) {
+                        errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
+                        // Fallback to upload endpoint once if base64 failed
+                        const form = new FormData();
+                        form.append("chatId", g.chatId);
+                        form.append("file", mediaFile, mediaFile.name || "media");
+                        if (textToSend) form.append("caption", textToSend);
+                        const resUpload = await fetch(fileUploadEndpoint, { method: "POST", body: form });
+                        const uploadBody = await resUpload.text();
+                        if (!resUpload.ok) {
+                            errors.push(`${g.name || g.chatId} (upload): ${uploadBody || "שליחה נכשלה"}`);
+                        }
+                    }
+                } else {
+                    const res = await fetch(messageEndpoint, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ chatId: g.chatId, message: textToSend }),
+                    });
+                    const body = await res.text();
+                    if (!res.ok) {
+                        errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
+                    }
+                }
+            }
+
+            if (errors.length) {
+                setMessage({ text: `חלק מהקבוצות לא קיבלו את ההודעה: ${errors.join(" | ")}`, type: "error" });
+            } else {
+                setMessage({ text: "ההודעה (כולל המדיה אם צורפה) נשלחה לקבוצות שנבחרו", type: "success" });
+            }
         } catch (err) {
             console.error("Failed sending to groups", err);
             setMessage({ text: "שגיאה בשליחת ההודעה לקבוצות", type: "error" });
         } finally {
             setSendingGroupsMsg(false);
+            setGroupMediaFile(null);
         }
     };
 
@@ -1250,59 +1392,77 @@ export default function SettingsPage() {
             setMessage({ text: "חסר ID/Token כדי לשלוח הודעות", type: "error" });
             return;
         }
-        const selectedUsers = usersDirectory.filter(u => bulkSelected.has(u.id));
-        if (!selectedUsers.length) {
-            setMessage({ text: "בחר משתמשים לשליחה", type: "error" });
+        const selectedUsers = usersDirectory.filter(u => bulkSelected.has(`u:${u.id}`));
+        const selectedVolunteers = volunteersDirectory.filter(v => bulkSelected.has(`v:${v.id}`));
+        const targets = [
+            ...selectedUsers.map((u) => ({ type: "user" as const, record: u })),
+            ...selectedVolunteers.map((v) => ({ type: "volunteer" as const, record: v })),
+        ];
+        if (!targets.length) {
+            setMessage({ text: "בחר משתמשים או מתנדבים לשליחה", type: "error" });
+            return;
+        }
+        if (bulkTemplate === "custom" && !bulkCustomMessage.trim()) {
+            setMessage({ text: "כתוב הודעה חופשית לפני שליחה", type: "error" });
             return;
         }
         setBulkSending(true);
         try {
-            const endpoint = `https://api.green-api.com/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
             const origin = getPublicBaseUrl(whatsappConfig.baseUrl);
             const parentsIndex = await loadParentsIndex();
             setEventsOptions(Array.from(parentsIndex.events.values()) as any);
-            for (const target of selectedUsers) {
+            for (const target of targets) {
                 await ensureGlobalRateLimit();
-                const phone = normalizePhone(await getUserPhone(target.id, target.email));
+                const rec = target.record as any;
+                const displayName = rec.fullName || rec.name || rec.email || "מתנדב/ת";
+                let phone = target.type === "user"
+                    ? normalizePhone(await getUserPhone(rec.id, rec.email))
+                    : normalizePhone(rec.phone || "");
+                if (!phone && target.type === "volunteer" && rec.email) {
+                    phone = normalizePhone(await getUserPhone(rec.id, rec.email));
+                }
                 if (!phone) {
-                    console.warn("No phone for user", target);
+                    console.warn("No phone for contact", rec);
                     continue;
                 }
                 let messageLines: string[] = [];
-                if (bulkTemplate === "openTasks") {
-                    const tasks = await fetchOpenTasksForUser(target.id, target.email, target.fullName, target.phone, parentsIndex);
-                    const list = tasks.slice(0, 5).map((t) => {
+                if (bulkTemplate === "custom") {
+                    messageLines = [bulkCustomMessage.trim()];
+                } else if (bulkTemplate === "openTasks") {
+                    const tasks = await fetchOpenTasksForUser(rec.id, rec.email, rec.fullName || rec.name, rec.phone, parentsIndex);
+                    const list = tasks.slice(0, 5).map((t: any) => {
                         const due = t.dueDate ? new Date(t.dueDate).toLocaleDateString("he-IL") : "";
                         const ev = t.eventTitle ? ` | אירוע: ${t.eventTitle}` : "";
                         return `- ${t.title}${ev}${due ? ` (דדליין: ${due})` : ""}`;
                     });
                     messageLines = [
-                        `היי ${target.fullName || target.email || "מתנדב/ת"},`,
+                        `היי ${displayName},`,
                         "תזכורת למשימות פתוחות שלך:",
                         ...(list.length ? list : ["לא נמצאו משימות פתוחות."]),
                         origin ? `כניסה למערכת: ${origin}` : "",
                     ].filter(Boolean);
                 } else {
-                    const events = await fetchUpcomingEventsForUser(target.id, target.email, target.fullName, target.phone, parentsIndex);
-                    const list = events.map((ev) => {
+                    const events = await fetchUpcomingEventsForUser(rec.id, rec.email, rec.fullName || rec.name, rec.phone, parentsIndex);
+                    const list = events.map((ev: any) => {
                         const date = ev.startTime ? new Date(ev.startTime).toLocaleDateString("he-IL") : "";
                         return `- ${ev.title}${date ? ` (${date})` : ""}${ev.location ? ` @ ${ev.location}` : ""}`;
                     });
                     messageLines = [
-                        `היי ${target.fullName || target.email || "משתמש"},`,
+                        `היי ${displayName},`,
                         "הנה 3 האירועים הקרובים:",
                         ...(list.length ? list : ["לא נמצאו אירועים קרובים."]),
                         origin ? `כניסה למערכת: ${origin}` : "",
                     ].filter(Boolean);
                 }
 
-                const res = await fetch(endpoint, {
+                const res = await fetch("/api/whatsapp/send", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ chatId: `${phone}@c.us`, message: messageLines.join("\n") }),
+                    body: JSON.stringify({ phone, message: messageLines.join("\n") }),
                 });
                 if (!res.ok) {
-                    console.warn("Bulk WhatsApp failed", target, await res.text());
+                    const errText = await res.text();
+                    console.warn("Bulk WhatsApp failed", rec, errText);
                 }
             }
             setMessage({ text: "ההודעות נשלחו (או דולגו למי שחסר לו מספר)", type: "success" });
@@ -1445,6 +1605,32 @@ export default function SettingsPage() {
             console.error("Error deleting all tasks:", err);
             setMessage({ text: "שגיאה במחיקת כל המשימות", type: "error" });
         }
+    };
+
+    const bulkAudienceList = bulkAudience === "users" ? usersDirectory : volunteersDirectory;
+    const bulkAudienceLoading = bulkAudience === "users" ? loadingUsersDirectory : loadingVolunteersDirectory;
+    const filteredBulkRecipients = (bulkAudienceLoading ? [] : bulkAudienceList)
+        .filter((u: any) => {
+            const s = waSearch.toLowerCase().trim();
+            if (!s) return true;
+            return (u.fullName || u.name || "").toLowerCase().includes(s)
+                || (u.email || "").toLowerCase().includes(s)
+                || (u.phone || "").includes(s);
+        })
+        .slice(0, 200);
+    const bulkKeyPrefix = bulkAudience === "users" ? "u" : "v";
+    const bulkAllVisibleSelected = filteredBulkRecipients.length > 0 && filteredBulkRecipients.every((u: any) => bulkSelected.has(`${bulkKeyPrefix}:${u.id}`));
+    const bulkVisibleSelectedCount = filteredBulkRecipients.filter((u: any) => bulkSelected.has(`${bulkKeyPrefix}:${u.id}`)).length;
+    const toggleSelectAllBulk = () => {
+        setBulkSelected((prev) => {
+            const next = new Set(prev);
+            if (bulkAllVisibleSelected) {
+                filteredBulkRecipients.forEach((u: any) => next.delete(`${bulkKeyPrefix}:${u.id}`));
+            } else {
+                filteredBulkRecipients.forEach((u: any) => next.add(`${bulkKeyPrefix}:${u.id}`));
+            }
+            return next;
+        });
     };
 
     if (authLoading || loading) {
@@ -2151,17 +2337,47 @@ export default function SettingsPage() {
                                         <div>
                                             <div className="flex items-center gap-2">
                                                 <PlugZap size={20} className="text-indigo-500" />
-                                                <h3 className="text-lg font-bold text-gray-900">שליחה מרוכזת למשתמשים</h3>
+                                                <h3 className="text-lg font-bold text-gray-900">שליחה מרוכזת</h3>
                                             </div>
                                             <p className="text-gray-500 text-sm mt-1">
-                                                בחר משתמשים והודעה מוכנה לשליחה בבת אחת.
+                                                בחר משתמשים או מתנדבים והודעה מוכנה לשליחה בבת אחת.
                                             </p>
                                         </div>
                                     </div>
 
+                                    <div className="flex flex-wrap items-center gap-3 mb-4">
+                                        <div className="flex bg-gray-50 border rounded-lg p-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setBulkAudience("users")}
+                                                className={`px-3 py-1.5 text-sm rounded-md font-medium transition ${bulkAudience === "users" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-700 hover:bg-white"}`}
+                                            >
+                                                משתמשי מערכת
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setBulkAudience("volunteers")}
+                                                className={`px-3 py-1.5 text-sm rounded-md font-medium transition ${bulkAudience === "volunteers" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-700 hover:bg-white"}`}
+                                            >
+                                                מתנדבים רשומים
+                                            </button>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={toggleSelectAllBulk}
+                                            disabled={!filteredBulkRecipients.length}
+                                            className="text-sm px-3 py-1.5 rounded-md border border-gray-200 hover:border-indigo-300 hover:text-indigo-700 transition disabled:opacity-50"
+                                        >
+                                            {bulkAllVisibleSelected ? "בטל סימון נוכחי" : "סמן את כל הנראים"}
+                                        </button>
+                                        <span className="text-xs text-gray-500">
+                                            נבחרו {bulkVisibleSelectedCount}/{filteredBulkRecipients.length || 0} • סה״כ {bulkAudienceList.length}
+                                        </span>
+                                    </div>
+
                                     <div className="grid sm:grid-cols-2 gap-4 mb-4">
                                         <div>
-                                            <label className="text-sm text-gray-600">חיפוש משתמשים</label>
+                                            <label className="text-sm text-gray-600">חיפוש</label>
                                             <input
                                                 type="text"
                                                 className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -2179,40 +2395,47 @@ export default function SettingsPage() {
                                             >
                                                 <option value="openTasks">תזכורת למשימות פתוחות</option>
                                                 <option value="upcomingEvents">עדכון 3 האירועים הקרובים</option>
+                                                <option value="custom">הודעה חופשית</option>
                                             </select>
                                         </div>
                                     </div>
 
+                                    {bulkTemplate === "custom" && (
+                                        <div className="mb-4">
+                                            <label className="text-sm text-gray-600">תוכן ההודעה החופשית</label>
+                                            <textarea
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none min-h-[120px]"
+                                                value={bulkCustomMessage}
+                                                onChange={(e) => setBulkCustomMessage(e.target.value)}
+                                                placeholder="כתוב כאן את ההודעה שתישלח לנמענים שסימנת..."
+                                            />
+                                        </div>
+                                    )}
+
                                     <div className="max-h-52 overflow-y-auto border rounded-lg p-3 mb-4">
-                                        {(loadingUsersDirectory ? [] : usersDirectory)
-                                            .filter((u) => {
-                                                const s = waSearch.toLowerCase();
-                                                if (!s) return true;
-                                                return (u.fullName || "").toLowerCase().includes(s)
-                                                    || (u.email || "").toLowerCase().includes(s)
-                                                    || (u.phone || "").includes(s);
-                                            })
-                                            .slice(0, 100)
-                                            .map((u) => (
-                                                <label key={u.id} className="flex items-center gap-2 py-1 text-sm text-gray-700">
+                                        {(bulkAudienceLoading ? [] : filteredBulkRecipients).map((u: any) => {
+                                            const key = `${bulkKeyPrefix}:${u.id}`;
+                                            return (
+                                                <label key={key} className="flex items-center gap-2 py-1 text-sm text-gray-700">
                                                     <input
                                                         type="checkbox"
-                                                        checked={bulkSelected.has(u.id)}
+                                                        checked={bulkSelected.has(key)}
                                                         onChange={(e) => {
                                                             setBulkSelected((prev) => {
                                                                 const next = new Set(prev);
-                                                                if (e.target.checked) next.add(u.id); else next.delete(u.id);
+                                                                if (e.target.checked) next.add(key); else next.delete(key);
                                                                 return next;
                                                             });
                                                         }}
                                                         className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
                                                     />
-                                                    <span className="flex-1 truncate">{u.fullName || u.email || "משתמש"}</span>
+                                                    <span className="flex-1 truncate">{u.fullName || u.name || u.email || "איש קשר"}</span>
                                                     {u.phone && <span className="text-xs text-gray-400">{u.phone}</span>}
                                                 </label>
-                                            ))}
-                                        {!loadingUsersDirectory && usersDirectory.length === 0 && (
-                                            <div className="text-sm text-gray-500">לא נמצאו משתמשים.</div>
+                                            );
+                                        })}
+                                        {!bulkAudienceLoading && filteredBulkRecipients.length === 0 && (
+                                            <div className="text-sm text-gray-500">לא נמצאו תוצאות.</div>
                                         )}
                                     </div>
 
@@ -2222,7 +2445,7 @@ export default function SettingsPage() {
                                         disabled={bulkSending}
                                         className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
                                     >
-                                        {bulkSending ? "שולח..." : "שלח למשתמשים שנבחרו"}
+                                        {bulkSending ? "שולח..." : "שלח לנבחרים"}
                                     </button>
                                 </div>
 
@@ -2346,6 +2569,24 @@ export default function SettingsPage() {
                                                 placeholder="מה תרצה לשלוח לקבוצות?"
                                             />
                                         )}
+                                        {groupSendMode === "custom" && (
+                                            <div className="space-y-1">
+                                                <label className="text-xs text-gray-600">מדיה מצורפת (אופציונלי, תמונה/וידאו)</label>
+                                                <input
+                                                    type="file"
+                                                    accept="image/*,video/*"
+                                                    onChange={(e) => {
+                                                        const file = e.target.files?.[0] || null;
+                                                        setGroupMediaFile(file);
+                                                    }}
+                                                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white"
+                                                />
+                                                {groupMediaFile && (
+                                                    <p className="text-[11px] text-gray-600">נבחר: {groupMediaFile.name}</p>
+                                                )}
+                                                <p className="text-[11px] text-gray-500">הקובץ נשלח ולא נשמר במערכת לאחר השליחה.</p>
+                                            </div>
+                                        )}
 
                                         {groupSendMode === "event" && (
                                             <div className="grid sm:grid-cols-2 gap-2">
@@ -2361,7 +2602,7 @@ export default function SettingsPage() {
                                                         </option>
                                                     ))}
                                                 </select>
-                                                <p className="text-xs text-gray-500">ייווצר מלל הזמנה עם פרטי האירוע וקישור להרשמה.</p>
+                                                <p className="text-xs text-gray-500">נשלח המלל והתמונה הרשמיים מתוך "תוכן ומדיה" של האירוע.</p>
                                             </div>
                                         )}
 

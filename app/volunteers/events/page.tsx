@@ -35,6 +35,7 @@ interface CompletedLog {
     taskTitle?: string;
     volunteerHours?: number | null;
     completedAt?: any;
+    scope?: "event" | "project" | "manual";
 }
 
 interface CompletedTaskItem {
@@ -184,6 +185,7 @@ export default function VolunteerEventsPage() {
                 priority: "NORMAL",
                 assignee: "",
                 dueDate: "",
+                scope: log.scope === "project" ? "project" : "event",
                 volunteerHours: log.volunteerHours ?? null,
             } as Task,
             completedAt: log.completedAt,

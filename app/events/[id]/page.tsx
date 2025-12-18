@@ -585,7 +585,36 @@ export default function EventDetailsPage() {
         }
     };
 
+    // Manual sends (צוות/מתנדבים) לא תלויים בכללי ההתרעות
+    const fetchWhatsappConfigManual = async () => {
+        try {
+            const ref = doc(db!, "integrations", "whatsapp");
+            const snap = await getDoc(ref);
+            if (!snap.exists()) return null;
+            const data = snap.data() as any;
+            if (!data.idInstance || !data.apiTokenInstance) return null;
+            return {
+                idInstance: data.idInstance as string,
+                apiTokenInstance: data.apiTokenInstance as string,
+                baseUrl: (data.baseUrl as string) || "",
+            };
+        } catch (err) {
+            console.warn("שגיאה בקריאת הגדרות וואטסאפ", err);
+            return null;
+        }
+    };
+
     const getUserPhone = async (assignee: Assignee) => {
+        if (!assignee) return "";
+        const key = buildVolunteerKey(assignee);
+        // Try cached maps first
+        const cachedFromVolMap = key ? volunteerPhoneMap.get(key) : "";
+        if (cachedFromVolMap) return cachedFromVolMap;
+        const cachedFromTeam = key ? teamContacts.find(t => t.key === key)?.phone : undefined;
+        if (cachedFromTeam) return cachedFromTeam;
+        const cachedFromCombined = key ? combinedVolunteers.find(v => buildVolunteerKey({ email: v.email, id: v.id, name: v.name, userId: (v as any).userId }) === key)?.phone : undefined;
+        if (cachedFromCombined) return cachedFromCombined;
+
         if (assignee.phone) return assignee.phone;
         if ((assignee as any).phoneNormalized) return (assignee as any).phoneNormalized;
         // 1) userId
@@ -594,8 +623,7 @@ export default function EventDetailsPage() {
                 const snap = await getDoc(doc(db!, "users", assignee.userId));
                 if (snap.exists()) {
                     const data = snap.data() as any;
-                    if (data?.phone) return data.phone;
-                    if (data?.fullName) return data.phone || "";
+                    if (data?.phone || data?.phoneNormalized || data?.phoneNumber) return data.phone || data.phoneNormalized || data.phoneNumber;
                 }
             } catch { /* ignore */ }
         }
@@ -672,6 +700,24 @@ export default function EventDetailsPage() {
     };
 
     const clearVolunteerSelection = () => setVolunteerSelections(new Set());
+
+    const toggleTeamSelection = (key: string) => {
+        setTeamSelections(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key); else next.add(key);
+            return next;
+        });
+    };
+
+    const selectAllTeam = () => {
+        const next = new Set<string>();
+        teamContacts.forEach(t => {
+            if (t.key) next.add(t.key);
+        });
+        setTeamSelections(next);
+    };
+
+    const clearTeamSelection = () => setTeamSelections(new Set());
 
     const dedupeAssignees = (arr: Assignee[]) => {
         const seen = new Set<string>();
@@ -860,6 +906,22 @@ export default function EventDetailsPage() {
     const [volunteerSelections, setVolunteerSelections] = useState<Set<string>>(new Set());
     const [sendingVolunteerMsg, setSendingVolunteerMsg] = useState(false);
     const volunteerMessageRef = useRef<string>("");
+    const [showTeamMessage, setShowTeamMessage] = useState(false);
+    const [teamSelections, setTeamSelections] = useState<Set<string>>(new Set());
+    const [sendingTeamMsg, setSendingTeamMsg] = useState(false);
+    const teamMessageRef = useRef<string>("");
+    const [assigneeWhatsappModal, setAssigneeWhatsappModal] = useState<{
+        taskId: string;
+        taskTitle: string;
+        eventTitle?: string;
+        assigneeName?: string;
+        assigneeEmail?: string;
+        phone: string;
+        message: string;
+        loadingPhone?: boolean;
+        sending?: boolean;
+        error?: string | null;
+    } | null>(null);
     const [showControlCenter, setShowControlCenter] = useState(false);
     const [controlSaving, setControlSaving] = useState(false);
     const [volunteerSharePaused, setVolunteerSharePaused] = useState(false);
@@ -905,9 +967,28 @@ export default function EventDetailsPage() {
                         map.set(key, { ...existing, phone: a.phone || phoneFromEvent });
                     }
                 });
-            });
+        });
         return Array.from(map.values());
     }, [tasks, volunteers, volunteerPhoneMap]);
+
+    const teamContacts = useMemo(() => {
+        const map = new Map<string, { key: string; name?: string; email?: string; userId?: string; role?: string; phone?: string }>();
+        (event?.team || []).forEach((member) => {
+            const key = buildVolunteerKey({ email: member.email, id: member.userId, name: member.name, userId: member.userId });
+            if (!key) return;
+            if (!map.has(key)) {
+                map.set(key, {
+                    key,
+                    name: member.name || member.email || "איש צוות",
+                    email: member.email,
+                    userId: member.userId,
+                    role: member.role,
+                    phone: (member as any).phone || "",
+                });
+            }
+        });
+        return Array.from(map.values());
+    }, [event?.team]);
 
     useEffect(() => {
         const next = new Set<string>();
@@ -1070,7 +1151,7 @@ export default function EventDetailsPage() {
 
     const handleSendVolunteerBroadcast = async () => {
         if (!db) return;
-        const cfg = await fetchWhatsappConfig();
+        const cfg = await fetchWhatsappConfigManual();
         if (!cfg) {
             alert("לא הוגדר אינטגרציית וואטסאפ לשליחה");
             return;
@@ -1139,6 +1220,79 @@ export default function EventDetailsPage() {
             alert("לא הצלחנו לשלוח הודעות למתנדבים");
         } finally {
             setSendingVolunteerMsg(false);
+        }
+    };
+
+    const handleSendTeamBroadcast = async () => {
+        if (!db) return;
+        if (!canManageTeam) {
+            alert("אין לך הרשאה לשלוח הודעה לצוות.");
+            return;
+        }
+        const cfg = await fetchWhatsappConfigManual();
+        if (!cfg) {
+            alert("לא הוגדר אינטגרציית וואטסאפ לשליחה");
+            return;
+        }
+        const list = teamContacts.filter((t) => t.key && teamSelections.has(t.key));
+        if (!list.length) {
+            alert("בחר לפחות איש צוות אחד לשליחה");
+            return;
+        }
+        const teamMessage = teamMessageRef.current || "";
+        if (!teamMessage.trim()) {
+            alert("כתוב הודעה לפני שליחה");
+            return;
+        }
+        setSendingTeamMsg(true);
+        try {
+            const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+            const origin = getPublicBaseUrl(cfg.baseUrl);
+            const link = origin ? `${origin}/events/${id}` : "";
+            const sent: string[] = [];
+            const skippedNoPhone: string[] = [];
+            const failed: string[] = [];
+            for (const member of list) {
+                const phoneRaw =
+                    member.phone ||
+                    (await getUserPhone({ name: member.name || "", email: member.email || "", userId: member.userId } as any));
+                const phone = normalizePhoneNumber(phoneRaw);
+                if (!phone) {
+                    skippedNoPhone.push(member.name || member.email || "איש צוות");
+                    continue;
+                }
+                const lines = [
+                    `היי ${member.name || "איש צוות"},`,
+                    teamMessage.trim(),
+                    event?.title ? `אירוע: ${event.title}` : "",
+                    link ? `דף האירוע: ${link}` : "",
+                ].filter(Boolean);
+                const message = lines.join("\n");
+                await ensureGlobalRateLimit();
+                const res = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
+                }).catch(err => {
+                    console.warn("send wa failed", err);
+                    return null;
+                });
+                if (res && res.ok) {
+                    sent.push(member.name || member.email || phone);
+                } else {
+                    failed.push(member.name || member.email || phone);
+                }
+            }
+            const parts = [];
+            if (sent.length) parts.push(`נשלחו ${sent.length} הודעות`);
+            if (failed.length) parts.push(`נכשלו ${failed.length} (בדוק קונפיגורציה/חיבור)`);
+            if (skippedNoPhone.length) parts.push(`דילגנו על ${skippedNoPhone.length} ללא מספר`);
+            alert(parts.join(" | "));
+        } catch (err) {
+            console.error("שגיאה בשליחת הודעה לצוות", err);
+            alert("לא הצלחנו לשלוח הודעות לצוות");
+        } finally {
+            setSendingTeamMsg(false);
         }
     };
 
@@ -2660,6 +2814,44 @@ export default function EventDetailsPage() {
         return digits;
     };
 
+    const handleSendAssigneeWhatsapp = async () => {
+        if (!assigneeWhatsappModal) return;
+        const phoneClean = normalizePhoneForWhatsApp(assigneeWhatsappModal.phone);
+        if (!phoneClean) {
+            setAssigneeWhatsappModal(prev => prev ? { ...prev, error: "מספר טלפון לא תקין" } : prev);
+            return;
+        }
+        if (!assigneeWhatsappModal.message.trim()) {
+            setAssigneeWhatsappModal(prev => prev ? { ...prev, error: "יש להזין תוכן הודעה" } : prev);
+            return;
+        }
+        setAssigneeWhatsappModal(prev => prev ? { ...prev, sending: true, error: null } : prev);
+        try {
+            const res = await fetch("/api/whatsapp/send", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ phone: phoneClean, message: assigneeWhatsappModal.message }),
+            });
+            const text = await res.text();
+            let parsed: any = {};
+            try {
+                parsed = text ? JSON.parse(text) : {};
+            } catch {
+                /* ignore parse errors */
+            }
+            if (!res.ok || parsed?.error) {
+                const msg = parsed?.error || text || `שליחה נכשלה (${res.status})`;
+                throw new Error(msg);
+            }
+            alert("ההודעה נשלחה בוואטסאפ");
+            setAssigneeWhatsappModal(null);
+        } catch (err) {
+            setAssigneeWhatsappModal(prev => prev ? { ...prev, sending: false, error: err instanceof Error ? err.message : "שגיאה בשליחה" } : prev);
+        }
+    };
+
+    const closeAssigneeWhatsappModal = () => setAssigneeWhatsappModal(null);
+
     const handleOpenWhatsApp = (phone?: string) => {
         const normalized = normalizePhoneForWhatsApp(phone || "");
         if (!normalized) {
@@ -2667,6 +2859,36 @@ export default function EventDetailsPage() {
             return;
         }
         window.open(`https://wa.me/${normalized}`, "_blank");
+    };
+
+    const handleAssigneeWhatsapp = async (task: Task, assignee?: Assignee) => {
+        const name = assignee?.name || assignee?.email || "מתנדב/ת";
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
+        const link = origin ? `${origin}/tasks/${task.id}?eventId=${task.eventId || id}` : "";
+        const defaultMessage = [
+            `היי ${name},`,
+            `יש לך משימה: "${task.title}".`,
+            event?.title ? `אירוע/פרויקט: ${event.title}` : "",
+            link ? `קישור למשימה: ${link}` : ""
+        ].filter(Boolean).join("\n");
+
+        setAssigneeWhatsappModal({
+            taskId: task.id,
+            taskTitle: task.title,
+            eventTitle: event?.title,
+            assigneeName: name,
+            assigneeEmail: assignee?.email,
+            phone: "",
+            message: defaultMessage,
+            loadingPhone: true,
+            sending: false,
+            error: null,
+        });
+
+        const foundPhone = await getUserPhone(assignee || { name: task.assignee, email: (task as any)?.assigneeEmail });
+        setAssigneeWhatsappModal(prev => prev && prev.taskId === task.id
+            ? { ...prev, phone: formatPhoneForDisplay(foundPhone || assignee?.phone || ""), loadingPhone: false }
+            : prev);
     };
 
     const formatGoogleDate = (date: Date) =>
@@ -4323,6 +4545,7 @@ export default function EventDetailsPage() {
                                                         setTaggingTask(task);
                                                         setTagSelection(task.assignees || []);
                                                     }}
+                                                    onAssigneeClick={(assignee) => handleAssigneeWhatsapp(task, assignee)}
                                                 />
                                             );
                                         })}
@@ -4372,6 +4595,7 @@ export default function EventDetailsPage() {
                                                         setTaggingTask(task);
                                                         setTagSelection(task.assignees || []);
                                                     }}
+                                                    onAssigneeClick={(assignee) => handleAssigneeWhatsapp(task, assignee)}
                                                 />
                                             );
                                         })}
@@ -4548,11 +4772,11 @@ export default function EventDetailsPage() {
                             )}
 
                             <div className="space-y-4">
-                                {event.team && event.team.length > 0 ? (
-                                    event.team.map((member, idx) => (
-                                        <div key={idx} className="flex items-center gap-3 justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                            {event.team && event.team.length > 0 ? (
+                                event.team.map((member, idx) => (
+                                    <div key={idx} className="flex items-center gap-3 justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
                                                     {member.name.substring(0, 2)}
                                                 </div>
                                                 <div>
@@ -4595,6 +4819,101 @@ export default function EventDetailsPage() {
                                 )}
                                 {!canManageTeam && (
                                     <p className="text-xs text-gray-500">רק יוצר האירוע יכול להוסיף שותפים.</p>
+                                )}
+
+                                {teamContacts.length > 0 && canManageTeam && (
+                                    <div className="mt-4 border-t pt-4 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm font-semibold text-gray-800">שליחת הודעת מערכת לאנשי הצוות</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const next = !showTeamMessage;
+                                                    if (next) {
+                                                        selectAllTeam();
+                                                    }
+                                                    setShowTeamMessage(next);
+                                                }}
+                                                className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                title="פתח שליחת הודעה לצוות"
+                                            >
+                                                <MessageCircle size={16} />
+                                            </button>
+                                        </div>
+                                        {showTeamMessage && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={selectAllTeam}
+                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                        >
+                                                            בחר הכל
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={clearTeamSelection}
+                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                        >
+                                                            נקה
+                                                        </button>
+                                                    </div>
+                                                    <span className="text-gray-500">נבחרו {teamSelections.size}</span>
+                                                </div>
+                                                <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
+                                                    {teamContacts.map((member) => {
+                                                        const checked = teamSelections.has(member.key);
+                                                        const phoneDisplay = member.phone ? formatPhoneForDisplay(member.phone) : "";
+                                                        return (
+                                                            <label key={member.key} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
+                                                                <div className="flex items-center gap-2">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        className="accent-indigo-600"
+                                                                        checked={checked}
+                                                                        onChange={() => toggleTeamSelection(member.key)}
+                                                                    />
+                                                                    <div className="flex flex-col">
+                                                                        <span className="font-medium text-gray-800">{member.name || member.email || "איש צוות"}</span>
+                                                                        <span className="text-xs text-gray-500">
+                                                                            {member.role || ""}
+                                                                            {(member.role && (member.email || phoneDisplay)) ? " • " : ""}
+                                                                            {member.email || ""}
+                                                                            {(member.email && phoneDisplay) ? " • " : ""}
+                                                                            {phoneDisplay}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                <span className="text-[11px] text-gray-500">
+                                                                    {phoneDisplay || "אין טלפון"}
+                                                                </span>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <textarea
+                                                    className="w-full border rounded-lg p-3 text-sm"
+                                                    rows={3}
+                                                    placeholder="כתוב את ההודעה שתרצה לשלוח לכל הצוות שנבחר"
+                                                    onChange={(e) => { teamMessageRef.current = e.target.value; }}
+                                                />
+                                                <div className="flex justify-end">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSendTeamBroadcast}
+                                                        disabled={sendingTeamMsg}
+                                                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                                                    >
+                                                        {sendingTeamMsg ? "שולח..." : "שלח הודעה לצוות"}
+                                                    </button>
+                                                </div>
+                                                <p className="text-xs text-gray-500">
+                                                    נשלח רק למי שנבחר ובעל מספר מעודכן ב״משתמשי מערכת״.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -4909,6 +5228,67 @@ export default function EventDetailsPage() {
                     </div>
                 </div>
             </div>
+
+            {assigneeWhatsappModal && (
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+                        <div className="flex items-start justify-between mb-4">
+                            <div>
+                                <h3 className="text-xl font-bold text-gray-900">שליחת הודעת מערכת בוואטסאפ</h3>
+                                <p className="text-sm text-gray-600">
+                                    אל: {assigneeWhatsappModal.assigneeName || assigneeWhatsappModal.assigneeEmail || "משתמש"} • {assigneeWhatsappModal.taskTitle}
+                                </p>
+                            </div>
+                            <button onClick={closeAssigneeWhatsappModal} className="text-gray-500 hover:text-gray-700">
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-sm font-medium text-gray-800 mb-1 block">טלפון יעד</label>
+                                <input
+                                    type="tel"
+                                    value={assigneeWhatsappModal.phone}
+                                    onChange={(e) => setAssigneeWhatsappModal(prev => prev ? { ...prev, phone: e.target.value } : prev)}
+                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                                    placeholder="לדוגמה: 0501234567"
+                                />
+                                {assigneeWhatsappModal.loadingPhone && (
+                                    <p className="text-xs text-gray-500 mt-1">מאחזר מספר טלפון מהפרופיל...</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium text-gray-800 mb-1 block">תוכן הודעה</label>
+                                <textarea
+                                    value={assigneeWhatsappModal.message}
+                                    onChange={(e) => setAssigneeWhatsappModal(prev => prev ? { ...prev, message: e.target.value } : prev)}
+                                    rows={4}
+                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                                />
+                            </div>
+                            {assigneeWhatsappModal.error && (
+                                <div className="text-sm text-red-600">{assigneeWhatsappModal.error}</div>
+                            )}
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    onClick={closeAssigneeWhatsappModal}
+                                    className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                                >
+                                    ביטול
+                                </button>
+                                <button
+                                    onClick={handleSendAssigneeWhatsapp}
+                                    disabled={assigneeWhatsappModal.sending}
+                                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60"
+                                >
+                                    {assigneeWhatsappModal.sending ? "שולח..." : "שלח בוואטסאפ"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {showControlCenter && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

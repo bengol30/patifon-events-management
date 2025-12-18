@@ -35,6 +35,52 @@ const isHeic = (name?: string) => {
     return lower.endsWith(".heic") || lower.endsWith(".heif");
 };
 
+const formatDateForCal = (d: Date) => {
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+};
+
+const triggerCalendarInvite = (ev: EventItem) => {
+    const start = getStartDate(ev.startTime);
+    if (!start) return;
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000); // default 2h duration
+    const title = encodeURIComponent(ev.title || "אירוע");
+    const description = encodeURIComponent(ev.officialPostText || ev.description || "");
+    const location = encodeURIComponent(ev.location || "");
+    const dates = `${formatDateForCal(start)}/${formatDateForCal(end)}`;
+
+    // Open Google Calendar template
+    const gcalUrl = `https://www.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dates}` +
+        (description ? `&details=${description}` : "") +
+        (location ? `&location=${location}` : "");
+    if (typeof window !== "undefined") {
+        window.open(gcalUrl, "_blank", "noopener,noreferrer");
+    }
+
+    // Also trigger ICS download for Outlook/Apple/others
+    const icsLines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "BEGIN:VEVENT",
+        `SUMMARY:${ev.title || "אירוע"}`,
+        description ? `DESCRIPTION:${ev.officialPostText || ev.description || ""}` : "",
+        location ? `LOCATION:${ev.location}` : "",
+        `DTSTART:${formatDateForCal(start)}`,
+        `DTEND:${formatDateForCal(end)}`,
+        "END:VEVENT",
+        "END:VCALENDAR",
+    ].filter(Boolean);
+    const blob = new Blob([icsLines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${ev.title || "event"}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+};
+
 export default function EventsLanding() {
     const [events, setEvents] = useState<EventItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -114,7 +160,8 @@ export default function EventsLanding() {
 
     const galleryDisplay = useMemo(() => galleryImages.slice(0, 3), [galleryImages]);
 
-    const handleSubmit = async (eventId: string) => {
+    const handleSubmit = async (eventObj: EventItem) => {
+        const eventId = eventObj.id;
         const state = formState[eventId] || { name: "", phone: "", email: "", submitting: false, success: false };
         if (!state.name.trim() || !state.phone.trim() || !state.email.trim()) {
             alert("שם, טלפון ואימייל הם שדות חובה");
@@ -129,6 +176,7 @@ export default function EventsLanding() {
                 createdAt: serverTimestamp(),
             });
             setFormState(prev => ({ ...prev, [eventId]: { name: "", phone: "", email: "", submitting: false, success: true } }));
+            triggerCalendarInvite(eventObj);
         } catch (err) {
             console.error("Failed to register", err);
             alert("לא הצלחנו לרשום, נסה שוב");
@@ -175,14 +223,14 @@ export default function EventsLanding() {
                                     </div>
                                     {state.success && (
                                         <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
-                                            נרשמתם בהצלחה!
+                                            נרשמתם בהצלחה! פתחנו לכם חלון לשמירת האירוע ביומן והורדנו קובץ .ics למקרה הצורך.
                                         </div>
                                     )}
                                     <form
                                         className="space-y-2"
                                         onSubmit={(e) => {
                                             e.preventDefault();
-                                            handleSubmit(ev.id);
+                                            handleSubmit(ev);
                                         }}
                                     >
                                         <input
