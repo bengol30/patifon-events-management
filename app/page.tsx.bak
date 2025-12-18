@@ -1885,7 +1885,7 @@ export default function Dashboard() {
             taskTitle: title,
             volunteerHours: hours,
             scope: editingVolunteer.scope || "event",
-            //             taskId: payload?.taskId || undefined,
+            taskId: payload?.taskId || undefined,
           }
         },
       });
@@ -2391,7 +2391,7 @@ export default function Dashboard() {
         };
         const hoursRaw = req.volunteerHours ?? (taskData?.volunteerHours ?? null);
         const parsedHours = hoursRaw != null ? Number(hoursRaw) : null;
-        const volunteerHours = parsedHours !== null && Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : null;
+        const volunteerHours = Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : null;
         completionData.volunteerHours = volunteerHours;
         if (isManualRequest) {
           completionData.manualRequest = true;

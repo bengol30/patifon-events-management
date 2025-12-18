@@ -46,7 +46,7 @@ const computeNextOccurrence = (
 };
 
 interface Assignee {
-    name: string;
+    name?: string;
     userId?: string;
     email?: string;
     phone?: string;
@@ -967,7 +967,7 @@ export default function EventDetailsPage() {
                         map.set(key, { ...existing, phone: a.phone || phoneFromEvent });
                     }
                 });
-        });
+            });
         return Array.from(map.values());
     }, [tasks, volunteers, volunteerPhoneMap]);
 
@@ -4772,11 +4772,11 @@ export default function EventDetailsPage() {
                             )}
 
                             <div className="space-y-4">
-                            {event.team && event.team.length > 0 ? (
-                                event.team.map((member, idx) => (
-                                    <div key={idx} className="flex items-center gap-3 justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                {event.team && event.team.length > 0 ? (
+                                    event.team.map((member, idx) => (
+                                        <div key={idx} className="flex items-center gap-3 justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
                                                     {member.name.substring(0, 2)}
                                                 </div>
                                                 <div>
@@ -5010,34 +5010,34 @@ export default function EventDetailsPage() {
                                                     <span className="text-gray-500">נבחרו {volunteerSelections.size}</span>
                                                 </div>
                                                 <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
-                {combinedVolunteers.map((vol, idx) => {
-                    const key = buildVolunteerKey({ email: vol.email, id: vol.id, name: vol.name });
-                    const checked = volunteerSelections.has(key);
-                    const phoneDisplay = vol.phone || volunteerPhoneMap.get(key);
-                    return (
-                        <label key={vol.id || idx} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    className="accent-indigo-600"
-                                    checked={checked}
-                                    onChange={() => toggleVolunteerSelection(key)}
-                                />
-                                <div className="flex flex-col">
-                                    <span className="font-medium text-gray-800">{vol.name || vol.email || "מתנדב"}</span>
-                                    <span className="text-xs text-gray-500">
-                                        {vol.email || ""}
-                                        {(vol.email && (vol.phone || phoneDisplay)) ? " • " : ""}
-                                        {(vol.phone || phoneDisplay) ? formatPhoneForDisplay(vol.phone || phoneDisplay) : ""}
-                                    </span>
-                                </div>
-                            </div>
-                            <span className="text-[11px] text-gray-500">
-                                {phoneDisplay ? formatPhoneForDisplay(phoneDisplay) : "אין טלפון"}
-                            </span>
-                        </label>
-                    );
-                })}
+                                                    {combinedVolunteers.map((vol, idx) => {
+                                                        const key = buildVolunteerKey({ email: vol.email, id: vol.id, name: vol.name });
+                                                        const checked = volunteerSelections.has(key);
+                                                        const phoneDisplay = vol.phone || volunteerPhoneMap.get(key);
+                                                        return (
+                                                            <label key={vol.id || idx} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
+                                                                <div className="flex items-center gap-2">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        className="accent-indigo-600"
+                                                                        checked={checked}
+                                                                        onChange={() => toggleVolunteerSelection(key)}
+                                                                    />
+                                                                    <div className="flex flex-col">
+                                                                        <span className="font-medium text-gray-800">{vol.name || vol.email || "מתנדב"}</span>
+                                                                        <span className="text-xs text-gray-500">
+                                                                            {vol.email || ""}
+                                                                            {(vol.email && (vol.phone || phoneDisplay)) ? " • " : ""}
+                                                                            {(vol.phone || phoneDisplay) ? formatPhoneForDisplay(vol.phone || phoneDisplay) : ""}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                <span className="text-[11px] text-gray-500">
+                                                                    {phoneDisplay ? formatPhoneForDisplay(phoneDisplay) : "אין טלפון"}
+                                                                </span>
+                                                            </label>
+                                                        );
+                                                    })}
                                                 </div>
                                                 <textarea
                                                     className="w-full border rounded-lg p-3 text-sm"
@@ -5218,8 +5218,8 @@ export default function EventDetailsPage() {
                             onClick={() => setShowControlCenter(true)}
                             disabled={!canManageTeam}
                             className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 vinyl-shadow transition ${canManageTeam
-                                    ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                                    : "bg-gray-200 text-gray-500 cursor-not-allowed"
+                                ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                                : "bg-gray-200 text-gray-500 cursor-not-allowed"
                                 }`}
                         >
                             <PauseCircle size={18} />
@@ -5486,12 +5486,12 @@ export default function EventDetailsPage() {
                                 <div className="bg-gray-50 rounded-lg p-4">
                                     <p className="text-sm font-medium text-gray-700 mb-2">קישור הרשמה למתנדבים:</p>
                                     <div className="flex items-center gap-2">
-                                    <input
-                                        type="text"
-                                        readOnly
-                                        value={baseUrl ? `${baseUrl}/events/${id}/volunteers/register` : ""}
-                                        className="flex-1 rounded-lg border-gray-300 border p-2 text-sm bg-white"
-                                    />
+                                        <input
+                                            type="text"
+                                            readOnly
+                                            value={baseUrl ? `${baseUrl}/events/${id}/volunteers/register` : ""}
+                                            className="flex-1 rounded-lg border-gray-300 border p-2 text-sm bg-white"
+                                        />
                                         <button
                                             type="button"
                                             onClick={copyVolunteerLink}
