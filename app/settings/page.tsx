@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { auth, db, storage } from "@/lib/firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc, getDoc, setDoc, getDocs, where, collectionGroup, limit } from "firebase/firestore";
 import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar } from "lucide-react";
@@ -1079,14 +1079,23 @@ export default function SettingsPage() {
             const baseApi = "https://api.green-api.com";
             const messageEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
             const errors: string[] = [];
-            let mediaBase64 = "";
             const mediaFileName = mediaFile?.name || "media";
+            // No need for base64 conversion - we upload to storage now
+
+            // Upload file once if needed
+            let uploadedUrl = "";
+            let storageRefToDelete: any = null;
+
             if (mediaFile) {
                 try {
-                    mediaBase64 = await fileToBase64(mediaFile);
-                } catch (err) {
-                    console.error("Failed reading media file", err);
-                    setMessage({ text: "שגיאה בקריאת הקובץ לפני שליחה", type: "error" });
+                    if (!storage) throw new Error("Storage not initialized");
+                    const storageRef = ref(storage, `whatsapp_uploads/${Date.now()}_${mediaFile.name}`);
+                    const uploadRes = await uploadBytes(storageRef, mediaFile);
+                    uploadedUrl = await getDownloadURL(uploadRes.ref);
+                    storageRefToDelete = storageRef;
+                } catch (uploadErr) {
+                    console.error("Failed to upload file for WhatsApp", uploadErr);
+                    setMessage({ text: "שגיאה בהעלאת הקובץ לשרת", type: "error" });
                     setSendingGroupsMsg(false);
                     return;
                 }
@@ -1094,6 +1103,8 @@ export default function SettingsPage() {
 
             for (const g of selected) {
                 await ensureGlobalRateLimit();
+
+                // Case 1: Event mode with existing URL
                 if (groupSendMode === "event" && mediaUrl) {
                     const res = await fetch("/api/whatsapp/send", {
                         method: "POST",
@@ -1115,15 +1126,15 @@ export default function SettingsPage() {
                     continue;
                 }
 
-                if (mediaFile) {
-                    // Use base64 method via our API route
+                // Case 2: Custom file upload (using the single uploaded URL)
+                if (uploadedUrl) {
                     const res = await fetch("/api/whatsapp/send", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            method: "base64",
+                            method: "url",
                             chatId: g.chatId,
-                            file: mediaBase64,
+                            urlFile: uploadedUrl,
                             fileName: mediaFileName,
                             caption: textToSend,
                             idInstance: whatsappConfig.idInstance.trim(),
@@ -1135,6 +1146,7 @@ export default function SettingsPage() {
                         errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
                     }
                 } else {
+                    // Case 3: Text only
                     const res = await fetch(messageEndpoint, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -1144,6 +1156,15 @@ export default function SettingsPage() {
                     if (!res.ok) {
                         errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
                     }
+                }
+            }
+
+            // Cleanup uploaded file
+            if (storageRefToDelete) {
+                try {
+                    await deleteObject(storageRefToDelete);
+                } catch (delErr) {
+                    console.warn("Failed to delete temp whatsapp file", delErr);
                 }
             }
 
