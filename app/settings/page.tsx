@@ -1095,7 +1095,7 @@ export default function SettingsPage() {
             for (const g of selected) {
                 await ensureGlobalRateLimit();
                 if (groupSendMode === "event" && mediaUrl) {
-                    const res = await fetch("/api/whatsapp/send-file", {
+                    const res = await fetch("/api/whatsapp/send", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -1117,7 +1117,7 @@ export default function SettingsPage() {
 
                 if (mediaFile) {
                     // Use base64 method via our API route
-                    const res = await fetch("/api/whatsapp/send-file", {
+                    const res = await fetch("/api/whatsapp/send", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({

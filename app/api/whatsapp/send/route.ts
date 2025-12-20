@@ -52,7 +52,81 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
-    const { phone, message } = await request.json();
+    const body = await request.json();
+    const { phone, message, method, chatId, file, fileName, urlFile, caption, idInstance, apiTokenInstance } = body;
+
+    // File sending mode
+    if (method === "base64" || method === "url") {
+      if (!chatId || !idInstance || !apiTokenInstance) {
+        return NextResponse.json(
+          { error: "Missing required parameters: chatId, idInstance, apiTokenInstance" },
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const baseApi = "https://api.green-api.com";
+      let endpoint = "";
+      let requestBody: any = { chatId };
+
+      if (method === "base64") {
+        if (!file || !fileName) {
+          return NextResponse.json(
+            { error: "Missing file or fileName for base64 method" },
+            { status: 400, headers: corsHeaders }
+          );
+        }
+        endpoint = `${baseApi}/waInstance${idInstance}/SendFileByBase64/${apiTokenInstance}`;
+        requestBody = {
+          chatId,
+          file,
+          fileName,
+          ...(caption ? { caption } : {}),
+        };
+      } else if (method === "url") {
+        if (!urlFile) {
+          return NextResponse.json(
+            { error: "Missing urlFile for url method" },
+            { status: 400, headers: corsHeaders }
+          );
+        }
+        endpoint = `${baseApi}/waInstance${idInstance}/SendFileByUrl/${apiTokenInstance}`;
+        requestBody = {
+          chatId,
+          urlFile,
+          fileName: fileName || "file",
+          ...(caption ? { caption } : {}),
+        };
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      const responseText = await response.text();
+
+      if (!response.ok) {
+        console.error("Green API error:", responseText);
+        return NextResponse.json(
+          { error: responseText || "Failed to send file" },
+          { status: response.status, headers: corsHeaders }
+        );
+      }
+
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        responseData = { message: responseText };
+      }
+
+      return NextResponse.json(responseData, { headers: corsHeaders });
+    }
+
+    // Regular text message mode
     if (!phone || !message) {
       return NextResponse.json({ error: "phone and message are required" }, { status: 400, headers: corsHeaders });
     }
