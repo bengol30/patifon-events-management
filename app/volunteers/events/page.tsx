@@ -652,9 +652,8 @@ export default function VolunteerEventsPage() {
         const cfg = await fetchWhatsappConfig();
         if (!cfg || !cfg.rules?.notifyOnVolunteerDone) return;
         await ensureGlobalRateLimit();
-        const baseApi = ((cfg.baseUrl ?? "https://api.green-api.com").includes("green-api.com")
-            ? (cfg.baseUrl ?? "https://api.green-api.com")
-            : "https://api.green-api.com").replace(/\/$/, "");
+        // Always use Green API for API calls, baseUrl is only for links in messages
+        const baseApi = "https://api.green-api.com";
         const phone = normalizePhone(await getUserPhone(opts.ownerId, opts.ownerEmail));
         if (!phone) return;
         const origin = getPublicBaseUrl(cfg.baseUrl);
