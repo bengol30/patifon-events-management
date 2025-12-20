@@ -860,7 +860,7 @@ export default function Dashboard() {
           }
         }
         if (recurrenceUpdates.length) {
-          Promise.allSettled(recurrenceUpdates).catch(() => {});
+          Promise.allSettled(recurrenceUpdates).catch(() => { });
         }
 
         const allProjectsData = allProjectsSnapshot.docs.map((doc) => ({
@@ -951,7 +951,7 @@ export default function Dashboard() {
         const containerTaskSnaps = await Promise.all(
           [...eventTaskContainers, ...projectTaskContainers].map(async (c) => {
             try {
-              return await getDocs(collection(db, c.scope === "project" ? "projects" : "events", c.id, "tasks"));
+              return await getDocs(collection(db!, c.scope === "project" ? "projects" : "events", c.id, "tasks"));
             } catch (err) {
               console.error("Error loading tasks for", c.scope, c.id, err);
               return null;
