@@ -9,6 +9,7 @@ export async function POST(request: Request) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
+      console.error("OpenAI API key is missing in environment variables");
       return NextResponse.json({ error: "OpenAI API key not configured" }, { status: 500 });
     }
 
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
     5. Do NOT add a preamble or postscript. Just return the formatted text.
     6. Do NOT include links if they were removed from the input. The input text should be the message content without the raw links.
     7. Ensure the text is properly aligned for RTL (Hebrew).
+    8. Be creative with emojis! Use different ones each time if appropriate.
 
     Input Text:
     "${text}"
@@ -36,12 +38,12 @@ export async function POST(request: Request) {
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // Using a fast and capable model
+        model: "gpt-4o", // Upgraded to gpt-4o for better creativity
         messages: [
-          { role: "system", content: "You are a helpful assistant for formatting WhatsApp messages in Hebrew." },
+          { role: "system", content: "You are a creative and helpful assistant for formatting WhatsApp messages in Hebrew." },
           { role: "user", content: prompt }
         ],
-        temperature: 0.7,
+        temperature: 0.8, // Increased temperature for more variety
       }),
     });
 

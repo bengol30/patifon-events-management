@@ -1073,6 +1073,106 @@ export default function SettingsPage() {
             return;
         }
 
+        const isLikelyUrl = (value: string) => /^(https?:\/\/|www\.|wa\.me\/)/i.test(value.trim());
+        const normalizeLink = (value: string) => (/^https?:\/\//i.test(value) ? value : `https://${value}`);
+        const trimLink = (value: string) => value.replace(/[),.!?]+$/g, "");
+
+        const extractLinks = (text: string) => {
+            const links: string[] = [];
+            let working = text || "";
+            const collect = (regex: RegExp) => {
+                working = working.replace(regex, (m) => {
+                    const cleaned = trimLink(m);
+                    if (cleaned) links.push(cleaned);
+                    const suffix = m.slice(cleaned.length);
+                    return suffix;
+                });
+            };
+            collect(/(?:https?:\/\/|www\.|wa\.me\/)\S+/gi);
+            collect(/\b(?!\S+@\S+)([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?:\/\S*)?/gi);
+            const cleaned = working.replace(/\n{2,}/g, "\n").trim();
+            return { cleaned, links };
+        };
+
+        const formatWhatsappText = (raw: string) => {
+            const trimmed = (raw || "").trim();
+            if (!trimmed) return "";
+            const emojiRules = [
+                { rx: /חשוב/i, emoji: "❗" },
+                { rx: /תזכורת/i, emoji: "⏰" },
+                { rx: /אירוע/i, emoji: "🎉" },
+                { rx: /משימה/i, emoji: "📝" },
+                { rx: /קישור|לינק/i, emoji: "🔗" },
+                { rx: /תודה/i, emoji: "🙏" },
+            ];
+            const boldify = (line: string) => {
+                const rawLine = line.trim();
+                if (!rawLine) return rawLine;
+                if (isLikelyUrl(rawLine)) return rawLine;
+                const bulletMatch = rawLine.match(/^\s*[-•]\s+(.*)$/);
+                if (bulletMatch) {
+                    const content = bulletMatch[1].trim();
+                    if (!content) return "•";
+                    if (isLikelyUrl(content)) return `• ${content}`;
+                    const colonIdx = content.indexOf(":");
+                    if (colonIdx > 0 && content.slice(colonIdx, colonIdx + 3) !== "://") {
+                        const title = content.slice(0, colonIdx).trim();
+                        const rest = content.slice(colonIdx + 1).trim();
+                        return `• *${title}*: ${rest}`;
+                    }
+                    const words = content.split(/\s+/);
+                    const headCount = Math.min(words.length, 3);
+                    const head = words.slice(0, headCount).join(" ");
+                    const tail = words.slice(headCount).join(" ");
+                    return `• *${head}*${tail ? ` ${tail}` : ""}`;
+                }
+                const idx = rawLine.indexOf(":");
+                if (idx > 0 && rawLine.slice(idx, idx + 3) !== "://") {
+                    const title = rawLine.slice(0, idx).trim();
+                    const rest = rawLine.slice(idx + 1).trim();
+                    return `*${title}*: ${rest}`;
+                }
+                return rawLine;
+            };
+            const addEmoji = (line: string) => {
+                let out = line;
+                emojiRules.forEach(rule => {
+                    if (rule.rx.test(out) && !out.includes(rule.emoji)) {
+                        out = `${rule.emoji} ${out}`;
+                    }
+                });
+                return out;
+            };
+            return trimmed
+                .split("\n")
+                .map((line) => addEmoji(boldify(line.trim())))
+                .join("\n");
+        };
+
+        const formatWithAi = async (raw: string) => {
+            const clean = (raw || "").trim();
+            if (!clean) return "";
+            try {
+                const res = await fetch("/api/ai/format-whatsapp", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ text: clean }),
+                });
+                if (!res.ok) {
+                    console.error("AI format failed:", res.status, await res.text());
+                    return "";
+                }
+                const data = await res.json();
+                const formatted = typeof data?.formatted === "string" ? data.formatted.trim() : "";
+                return formatted.replace(/^```[\s\S]*?```$/g, "").trim();
+            } catch (err) {
+                console.error("AI format exception:", err);
+                return "";
+            }
+        };
+
+        const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
         setSendingGroupsMsg(true);
         try {
             // Text messages still use direct API call (no CORS issue for simple POST)
@@ -1101,9 +1201,14 @@ export default function SettingsPage() {
                 }
             }
 
+            const { cleaned: rawWithoutLinks, links } = extractLinks(textToSend);
+            const aiFormatted = await formatWithAi(rawWithoutLinks);
+            const formattedBase = aiFormatted || formatWhatsappText(rawWithoutLinks);
+            const captionToUse = formattedBase || (links.length ? "🔗 קישור מצורף" : textToSend);
+            const linkMessage = links.length ? links.map((l) => `🔗 ${normalizeLink(l)}`).join("\n") : "";
+
             for (const g of selected) {
                 await ensureGlobalRateLimit();
-
                 // Case 1: Event mode with existing URL
                 if (groupSendMode === "event" && mediaUrl) {
                     const res = await fetch("/api/whatsapp/send", {
@@ -1114,7 +1219,7 @@ export default function SettingsPage() {
                             chatId: g.chatId,
                             urlFile: mediaUrl,
                             fileName: fileNameFromUrl(mediaUrl),
-                            caption: textToSend,
+                            caption: captionToUse,
                             idInstance: whatsappConfig.idInstance.trim(),
                             apiTokenInstance: whatsappConfig.apiTokenInstance.trim(),
                         }),
@@ -1122,6 +1227,18 @@ export default function SettingsPage() {
                     const body = await res.text();
                     if (!res.ok) {
                         errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
+                    } else if (linkMessage) {
+                        await sleep(2000);
+                        await ensureGlobalRateLimit();
+                        const resLink = await fetch(messageEndpoint, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ chatId: g.chatId, message: linkMessage }),
+                        });
+                        if (!resLink.ok) {
+                            const text = await resLink.text();
+                            errors.push(`${g.name || g.chatId}: ${text || "שליחת קישור נכשלה"}`);
+                        }
                     }
                     continue;
                 }
@@ -1136,7 +1253,7 @@ export default function SettingsPage() {
                             chatId: g.chatId,
                             urlFile: uploadedUrl,
                             fileName: mediaFileName,
-                            caption: textToSend,
+                            caption: captionToUse,
                             idInstance: whatsappConfig.idInstance.trim(),
                             apiTokenInstance: whatsappConfig.apiTokenInstance.trim(),
                         }),
@@ -1144,17 +1261,41 @@ export default function SettingsPage() {
                     const body = await res.text();
                     if (!res.ok) {
                         errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
+                    } else if (linkMessage) {
+                        await sleep(2000);
+                        await ensureGlobalRateLimit();
+                        const resLink = await fetch(messageEndpoint, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ chatId: g.chatId, message: linkMessage }),
+                        });
+                        if (!resLink.ok) {
+                            const text = await resLink.text();
+                            errors.push(`${g.name || g.chatId}: ${text || "שליחת קישור נכשלה"}`);
+                        }
                     }
                 } else {
                     // Case 3: Text only
                     const res = await fetch(messageEndpoint, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ chatId: g.chatId, message: textToSend }),
+                        body: JSON.stringify({ chatId: g.chatId, message: captionToUse }),
                     });
                     const body = await res.text();
                     if (!res.ok) {
                         errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
+                    } else if (linkMessage) {
+                        await sleep(2000);
+                        await ensureGlobalRateLimit();
+                        const resLink = await fetch(messageEndpoint, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ chatId: g.chatId, message: linkMessage }),
+                        });
+                        if (!resLink.ok) {
+                            const text = await resLink.text();
+                            errors.push(`${g.name || g.chatId}: ${text || "שליחת קישור נכשלה"}`);
+                        }
                     }
                 }
             }
