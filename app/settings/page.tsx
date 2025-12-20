@@ -1159,13 +1159,17 @@ export default function SettingsPage() {
                 }
             }
 
-            // Cleanup uploaded file
+            // Cleanup uploaded file after a delay to allow Green API to download it
             if (storageRefToDelete) {
-                try {
-                    await deleteObject(storageRefToDelete);
-                } catch (delErr) {
-                    console.warn("Failed to delete temp whatsapp file", delErr);
-                }
+                setTimeout(async () => {
+                    try {
+                        console.log("Deleting temp whatsapp file...");
+                        await deleteObject(storageRefToDelete);
+                        console.log("Temp file deleted");
+                    } catch (delErr) {
+                        console.warn("Failed to delete temp whatsapp file", delErr);
+                    }
+                }, 60000); // Wait 60 seconds
             }
 
             if (errors.length) {
