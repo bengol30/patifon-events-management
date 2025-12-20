@@ -59,7 +59,7 @@ interface ProjectTask {
   currentStatus?: string;
   nextStep?: string;
   previewImage?: string;
-  scope?: "event" | "project";
+  scope?: "event" | "project" | "manual" | "general";
   isVolunteerTask?: boolean;
   volunteerHours?: number | null;
 }
@@ -229,20 +229,20 @@ export default function ProjectDetailsPage() {
                 priority: (d.priority as any) || "NORMAL",
                 eventId: ev.id,
                 eventTitle: ev.title,
-              assignee: d.assignee,
-              assignees: d.assignees,
-              description: d.description,
-              currentStatus: d.currentStatus,
-              nextStep: d.nextStep,
-              previewImage: d.previewImage,
-              scope: "event",
-              isVolunteerTask: !!d.isVolunteerTask,
-              volunteerHours: d.volunteerHours ?? null,
+                assignee: d.assignee,
+                assignees: d.assignees,
+                description: d.description,
+                currentStatus: d.currentStatus,
+                nextStep: d.nextStep,
+                previewImage: d.previewImage,
+                scope: "event",
+                isVolunteerTask: !!d.isVolunteerTask,
+                volunteerHours: d.volunteerHours ?? null,
+              });
             });
-          });
-        } catch (err) {
-          console.error("Failed loading tasks for event", ev.id, err);
-        }
+          } catch (err) {
+            console.error("Failed loading tasks for event", ev.id, err);
+          }
         }
         // Project-level tasks
         try {
@@ -702,21 +702,21 @@ export default function ProjectDetailsPage() {
                   {usersList
                     .filter(u => (u.fullName || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase()))
                     .map(u => {
-                    const checked = newTask.assignees.some(a => getAssigneeKey(a) === getAssigneeKey({ userId: u.id, email: u.email, name: u.fullName }));
-                    return (
-                      <label key={u.id} className="flex items-center gap-2 p-2 text-sm cursor-pointer hover:bg-gray-50">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleNewTaskAssignee(u.id, u.fullName, u.email)}
-                        />
-                        <div className="flex flex-col">
-                          <span className="font-medium text-gray-900">{u.fullName || "ללא שם"}</span>
-                          <span className="text-xs text-gray-600">{u.email}</span>
-                        </div>
-                      </label>
-                    );
-                  })}
+                      const checked = newTask.assignees.some(a => getAssigneeKey(a) === getAssigneeKey({ userId: u.id, email: u.email, name: u.fullName }));
+                      return (
+                        <label key={u.id} className="flex items-center gap-2 p-2 text-sm cursor-pointer hover:bg-gray-50">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleNewTaskAssignee(u.id, u.fullName, u.email)}
+                          />
+                          <div className="flex flex-col">
+                            <span className="font-medium text-gray-900">{u.fullName || "ללא שם"}</span>
+                            <span className="text-xs text-gray-600">{u.email}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
                   {usersList.filter(u => (u.fullName || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase())).length === 0 && (
                     <div className="p-2 text-xs text-gray-500">אין משתמשים זמינים לתיוג.</div>
                   )}
@@ -1074,9 +1074,9 @@ export default function ProjectDetailsPage() {
             <div className="text-gray-600 text-sm">אין משימות לאירועים המשויכים לפרויקט.</div>
           ) : (
             <div className="space-y-3">
-                {projectTasks.map((t) => (
-                  <TaskCard
-                    key={t.id}
+              {projectTasks.map((t) => (
+                <TaskCard
+                  key={t.id}
                   id={t.id}
                   title={t.title}
                   description={t.description}
@@ -1091,12 +1091,12 @@ export default function ProjectDetailsPage() {
                   eventTitle={t.eventTitle}
                   scope={t.scope}
                   previewImage={t.previewImage}
-                onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
-                onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
-                onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
-                onManageAssignees={t.scope === "event"
-                  ? () => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)
-                  : undefined}
+                  onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
+                  onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
+                  onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
+                  onManageAssignees={t.scope === "event"
+                    ? () => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)
+                    : undefined}
                   onDelete={() => {
                     if (!db) return;
                     if (confirm("למחוק משימה זו?")) {

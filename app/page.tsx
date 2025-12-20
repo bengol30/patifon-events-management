@@ -53,7 +53,7 @@ interface Task {
   priority: "NORMAL" | "HIGH" | "CRITICAL";
   eventId: string;
   eventTitle: string;
-  scope?: "event" | "project";
+  scope?: "event" | "project" | "manual" | "general";
   lastMessageTime?: any;
   lastMessageBy?: string;
   readBy?: Record<string, boolean>;
@@ -1878,24 +1878,24 @@ export default function Dashboard() {
             ));
             const completedCount = completionsSnap.docs.length;
             const remainingCount = Math.max(0, required - completedCount);
-              const nextStatus = completedCount >= required ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
-              const assignees = Array.isArray(taskData.assignees) ? taskData.assignees : [];
-              const filteredAssignees = assignees.filter((a: any) => (a?.email || "").toLowerCase() !== volunteerEmailLower);
-              const primary = filteredAssignees[0];
-              await updateDoc(taskRef, {
-                status: nextStatus,
-                remainingCompletions: remainingCount,
-                assignees: filteredAssignees,
-                assignee: primary?.name || "",
-                assigneeId: primary?.userId || "",
-                assigneeEmail: (primary?.email || "").toLowerCase() || "",
-              });
-            }
-          } catch (err) {
-            console.warn("Failed adjusting task after completion deletion", err);
+            const nextStatus = completedCount >= required ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
+            const assignees = Array.isArray(taskData.assignees) ? taskData.assignees : [];
+            const filteredAssignees = assignees.filter((a: any) => (a?.email || "").toLowerCase() !== volunteerEmailLower);
+            const primary = filteredAssignees[0];
+            await updateDoc(taskRef, {
+              status: nextStatus,
+              remainingCompletions: remainingCount,
+              assignees: filteredAssignees,
+              assignee: primary?.name || "",
+              assigneeId: primary?.userId || "",
+              assigneeEmail: (primary?.email || "").toLowerCase() || "",
+            });
           }
+        } catch (err) {
+          console.warn("Failed adjusting task after completion deletion", err);
         }
-        await loadVolunteerTasks(editingVolunteer);
+      }
+      await loadVolunteerTasks(editingVolunteer);
     } catch (err) {
       console.error("Failed deleting completion", err);
       alert("שגיאה במחיקת המשימה/שעות.");

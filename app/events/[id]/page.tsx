@@ -71,7 +71,7 @@ interface Task {
     isVolunteerTask?: boolean;
     volunteerHours?: number | null;
     createdByName?: string;
-    scope?: "event" | "project";
+    scope?: "event" | "project" | "manual" | "general";
     specialType?: string;
     eventTitle?: string;
     eventId?: string;
@@ -771,7 +771,7 @@ export default function EventDetailsPage() {
                         : [
                             taskLink ? `דף המשימה: ${taskLink}` : "",
                             eventLink ? `דף האירוע: ${eventLink}` : ""
-                          ].filter(Boolean).join("\n"),
+                        ].filter(Boolean).join("\n"),
                 ].filter(Boolean);
                 const message = lines.join("\n");
                 const res = await fetch(endpoint, {

@@ -29,7 +29,7 @@ interface TaskProps {
     previewImage?: string;
     createdByName?: string;
     onOpen?: () => void;
-    scope?: "event" | "project";
+    scope?: "event" | "project" | "manual" | "general";
     specialType?: string;
     requiredCompletions?: number | null;
     remainingCompletions?: number | null;

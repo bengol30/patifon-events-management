@@ -37,7 +37,7 @@ interface Task {
     createdByName?: string;
     createdByPhone?: string;
     createdBy?: string | null;
-    scope?: "event" | "project";
+    scope?: "event" | "project" | "manual" | "general";
 }
 
 interface EventTeamMember {
@@ -277,7 +277,7 @@ export default function TaskDetailPage() {
                         : [
                             taskLink ? `דף המשימה: ${taskLink}` : "",
                             eventLink ? `דף האירוע: ${eventLink}` : ""
-                          ].filter(Boolean).join("\n"),
+                        ].filter(Boolean).join("\n"),
                     `התוייג ע\"י: ${senderName}`,
                 ].filter(Boolean);
                 const message = lines.join("\n");

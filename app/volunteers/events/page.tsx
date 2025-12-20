@@ -17,7 +17,7 @@ interface Task {
     isVolunteerTask?: boolean;
     assignees?: { name?: string; email?: string }[];
     volunteerHours?: number | null;
-    scope?: "event" | "project";
+    scope?: "event" | "project" | "manual" | "general";
     pendingApproval?: boolean;
     pendingApprovalRequestId?: string;
     lastApprovalDecision?: string;
@@ -58,7 +58,7 @@ interface EventData {
     needsVolunteers?: boolean;
     volunteersCount?: number | null;
     tasks?: Task[];
-    scope?: "event" | "project";
+    scope?: "event" | "project" | "manual" | "general";
     contactPhone?: string;
     contactName?: string;
     createdBy?: string;
@@ -594,7 +594,7 @@ export default function VolunteerEventsPage() {
         return "";
     };
 
-    const resolveVolunteerPhone = async (eventId?: string, scope: "event" | "project" | "manual" = "event") => {
+    const resolveVolunteerPhone = async (eventId?: string, scope: "event" | "project" | "manual" | "general" = "event") => {
         const fromSession = eventId ? sessionMap[eventId]?.phone : "";
         if (fromSession) return fromSession;
         if (sessionMap["general"]?.phone) return sessionMap["general"]?.phone || "";
@@ -647,13 +647,13 @@ export default function VolunteerEventsPage() {
         eventTitle?: string;
         volunteerPhone?: string;
         volunteerEmail?: string;
-        scope?: "event" | "project" | "manual";
+        scope?: "event" | "project" | "manual" | "general";
     }) => {
         const cfg = await fetchWhatsappConfig();
         if (!cfg || !cfg.rules?.notifyOnVolunteerDone) return;
         await ensureGlobalRateLimit();
-        const baseApi = ((cfg.baseUrl || "https://api.green-api.com").includes("green-api.com")
-            ? cfg.baseUrl
+        const baseApi = ((cfg.baseUrl ?? "https://api.green-api.com").includes("green-api.com")
+            ? (cfg.baseUrl ?? "https://api.green-api.com")
             : "https://api.green-api.com").replace(/\/$/, "");
         const phone = normalizePhone(await getUserPhone(opts.ownerId, opts.ownerEmail));
         if (!phone) return;
@@ -933,7 +933,7 @@ export default function VolunteerEventsPage() {
     };
 
     type TaskRefPath = ["projects" | "events", string, "tasks", string];
-    const getTaskRefPath = (scope: "event" | "project" = "event", eventId: string, taskId: string): TaskRefPath =>
+    const getTaskRefPath = (scope: "event" | "project" | "manual" | "general" = "event", eventId: string, taskId: string): TaskRefPath =>
         scope === "project" ? ["projects", eventId, "tasks", taskId] : ["events", eventId, "tasks", taskId];
 
     const buildWhatsappLink = (rawPhone?: any, taskTitle?: string, creatorName?: string) => {
@@ -983,7 +983,7 @@ export default function VolunteerEventsPage() {
         })();
     }, [db, tasksByEvent, userMetaCache]);
 
-    const setTaskSelectionImmediate = async (eventId: string, taskId: string, select: boolean, scope: "event" | "project" = "event") => {
+    const setTaskSelectionImmediate = async (eventId: string, taskId: string, select: boolean, scope: "event" | "project" | "manual" | "general" = "event") => {
         if (!db) return;
         if (!isAuthed) {
             openAuth(eventId);
@@ -1117,14 +1117,14 @@ export default function VolunteerEventsPage() {
         }
     };
 
-    const removeTaskSelection = async (eventId: string, taskId: string, scope: "event" | "project" = "event") => {
+    const removeTaskSelection = async (eventId: string, taskId: string, scope: "event" | "project" | "manual" | "general" = "event") => {
         // Prevent removing a task that was already completed
         const currentStatus = (tasksByEvent[eventId] || []).find((t) => t.id === taskId)?.status;
         if (currentStatus === "DONE") return;
         await setTaskSelectionImmediate(eventId, taskId, false, scope);
     };
 
-    const toggleTaskDone = async (eventId: string, taskId: string, currentStatus: string, scope: "event" | "project" = "event") => {
+    const toggleTaskDone = async (eventId: string, taskId: string, currentStatus: string, scope: "event" | "project" | "manual" | "general" = "event") => {
         if (!db) return;
         if (!isAuthed) return;
         const isPending = currentStatus === "PENDING_APPROVAL";
@@ -1384,8 +1384,8 @@ export default function VolunteerEventsPage() {
                                     <button
                                         onClick={() => setShowPendingOnly((v) => !v)}
                                         className={`text-xs px-3 py-2 rounded-lg border font-semibold transition ${showPendingOnly
-                                                ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                                                : "bg-white text-gray-700 border-gray-200"
+                                            ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                            : "bg-white text-gray-700 border-gray-200"
                                             }`}
                                     >
                                         {showPendingOnly ? "הצג הכל" : "הצג רק משימות פתוחות"}
