@@ -31,26 +31,49 @@ export async function POST(request: Request) {
     "${text}"
     `;
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    let model = "gpt-4o";
+    let response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o", // Upgraded to gpt-4o for better creativity
+        model,
         messages: [
           { role: "system", content: "You are a creative and helpful assistant for formatting WhatsApp messages in Hebrew." },
           { role: "user", content: prompt }
         ],
-        temperature: 0.8, // Increased temperature for more variety
+        temperature: 0.8,
       }),
     });
 
     if (!response.ok) {
+      // Try fallback to gpt-3.5-turbo if 4o fails (e.g. 404 model not found or 429 rate limit)
+      console.warn(`Failed with ${model}, trying gpt-3.5-turbo...`);
+      model = "gpt-3.5-turbo";
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: "You are a creative and helpful assistant for formatting WhatsApp messages in Hebrew." },
+            { role: "user", content: prompt }
+          ],
+          temperature: 0.8,
+        }),
+      });
+    }
+
+    if (!response.ok) {
       const errorText = await response.text();
       console.error("OpenAI API error:", errorText);
-      return NextResponse.json({ error: "Failed to format text with AI" }, { status: 500 });
+      // Return the actual error to the client for debugging
+      return NextResponse.json({ error: `OpenAI Error: ${errorText}` }, { status: 500 });
     }
 
     const data = await response.json();
