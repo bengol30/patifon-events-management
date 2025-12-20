@@ -1075,12 +1075,9 @@ export default function SettingsPage() {
 
         setSendingGroupsMsg(true);
         try {
-            // Always use Green API for API calls, baseUrl is only for links in messages
+            // Text messages still use direct API call (no CORS issue for simple POST)
             const baseApi = "https://api.green-api.com";
             const messageEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
-            const fileUploadEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByUpload/${whatsappConfig.apiTokenInstance.trim()}`;
-            const fileUrlEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByUrl/${whatsappConfig.apiTokenInstance.trim()}`;
-            const fileBase64Endpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByBase64/${whatsappConfig.apiTokenInstance.trim()}`;
             const errors: string[] = [];
             let mediaBase64 = "";
             const mediaFileName = mediaFile?.name || "media";
@@ -1098,14 +1095,17 @@ export default function SettingsPage() {
             for (const g of selected) {
                 await ensureGlobalRateLimit();
                 if (groupSendMode === "event" && mediaUrl) {
-                    const res = await fetch(fileUrlEndpoint, {
+                    const res = await fetch("/api/whatsapp/send-file", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
+                            method: "url",
                             chatId: g.chatId,
                             urlFile: mediaUrl,
                             fileName: fileNameFromUrl(mediaUrl),
                             caption: textToSend,
+                            idInstance: whatsappConfig.idInstance.trim(),
+                            apiTokenInstance: whatsappConfig.apiTokenInstance.trim(),
                         }),
                     });
                     const body = await res.text();
@@ -1116,30 +1116,23 @@ export default function SettingsPage() {
                 }
 
                 if (mediaFile) {
-                    // Prefer base64 endpoint to avoid storage or fetch failures
-                    const res = await fetch(fileBase64Endpoint, {
+                    // Use base64 method via our API route
+                    const res = await fetch("/api/whatsapp/send-file", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
+                            method: "base64",
                             chatId: g.chatId,
                             file: mediaBase64,
                             fileName: mediaFileName,
                             caption: textToSend,
+                            idInstance: whatsappConfig.idInstance.trim(),
+                            apiTokenInstance: whatsappConfig.apiTokenInstance.trim(),
                         }),
                     });
                     const body = await res.text();
                     if (!res.ok) {
                         errors.push(`${g.name || g.chatId}: ${body || "שליחה נכשלה"}`);
-                        // Fallback to upload endpoint once if base64 failed
-                        const form = new FormData();
-                        form.append("chatId", g.chatId);
-                        form.append("file", mediaFile, mediaFile.name || "media");
-                        if (textToSend) form.append("caption", textToSend);
-                        const resUpload = await fetch(fileUploadEndpoint, { method: "POST", body: form });
-                        const uploadBody = await resUpload.text();
-                        if (!resUpload.ok) {
-                            errors.push(`${g.name || g.chatId} (upload): ${uploadBody || "שליחה נכשלה"}`);
-                        }
                     }
                 } else {
                     const res = await fetch(messageEndpoint, {
