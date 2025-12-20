@@ -746,6 +746,8 @@ export default function EventDetailsPage() {
             }
             const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
             const origin = getPublicBaseUrl(cfg.baseUrl);
+            const isVolunteerTask = task.isVolunteerTask === true || task.volunteerHours != null;
+            const volunteerAreaLink = origin ? `${origin}/volunteers/events` : "";
             const taskLink = origin ? `${origin}/tasks/${task.id}?eventId=${id}` : "";
             const eventLink = origin ? `${origin}/events/${id}` : "";
             const senderName = user?.displayName || user?.email || "משתמש";
@@ -764,8 +766,12 @@ export default function EventDetailsPage() {
                     due ? `דדליין: ${due}` : "",
                     task.priority ? `עדיפות: ${task.priority}` : "",
                     task.description ? `תיאור: ${task.description}` : "",
-                    taskLink ? `דף המשימה: ${taskLink}` : "",
-                    eventLink ? `דף האירוע: ${eventLink}` : "",
+                    isVolunteerTask
+                        ? (volunteerAreaLink ? `האזור האישי למשימות שלך: ${volunteerAreaLink}` : "")
+                        : [
+                            taskLink ? `דף המשימה: ${taskLink}` : "",
+                            eventLink ? `דף האירוע: ${eventLink}` : ""
+                          ].filter(Boolean).join("\n"),
                 ].filter(Boolean);
                 const message = lines.join("\n");
                 const res = await fetch(endpoint, {
@@ -2864,12 +2870,17 @@ export default function EventDetailsPage() {
     const handleAssigneeWhatsapp = async (task: Task, assignee?: Assignee) => {
         const name = assignee?.name || assignee?.email || "מתנדב/ת";
         const origin = typeof window !== "undefined" ? window.location.origin : "";
-        const link = origin ? `${origin}/tasks/${task.id}?eventId=${task.eventId || id}` : "";
+        const isVolunteerTask = task.isVolunteerTask === true || task.volunteerHours != null;
+        const link = isVolunteerTask
+            ? (origin ? `${origin}/volunteers/events` : "")
+            : (origin ? `${origin}/tasks/${task.id}?eventId=${task.eventId || id}` : "");
         const defaultMessage = [
             `היי ${name},`,
             `יש לך משימה: "${task.title}".`,
             event?.title ? `אירוע/פרויקט: ${event.title}` : "",
-            link ? `קישור למשימה: ${link}` : ""
+            link
+                ? (isVolunteerTask ? `האזור האישי למשימות שלך: ${link}` : `קישור למשימה: ${link}`)
+                : ""
         ].filter(Boolean).join("\n");
 
         setAssigneeWhatsappModal({

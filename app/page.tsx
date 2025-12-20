@@ -189,7 +189,9 @@ export default function Dashboard() {
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
-  const [projectIndex, setProjectIndex] = useState<Record<string, Project>>({});
+  const [allEventsRaw, setAllEventsRaw] = useState<Event[]>([]);
+  const [allProjectsRaw, setAllProjectsRaw] = useState<Project[]>([]);
+  const [skipTargetedTaskQuery, setSkipTargetedTaskQuery] = useState(false);
 
   // My Tasks State
   const [myTasks, setMyTasks] = useState<Task[]>([]);
@@ -220,6 +222,8 @@ export default function Dashboard() {
   const [uploadingRegisterGallery, setUploadingRegisterGallery] = useState(false);
   const [deletingRegisterGalleryId, setDeletingRegisterGalleryId] = useState<string | null>(null);
   const registerGalleryInputRef = useRef<HTMLInputElement | null>(null);
+  const volunteersLoadedRef = useRef(false);
+  const registrantsLoadedRef = useRef(false);
   const [volunteerSearch, setVolunteerSearch] = useState("");
   const [editingVolunteer, setEditingVolunteer] = useState<VolunteerRecord | null>(null);
   const [editVolunteerName, setEditVolunteerName] = useState("");
@@ -270,6 +274,14 @@ export default function Dashboard() {
     error?: string | null;
   } | null>(null);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("skipTaskTargetQuery");
+    if (stored === "true") {
+      setSkipTargetedTaskQuery(true);
+    }
+  }, []);
+
   const filteredVolunteers = useMemo(() => {
     const query = volunteerSearch.trim().toLowerCase();
     if (!query) return volunteersList;
@@ -308,6 +320,14 @@ export default function Dashboard() {
   const [chatTask, setChatTask] = useState<Task | null>(null);
   const isProjectManager = (user?.email || "").toLowerCase() === "bengo0469@gmail.com";
   const isAdmin = isProjectManager;
+
+  // Reset cached lists when user changes
+  useEffect(() => {
+    volunteersLoadedRef.current = false;
+    registrantsLoadedRef.current = false;
+    setVolunteersList([]);
+    setRegistrantsList([]);
+  }, [user?.uid]);
 
   // Non-admins must not see registrants panel
   useEffect(() => {
@@ -717,77 +737,9 @@ export default function Dashboard() {
 
   // Refresh notifications (messages/join requests) when panel opens
   useEffect(() => {
-    const fetchNotificationTasks = async () => {
-      if (!db || !user || activePanel !== "notifications") return;
-      try {
-        setLoadingNotifications(true);
-        const tasksSnapshot = await getDocs(collectionGroup(db, "tasks"));
-        const notif: Task[] = [];
-        const userName = user.displayName || "";
-        const userEmail = user.email || "";
-        const currentUid = user.uid;
-        const eventLookup = new Map(events.map(e => [e.id, e]));
-        const projectLookup = new Map(Object.entries(projectIndex || {}));
-
-        tasksSnapshot.forEach(docSnap => {
-          const taskData = docSnap.data();
-          const isProjectTask = isProjectTaskRef(docSnap.ref);
-          const parentCollectionId = docSnap.ref.parent.parent?.parent?.id;
-          const eventId = docSnap.ref.parent.parent?.id || "";
-          let event = isProjectTask ? projectLookup.get(eventId) : eventLookup.get(eventId);
-          if (!event && isProjectTask) {
-            event = { id: eventId, title: taskData.eventTitle || "פרויקט" } as any;
-          }
-          // Skip tasks whose parent event no longer exists or marked deleted
-          if (!isProjectTask && (!event || isEventDeletedFlag(event))) {
-            return;
-          }
-          const isVolunteerTask = taskData.isVolunteerTask === true || taskData.volunteerHours != null;
-          const teamPaused = !isProjectTask && (event as any)?.teamTasksPaused;
-          if (teamPaused && !isVolunteerTask) return;
-
-          const match = matchAssignee({
-            taskData,
-            userId: currentUid,
-            userName,
-            userEmail,
-          });
-
-          if (match.isAssigned || match.isMentioned) {
-            notif.push({
-              id: docSnap.id,
-              title: taskData.title,
-              dueDate: taskData.dueDate,
-              priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
-              assignee: taskData.assignee,
-              assigneeId: match.assigneeId,
-              assignees: match.assigneesArr,
-              status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
-              eventId: eventId,
-              eventTitle: isProjectTask
-                ? (event as any)?.name || (event as any)?.title || taskData.eventTitle || "פרויקט"
-                : (event as any)?.title || taskData.eventTitle || "אירוע לא ידוע",
-              scope: isProjectTask ? "project" : "event",
-              currentStatus: taskData.currentStatus || "",
-              nextStep: taskData.nextStep || "",
-              lastMessageTime: taskData.lastMessageTime || null,
-              lastMessageBy: taskData.lastMessageBy || "",
-              readBy: taskData.readBy || {},
-              lastMessageMentions: (taskData.lastMessageMentions as any) || [],
-              requiredCompletions: taskData.requiredCompletions != null ? Number(taskData.requiredCompletions) : null,
-              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null
-            } as Task);
-          }
-        });
-        setNotificationTasks(notif);
-      } catch (err) {
-        console.error("Error loading notification tasks:", err);
-      } finally {
-        setLoadingNotifications(false);
-      }
-    };
-    fetchNotificationTasks();
-  }, [activePanel, user, events, db]);
+    if (!db || !user || activePanel !== "notifications") return;
+    setLoadingNotifications(false);
+  }, [activePanel, user, db, notificationTasks.length]);
 
   // Fetch unread edit requests for admin badge
   useEffect(() => {
@@ -839,6 +791,17 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchData = async () => {
       if (!db || !user) {
+        setEvents([]);
+        setProjects([]);
+        setAllEventsRaw([]);
+        setAllProjectsRaw([]);
+        setMyTasks([]);
+        setNotificationTasks([]);
+        setVolunteersList([]);
+        setRegistrantsList([]);
+        setRegisterEventsAll([]);
+        setUsersList([]);
+        setUserEventsMap({});
         setLoadingEvents(false);
         setLoadingProjects(false);
         setLoadingTasks(false);
@@ -853,17 +816,23 @@ export default function Dashboard() {
         setLoadingStats(true);
         setLoadingProjects(true);
         setLoadingUsers(true);
-        setLoadingVolunteers(true);
         setLoadingNotifications(true);
+        setLoadingTasks(true);
         setUsersError(null);
-        // Fetch all events (for per-user stats)
-        const allEventsSnapshot = await getDocs(query(collection(db, "events"), orderBy("createdAt", "desc")));
-        const allEventsRaw = allEventsSnapshot.docs.map((doc) => ({
+
+        const [allEventsSnapshot, allProjectsSnapshot] = await Promise.all([
+          getDocs(query(collection(db, "events"), orderBy("createdAt", "desc"))),
+          getDocs(collection(db, "projects")),
+        ]);
+
+        const allEventsRawDocs = allEventsSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         })) as any[];
+
+        const recurrenceUpdates: Promise<void>[] = [];
         const allEventsData: Event[] = [];
-        for (const ev of allEventsRaw) {
+        for (const ev of allEventsRawDocs) {
           const recurrence = normalizeRecurrence(ev.recurrence);
           if (recurrence !== "NONE") {
             const startDate = toDateSafe(ev.startTime) || new Date();
@@ -873,14 +842,12 @@ export default function Dashboard() {
             const durationMs = endDate && startDate ? endDate.getTime() - startDate.getTime() : null;
             const newEnd = durationMs && durationMs > 0 ? new Date(next.getTime() + durationMs) : endDate;
             if (next.getTime() !== startDate.getTime()) {
-              try {
-                await updateDoc(doc(db, "events", ev.id), {
+              recurrenceUpdates.push(
+                updateDoc(doc(db, "events", ev.id), {
                   startTime: next,
                   ...(newEnd ? { endTime: newEnd } : {}),
-                });
-              } catch (err) {
-                console.warn("Failed updating recurring event date", ev.id, err);
-              }
+                }).catch((err) => console.warn("Failed updating recurring event date", ev.id, err))
+              );
             }
             allEventsData.push({
               ...ev,
@@ -892,13 +859,18 @@ export default function Dashboard() {
             allEventsData.push(ev as Event);
           }
         }
-        // Fetch projects (for volunteer lookup from projects)
-        const allProjectsSnapshot = await getDocs(collection(db, "projects"));
+        if (recurrenceUpdates.length) {
+          Promise.allSettled(recurrenceUpdates).catch(() => {});
+        }
+
         const allProjectsData = allProjectsSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         })) as any[];
-        setProjectIndex(Object.fromEntries(allProjectsData.map((p: any) => [p.id, p])));
+
+        setAllEventsRaw(allEventsData);
+        setAllProjectsRaw(allProjectsData);
+
         const eventsByCreator: Record<string, Event[]> = {};
         const addToMap = (key: string | undefined | null, ev: Event) => {
           const normKey = normalizeKey(key);
@@ -918,7 +890,6 @@ export default function Dashboard() {
         });
         setUserEventsMap(eventsByCreator);
 
-        // Fetch events relevant to current user
         const eventsForUser = allEventsData.filter(e =>
           (Array.isArray((e as any).members) && (e as any).members.includes(user.uid)) ||
           (e.createdByEmail && user.email && normalizeKey(e.createdByEmail) === normalizeKey(user.email)) ||
@@ -932,7 +903,6 @@ export default function Dashboard() {
         const displayEventIds = new Set(sortedByDate.map(e => e.id));
         setEvents(sortedByDate);
 
-        // Fetch projects relevant to current user
         const projectsForUser = allProjectsData.filter((p) => {
           const ownerMatch =
             p.ownerId === user.uid ||
@@ -959,6 +929,7 @@ export default function Dashboard() {
           }));
         setProjects(activeProjects);
         setLoadingProjects(false);
+
         const myCreatedEvents = allEventsData.filter(e =>
           e.createdBy === user.uid ||
           (e.createdByEmail && user.email && normalizeKey(e.createdByEmail) === normalizeKey(user.email))
@@ -969,46 +940,109 @@ export default function Dashboard() {
           toPartnerArray((e as any).partners).forEach(p => uniquePartners.add(p));
         });
 
-        // Fetch My Tasks (using Collection Group Query)
-        // Note: This requires a composite index in Firestore if we filter by multiple fields
-        // For now, we'll fetch all tasks and filter in client to match assignee name flexibly
-        const tasksQuery = query(collectionGroup(db, "tasks"));
-        const tasksSnapshot = await getDocs(tasksQuery);
+        const userName = user.displayName || "";
+        const userEmail = user.email || "";
+        const userEmailLower = userEmail.toLowerCase();
+
+        const eventTaskContainers = sortedByDate.map(ev => ({ id: ev.id, scope: "event" as const }));
+        const projectTaskContainers = activeProjects.map(p => ({ id: p.id, scope: "project" as const }));
+        const taskDocsMap = new Map<string, any>();
+
+        const containerTaskSnaps = await Promise.all(
+          [...eventTaskContainers, ...projectTaskContainers].map(async (c) => {
+            try {
+              return await getDocs(collection(db, c.scope === "project" ? "projects" : "events", c.id, "tasks"));
+            } catch (err) {
+              console.error("Error loading tasks for", c.scope, c.id, err);
+              return null;
+            }
+          })
+        );
+
+        containerTaskSnaps.forEach((snap) => {
+          snap?.forEach((d) => taskDocsMap.set(d.ref.path, d));
+        });
+
+        let shouldFallbackAssignedScan = skipTargetedTaskQuery;
+        if (!skipTargetedTaskQuery) {
+          const targetedQueries = [
+            query(collectionGroup(db, "tasks"), where("assigneeId", "==", user.uid)),
+          ];
+          if (userEmailLower) {
+            targetedQueries.push(query(collectionGroup(db, "tasks"), where("assigneeEmail", "==", userEmailLower)));
+          }
+          const targetedSnaps = await Promise.all(
+            targetedQueries.map(async (q) => {
+              try {
+                return await getDocs(q);
+              } catch (err: any) {
+                const msg = err?.message || "";
+                const isIndexMissing = msg.includes("requires a COLLECTION_GROUP") || msg.includes("index");
+                if (isIndexMissing) {
+                  console.warn("Targeted task query skipped (missing Firestore index). Create the suggested index or continue without targeted fetches.", err);
+                  setSkipTargetedTaskQuery(true);
+                  try {
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("skipTaskTargetQuery", "true");
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                  shouldFallbackAssignedScan = true;
+                } else {
+                  console.warn("Targeted task query failed", err);
+                }
+                return null;
+              }
+            })
+          );
+          targetedSnaps.forEach((snap) => {
+            snap?.forEach((d) => taskDocsMap.set(d.ref.path, d));
+          });
+        }
+
+        if (shouldFallbackAssignedScan) {
+          try {
+            const fallbackSnap = await getDocs(query(collectionGroup(db, "tasks"), limit(500)));
+            fallbackSnap.forEach((d) => {
+              const data = d.data();
+              const match = matchAssignee({
+                taskData: data,
+                userId: user.uid,
+                userName,
+                userEmail,
+              });
+              if (match.isAssigned || match.isMentioned) {
+                taskDocsMap.set(d.ref.path, d);
+              }
+            });
+          } catch (err) {
+            console.warn("Fallback assigned task scan failed", err);
+          }
+        }
 
         const userTasks: Task[] = [];
         const notifTasks: Task[] = [];
-        const userName = user.displayName || "";
-        const userEmail = user.email || "";
         let tasksInMyEvents = 0;
         let unassignedCount = 0;
 
         const eventLookup = new Map(allEventsData.map(e => [e.id, e]));
         const projectLookup = new Map(allProjectsData.map(p => [p.id, p]));
 
-        const isTaskAssignedToCurrentUser = (task: any) => {
-          const match = matchAssignee({
-            taskData: task,
-            userId: user.uid,
-            userName,
-            userEmail,
-          });
-          return match.isAssigned;
-        };
-
-        tasksSnapshot.forEach(doc => {
-          const taskData = doc.data();
-          const isProjectTask = isProjectTaskRef(doc.ref);
+        taskDocsMap.forEach((docSnap) => {
+          const taskData = docSnap.data();
+          const isProjectTask = isProjectTaskRef(docSnap.ref);
           const scope: "event" | "project" = isProjectTask ? "project" : "event";
-          const eventId = doc.ref.parent.parent?.id || "";
+          const eventId = docSnap.ref.parent.parent?.id || "";
           let container = isProjectTask ? projectLookup.get(eventId) : eventLookup.get(eventId);
           if (!container && isProjectTask) {
             container = { id: eventId, name: taskData.eventTitle || taskData.title || "פרויקט" } as any;
           }
-          if (!container) return;
-          if (!isProjectTask && isEventDeletedFlag(container)) return;
           const isVolunteerTask = taskData.isVolunteerTask === true || taskData.volunteerHours != null;
           const teamPaused = !isProjectTask && (container as any)?.teamTasksPaused;
+          if (!isProjectTask && container && isEventDeletedFlag(container)) return;
           if (teamPaused && !isVolunteerTask) return;
+
           if (scope === "event" && myEventIds.has(eventId)) {
             tasksInMyEvents += 1;
           }
@@ -1026,7 +1060,7 @@ export default function Dashboard() {
 
           if (match.isAssigned || match.isMentioned) {
             notifTasks.push({
-              id: doc.id,
+              id: docSnap.id,
               title: taskData.title,
               dueDate: taskData.dueDate,
               priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
@@ -1057,15 +1091,10 @@ export default function Dashboard() {
             unassignedCount += 1;
           }
 
-          const isAssignedToUser = taskData.status !== "DONE" && isTaskAssignedToCurrentUser({
-            ...taskData,
-            assignees: match.assigneesArr,
-            assigneeEmail: (taskData as any).assigneeEmail || (match.assigneesArr[0]?.email) || taskData.assigneeEmail,
-          });
-
+          const isAssignedToUser = taskData.status !== "DONE" && match.isAssigned;
           if (isAssignedToUser) {
             userTasks.push({
-              id: doc.id,
+              id: docSnap.id,
               title: taskData.title,
               dueDate: taskData.dueDate,
               priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
@@ -1092,6 +1121,7 @@ export default function Dashboard() {
         setMyTasks(userTasks);
         setNotificationTasks(notifTasks);
         setUnassignedTasksCount(unassignedCount);
+
         const attendeesByEvent = await Promise.all(
           myCreatedEvents.map(async (ev) => {
             try {
@@ -1111,7 +1141,6 @@ export default function Dashboard() {
           tasks: tasksInMyEvents,
         });
 
-        // Fetch Users in system + add placeholders from events/team (for non-onboarded users)
         const usersSnap = await getDocs(collection(db, "users"));
         const usersFromDb = usersSnap.docs.map(u => ({ id: u.id, ...u.data() } as any));
         const existingEmails = new Set(
@@ -1137,336 +1166,6 @@ export default function Dashboard() {
           (teamArr || []).forEach(m => addPlaceholderUser(m.email, m.name));
         });
         setUsersList([...usersFromDb, ...placeholders]);
-
-        // Fetch volunteers from all events
-        try {
-          const volunteersData: { id: string; name?: string; firstName?: string; lastName?: string; email?: string; phone?: string; phoneNormalized?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project"; program?: string; year?: string; idNumber?: string; totalHours?: number }[] = [];
-          const eventTitleMap = new Map(allEventsData.map(e => [e.id, e.title || "אירוע ללא שם"]));
-          const projectTitleMap = new Map(allProjectsData.map(p => [p.id, (p as any).name || (p as any).title || "פרויקט ללא שם"]));
-          const seenVolunteers = new Set<string>();
-          const emailIndex = new Map<string, number>();
-          const phoneIndex = new Map<string, number>();
-          const normalizeLower = (val?: string) => (val || "").toString().trim().toLowerCase();
-          const normalizePhone = (val?: string) => {
-            const digits = (val || "").toString().replace(/\D/g, "");
-            if (!digits) return "";
-            if (digits.startsWith("972")) return digits;
-            if (digits.startsWith("0")) return `972${digits.slice(1)}`;
-            return digits;
-          };
-          const mergeVolunteerFields = (target: any, src: any) => ({
-            ...target,
-            name: (target.name && target.name.trim() !== "מתנדב ללא שם") ? target.name : (src.name || target.name),
-            firstName: target.firstName || src.firstName,
-            lastName: target.lastName || src.lastName,
-            email: target.email || src.email,
-            phone: target.phone || src.phone,
-            phoneNormalized: target.phoneNormalized || src.phoneNormalized || normalizePhone(src.phone),
-            program: target.program || src.program,
-            year: target.year || src.year,
-            idNumber: target.idNumber || src.idNumber,
-            createdAt: target.createdAt || src.createdAt,
-            eventId: target.eventId || src.eventId,
-            eventTitle: target.eventTitle || src.eventTitle,
-            scope: target.scope || src.scope,
-          });
-          const addVolunteer = (volDoc: any, eventId: string, volData: any, eventTitle?: string, scope: "event" | "project" = "event") => {
-            const key = `${scope}-${eventId}-${volDoc.id}`;
-            if (seenVolunteers.has(key)) return;
-            seenVolunteers.add(key);
-
-            // Extract name - try multiple formats
-            let volunteerName = "";
-            if (volData.name && typeof volData.name === "string" && volData.name.trim()) {
-              volunteerName = volData.name.trim();
-            } else if (volData.firstName || volData.lastName) {
-              volunteerName = `${volData.firstName || ""} ${volData.lastName || ""}`.trim();
-            } else if (volData.email) {
-              // Use email as fallback
-              volunteerName = volData.email.split("@")[0];
-            }
-
-            if (!volunteerName) {
-              console.warn("Volunteer without name:", { volId: volDoc.id, volData, eventId });
-              volunteerName = "מתנדב ללא שם";
-            }
-
-            const emailKey = normalizeLower(volData.email);
-            const phoneKey = normalizePhone(volData.phone);
-            let existingIdx = -1;
-            if (emailKey && emailIndex.has(emailKey)) existingIdx = emailIndex.get(emailKey)!;
-            else if (phoneKey && phoneIndex.has(phoneKey)) existingIdx = phoneIndex.get(phoneKey)!;
-
-            const baseData = {
-              id: volDoc.id,
-              name: volunteerName,
-              firstName: volData.firstName || "",
-              lastName: volData.lastName || "",
-              email: volData.email || "",
-              phone: volData.phone || "",
-              phoneNormalized: normalizePhone(volData.phone),
-              eventId: eventId,
-              eventTitle: eventTitleMap.get(eventId) || projectTitleMap.get(eventId) || eventTitle || (scope === "project" ? "פרויקט ללא שם" : "אירוע ללא שם"),
-              createdAt: volData.createdAt,
-              scope,
-              program: volData.program || "",
-              year: volData.year || "",
-              idNumber: volData.idNumber || "",
-            };
-
-            if (existingIdx >= 0) {
-              volunteersData[existingIdx] = mergeVolunteerFields(volunteersData[existingIdx], baseData);
-              if (emailKey) emailIndex.set(emailKey, existingIdx);
-              if (phoneKey) phoneIndex.set(phoneKey, existingIdx);
-            } else {
-              volunteersData.push(baseData);
-              const idx = volunteersData.length - 1;
-              if (emailKey) emailIndex.set(emailKey, idx);
-              if (phoneKey) phoneIndex.set(phoneKey, idx);
-            }
-          };
-
-          try {
-            const volunteersQuery = query(collectionGroup(db, "volunteers"));
-            const volunteersSnapshot = await getDocs(volunteersQuery);
-
-            volunteersSnapshot.forEach((volDoc) => {
-              const volData = volDoc.data();
-              const eventId = volDoc.ref.parent.parent?.id || "";
-
-              // Check if parent is an event or project
-              const parentPath = volDoc.ref.parent.parent?.path || "";
-              const isEventVolunteer = parentPath.startsWith("events/") || parentPath.includes("/events/");
-              const isProjectVolunteer = parentPath.startsWith("projects/") || parentPath.includes("/projects/");
-              if (isEventVolunteer) {
-                addVolunteer(volDoc, eventId, volData, undefined, "event");
-              } else if (isProjectVolunteer) {
-                addVolunteer(volDoc, eventId, volData, undefined, "project");
-              }
-            });
-
-            console.log(`Loaded ${volunteersData.length} volunteers from events via collectionGroup`, volunteersData.length > 0 ? volunteersData.slice(0, 3) : "No volunteers found");
-          } catch (eventsVolunteersError) {
-            console.error("Error loading volunteers from events:", eventsVolunteersError);
-          }
-
-          // General volunteers (global sign-up)
-          try {
-            const generalSnap = await getDocs(collection(db, "general_volunteers"));
-            generalSnap.forEach((volDoc) => {
-              const volData = volDoc.data();
-              // Build name
-              let volunteerName = "";
-              if (volData.name && typeof volData.name === "string" && volData.name.trim()) {
-                volunteerName = volData.name.trim();
-              } else if (volData.firstName || volData.lastName) {
-                volunteerName = `${volData.firstName || ""} ${volData.lastName || ""}`.trim();
-              } else if (volData.email) {
-                volunteerName = volData.email.split("@")[0];
-              } else {
-                volunteerName = "מתנדב ללא שם";
-              }
-              const fakeDoc = { id: volDoc.id };
-              addVolunteer(fakeDoc, "general", { ...volData, name: volunteerName }, "הרשמה כללית", "event");
-            });
-          } catch (err) {
-            console.error("Error loading general volunteers", err);
-          }
-
-          // Always also fetch per-event to include legacy/missing docs
-          console.log("Loading volunteers from events individually (merge + dedup)...");
-          for (const event of allEventsData) {
-            try {
-              const eventVolunteersSnap = await getDocs(collection(db, "events", event.id, "volunteers"));
-              eventVolunteersSnap.forEach((volDoc) => {
-                const volData = volDoc.data();
-                addVolunteer(volDoc, event.id, volData, event.title, "event");
-              });
-            } catch (eventError) {
-              console.error(`Error loading volunteers for event ${event.id}:`, eventError);
-            }
-          }
-          console.log("Loading volunteers from projects individually (merge + dedup)...");
-          for (const project of allProjectsData) {
-            try {
-              const projectVolunteersSnap = await getDocs(collection(db, "projects", project.id, "volunteers"));
-              projectVolunteersSnap.forEach((volDoc) => {
-                const volData = volDoc.data();
-                const projTitle = (project as any).name || (project as any).title;
-                addVolunteer(volDoc, project.id, volData, projTitle, "project");
-              });
-            } catch (projectError) {
-              console.error(`Error loading volunteers for project ${project.id}:`, projectError);
-            }
-          }
-          console.log(`Loaded ${volunteersData.length} volunteers total after merging per-event/project fetches`);
-
-          // Aggregate volunteered hours from completions (for sorting by hours desc)
-          try {
-            const hoursByKey = new Map<string, number>();
-            const completionsSnap = await getDocs(collection(db, "volunteer_completions"));
-            completionsSnap.forEach((docSnap) => {
-              const data = docSnap.data() as any;
-              const emailKey = normalizeLower(data.email);
-              const phoneKey = normalizePhone(data.phone || "");
-              const h = Number(data.volunteerHours);
-              if (!Number.isFinite(h) || h <= 0) return;
-              const key = emailKey || phoneKey;
-              if (!key) return;
-              hoursByKey.set(key, (hoursByKey.get(key) || 0) + h);
-            });
-            volunteersData.forEach((vol, idx) => {
-              const key = normalizeLower(vol.email) || vol.phoneNormalized || normalizePhone(vol.phone);
-              const totalHours = key ? hoursByKey.get(key) || 0 : 0;
-              volunteersData[idx] = { ...vol, totalHours };
-            });
-          } catch (err) {
-            console.warn("Failed aggregating volunteer hours", err);
-          }
-
-          // Sort: hours desc, then newest createdAt
-          const ts = (val: any) => {
-            if (!val) return 0;
-            if (typeof val.seconds === "number") return val.seconds;
-            if (val instanceof Date) return Math.floor(val.getTime() / 1000);
-            const parsed = Date.parse(val);
-            return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
-          };
-          volunteersData.sort((a, b) => {
-            const hA = a.totalHours || 0;
-            const hB = b.totalHours || 0;
-            if (hB !== hA) return hB - hA;
-            return ts(b.createdAt) - ts(a.createdAt);
-          });
-
-          setVolunteersList(volunteersData);
-          // Registrants (event guest registrations) - admin only
-          if (isAdmin) {
-            try {
-              const regsQuery = query(collectionGroup(db, "registrants"));
-              const regsSnap = await getDocs(regsQuery);
-              const regs: EventRegistrant[] = [];
-              regsSnap.forEach((rDoc) => {
-                const data = rDoc.data() as any;
-                const parentId = rDoc.ref.parent.parent?.id || "";
-                const regEventTitle = eventTitleMap.get(parentId) || (data.eventTitle as string) || "אירוע";
-                regs.push({
-                  id: rDoc.id,
-                  name: data.name || data.fullName || data.firstName || "",
-                  email: data.email || "",
-                  phone: data.phone || "",
-                  eventId: parentId,
-                  eventTitle: regEventTitle,
-                  createdAt: data.createdAt,
-                });
-              });
-              regs.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
-              setRegistrantsList(regs);
-            } catch (err) {
-              console.error("Error loading registrants", err);
-              setRegistrantsList([]);
-            }
-            setLoadingRegistrants(false);
-          }
-
-          // Load all events for register modal editing/selection
-          try {
-            const allEventsSnap = await getDocs(collection(db, "events"));
-            const allEv: any[] = [];
-            const byId = new Map<string, any>();
-            allEventsSnap.forEach(d => {
-              const data = d.data() as any;
-              const item = {
-                id: d.id,
-                title: data.title || "אירוע ללא שם",
-                description: data.description || data.goal || "",
-                location: data.location || "",
-                startTime: data.startTime,
-                officialFlyerUrl: data.officialFlyerUrl || data.previewImage || "",
-                createdBy: data.createdBy,
-                members: data.members || [],
-                team: data.team || [],
-              };
-              allEv.push(item);
-              byId.set(d.id, item);
-            });
-            // default selection if not saved
-            const cfgRef = doc(db, "settings", "public_register_events");
-            const cfgSnap = await getDoc(cfgRef);
-            const allowed: string[] = cfgSnap.exists() ? (cfgSnap.data() as any).allowedEventIds || [] : [];
-            const allowedSet = new Set<string>(allowed);
-            if (allowedSet.size === 0) {
-              allEv.forEach(ev => {
-                const hasAdmin =
-                  (ev.createdBy === user.uid) ||
-                  (Array.isArray(ev.members) && ev.members.includes(user.uid)) ||
-                  ((ev.team || []).some((m: any) => (m.userId && m.userId === user.uid) || (m.email && m.email.toLowerCase() === (user.email || "").toLowerCase())));
-                if (hasAdmin) allowedSet.add(ev.id);
-              });
-            }
-            // Ensure allowed events are present even אם לא נטענו ברשימה
-            const missingAllowed = Array.from(allowedSet).filter(id => !byId.has(id));
-            for (const mid of missingAllowed) {
-              try {
-                const docSnap = await getDoc(doc(db, "events", mid));
-                if (docSnap.exists()) {
-                  const data = docSnap.data() as any;
-                  const item = {
-                    id: docSnap.id,
-                    title: data.title || "אירוע ללא שם",
-                    description: data.description || data.goal || "",
-                    location: data.location || "",
-                    startTime: data.startTime,
-                    officialFlyerUrl: data.officialFlyerUrl || data.previewImage || "",
-                    createdBy: data.createdBy,
-                    members: data.members || [],
-                    team: data.team || [],
-                  };
-                  allEv.push(item);
-                  byId.set(item.id, item);
-                }
-              } catch (err) {
-                console.warn("Failed loading allowed event", mid, err);
-              }
-            }
-            setRegisterEventsAll(allEv);
-            setRegisterEventsSelection(allowedSet);
-          } catch (err) {
-            console.error("Error loading events for register selection", err);
-          }
-
-        } catch (volunteersError) {
-          console.error("Error loading volunteers:", volunteersError);
-          setVolunteersList([]);
-          setRegistrantsList([]);
-          setLoadingRegistrants(false);
-        }
-
-        // Fetch join requests of current user to show pending/approved
-        const myJoinRequestsSnap = await getDocs(query(
-          collection(db, "join_requests"),
-          where("requesterId", "==", user.uid)
-        ));
-        const reqMap: Record<string, "PENDING" | "APPROVED" | "REJECTED"> = {};
-        myJoinRequestsSnap.forEach(r => {
-          const data = r.data() as any;
-          if (data.eventId && data.status) {
-            reqMap[data.eventId] = data.status;
-          }
-        });
-        setJoinRequests(reqMap);
-
-        // Join requests directed to me as בעל אירוע
-        const incomingByOwnerId = await getDocs(query(collection(db!, "join_requests"), where("ownerId", "==", user.uid)));
-        let incomingByEmail: any = null;
-        if (user.email) {
-          incomingByEmail = await getDocs(query(collection(db!, "join_requests"), where("ownerEmail", "==", user.email)));
-        }
-        const incomingCombined: Record<string, JoinRequest> = {};
-        incomingByOwnerId.forEach(d => { incomingCombined[d.id] = { id: d.id, ...d.data() } as JoinRequest; });
-        (incomingByEmail?.docs || []).forEach((d: any) => { incomingCombined[d.id] = { id: d.id, ...d.data() } as JoinRequest; });
-        setIncomingJoinRequests(Object.values(incomingCombined).filter(r => r.status === "PENDING"));
-
       } catch (error) {
         console.error("Error fetching data:", error);
         setUsersError("שגיאה בטעינת משתמשים");
@@ -1484,7 +1183,283 @@ export default function Dashboard() {
     if (user) {
       fetchData();
     }
-  }, [user]);
+  }, [user, db]);
+
+  // Load volunteers lazily when the volunteers panel opens
+  useEffect(() => {
+    const loadVolunteers = async () => {
+      if (!db || !user || activePanel !== "volunteers") return;
+      if (volunteersLoadedRef.current) return;
+      try {
+        volunteersLoadedRef.current = true;
+        setLoadingVolunteers(true);
+        const eventTitleMap = new Map((allEventsRaw.length ? allEventsRaw : events).map(e => [e.id, e.title || "אירוע ללא שם"]));
+        const projectTitleMap = new Map((allProjectsRaw.length ? allProjectsRaw : projects).map(p => [p.id, (p as any).name || (p as any).title || "פרויקט ללא שם"]));
+        const volunteersData: { id: string; name?: string; firstName?: string; lastName?: string; email?: string; phone?: string; phoneNormalized?: string; eventId: string; eventTitle?: string; createdAt?: any; scope?: "event" | "project"; program?: string; year?: string; idNumber?: string; totalHours?: number }[] = [];
+        const seenVolunteers = new Set<string>();
+        const emailIndex = new Map<string, number>();
+        const phoneIndex = new Map<string, number>();
+        const normalizeLower = (val?: string) => (val || "").toString().trim().toLowerCase();
+        const normalizePhone = (val?: string) => {
+          const digits = (val || "").toString().replace(/\D/g, "");
+          if (!digits) return "";
+          if (digits.startsWith("972")) return digits;
+          if (digits.startsWith("0")) return `972${digits.slice(1)}`;
+          return digits;
+        };
+        const mergeVolunteerFields = (target: any, src: any) => ({
+          ...target,
+          name: (target.name && target.name.trim() !== "מתנדב ללא שם") ? target.name : (src.name || target.name),
+          firstName: target.firstName || src.firstName,
+          lastName: target.lastName || src.lastName,
+          email: target.email || src.email,
+          phone: target.phone || src.phone,
+          phoneNormalized: target.phoneNormalized || src.phoneNormalized || normalizePhone(src.phone),
+          program: target.program || src.program,
+          year: target.year || src.year,
+          idNumber: target.idNumber || src.idNumber,
+          createdAt: target.createdAt || src.createdAt,
+          eventId: target.eventId || src.eventId,
+          eventTitle: target.eventTitle || src.eventTitle,
+          scope: target.scope || src.scope,
+        });
+        const addVolunteer = (volDoc: any, eventId: string, volData: any, eventTitle?: string, scope: "event" | "project" = "event") => {
+          const key = `${scope}-${eventId}-${volDoc.id}`;
+          if (seenVolunteers.has(key)) return;
+          seenVolunteers.add(key);
+
+          let volunteerName = "";
+          if (volData.name && typeof volData.name === "string" && volData.name.trim()) {
+            volunteerName = volData.name.trim();
+          } else if (volData.firstName || volData.lastName) {
+            volunteerName = `${volData.firstName || ""} ${volData.lastName || ""}`.trim();
+          } else if (volData.email) {
+            volunteerName = volData.email.split("@")[0];
+          }
+          if (!volunteerName) {
+            volunteerName = "מתנדב ללא שם";
+          }
+
+          const emailKey = normalizeLower(volData.email);
+          const phoneKey = normalizePhone(volData.phone);
+          let existingIdx = -1;
+          if (emailKey && emailIndex.has(emailKey)) existingIdx = emailIndex.get(emailKey)!;
+          else if (phoneKey && phoneIndex.has(phoneKey)) existingIdx = phoneIndex.get(phoneKey)!;
+
+          const baseData = {
+            id: volDoc.id,
+            name: volunteerName,
+            firstName: volData.firstName || "",
+            lastName: volData.lastName || "",
+            email: volData.email || "",
+            phone: volData.phone || "",
+            phoneNormalized: normalizePhone(volData.phone),
+            eventId: eventId,
+            eventTitle: eventTitleMap.get(eventId) || projectTitleMap.get(eventId) || eventTitle || (scope === "project" ? "פרויקט ללא שם" : "אירוע ללא שם"),
+            createdAt: volData.createdAt,
+            scope,
+            program: volData.program || "",
+            year: volData.year || "",
+            idNumber: volData.idNumber || "",
+          };
+
+          if (existingIdx >= 0) {
+            volunteersData[existingIdx] = mergeVolunteerFields(volunteersData[existingIdx], baseData);
+            if (emailKey) emailIndex.set(emailKey, existingIdx);
+            if (phoneKey) phoneIndex.set(phoneKey, existingIdx);
+          } else {
+            volunteersData.push(baseData);
+            const idx = volunteersData.length - 1;
+            if (emailKey) emailIndex.set(emailKey, idx);
+            if (phoneKey) phoneIndex.set(phoneKey, idx);
+          }
+        };
+
+        try {
+          const volunteersQuery = query(collectionGroup(db, "volunteers"));
+          const volunteersSnapshot = await getDocs(volunteersQuery);
+          volunteersSnapshot.forEach((volDoc) => {
+            const volData = volDoc.data();
+            const parentPath = volDoc.ref.parent.parent?.path || "";
+            const eventId = volDoc.ref.parent.parent?.id || "";
+            const isProjectVolunteer = parentPath.startsWith("projects/") || parentPath.includes("/projects/");
+            addVolunteer(volDoc, eventId, volData, undefined, isProjectVolunteer ? "project" : "event");
+          });
+        } catch (err) {
+          console.error("Error loading volunteers from events:", err);
+        }
+
+        try {
+          const generalSnap = await getDocs(collection(db, "general_volunteers"));
+          generalSnap.forEach((volDoc) => {
+            const volData = volDoc.data();
+            let volunteerName = "";
+            if (volData.name && typeof volData.name === "string" && volData.name.trim()) {
+              volunteerName = volData.name.trim();
+            } else if (volData.firstName || volData.lastName) {
+              volunteerName = `${volData.firstName || ""} ${volData.lastName || ""}`.trim();
+            } else if (volData.email) {
+              volunteerName = volData.email.split("@")[0];
+            } else {
+              volunteerName = "מתנדב ללא שם";
+            }
+            const fakeDoc = { id: volDoc.id };
+            addVolunteer(fakeDoc, "general", { ...volData, name: volunteerName }, "הרשמה כללית", "event");
+          });
+        } catch (err) {
+          console.error("Error loading general volunteers", err);
+        }
+
+        try {
+          const hoursByKey = new Map<string, number>();
+          const completionsSnap = await getDocs(collection(db, "volunteer_completions"));
+          completionsSnap.forEach((docSnap) => {
+            const data = docSnap.data() as any;
+            const emailKey = normalizeLower(data.email);
+            const phoneKey = normalizePhone(data.phone || "");
+            const h = Number(data.volunteerHours);
+            if (!Number.isFinite(h) || h <= 0) return;
+            const key = emailKey || phoneKey;
+            if (!key) return;
+            hoursByKey.set(key, (hoursByKey.get(key) || 0) + h);
+          });
+          volunteersData.forEach((vol, idx) => {
+            const key = normalizeLower(vol.email) || vol.phoneNormalized || normalizePhone(vol.phone);
+            const totalHours = key ? hoursByKey.get(key) || 0 : 0;
+            volunteersData[idx] = { ...vol, totalHours };
+          });
+        } catch (err) {
+          console.warn("Failed aggregating volunteer hours", err);
+        }
+
+        const ts = (val: any) => {
+          if (!val) return 0;
+          if (typeof val.seconds === "number") return val.seconds;
+          if (val instanceof Date) return Math.floor(val.getTime() / 1000);
+          const parsed = Date.parse(val);
+          return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+        };
+        volunteersData.sort((a, b) => {
+          const hA = a.totalHours || 0;
+          const hB = b.totalHours || 0;
+          if (hB !== hA) return hB - hA;
+          return ts(b.createdAt) - ts(a.createdAt);
+        });
+
+        setVolunteersList(volunteersData);
+      } catch (volunteersError) {
+        console.error("Error loading volunteers:", volunteersError);
+        volunteersLoadedRef.current = false;
+        setVolunteersList([]);
+      } finally {
+        setLoadingVolunteers(false);
+      }
+    };
+    loadVolunteers();
+  }, [activePanel, db, user, allEventsRaw, allProjectsRaw, events, projects]);
+
+  useEffect(() => {
+    const loadRegistrants = async () => {
+      if (!db || !user || !isAdmin || activePanel !== "registrants") return;
+      if (registrantsLoadedRef.current) return;
+      try {
+        registrantsLoadedRef.current = true;
+        setLoadingRegistrants(true);
+        const eventTitleMap = new Map((allEventsRaw.length ? allEventsRaw : events).map(e => [e.id, e.title || "אירוע"]));
+        const regsSnap = await getDocs(query(collectionGroup(db, "registrants")));
+        const regs: EventRegistrant[] = [];
+        const ts = (val: any) => {
+          if (!val) return 0;
+          if (typeof val.seconds === "number") return val.seconds;
+          if (val instanceof Date) return Math.floor(val.getTime() / 1000);
+          const parsed = Date.parse(val);
+          return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+        };
+        regsSnap.forEach((rDoc) => {
+          const data = rDoc.data() as any;
+          const parentId = rDoc.ref.parent.parent?.id || "";
+          const regEventTitle = eventTitleMap.get(parentId) || (data.eventTitle as string) || "אירוע";
+          regs.push({
+            id: rDoc.id,
+            name: data.name || data.fullName || data.firstName || "",
+            email: data.email || "",
+            phone: data.phone || "",
+            eventId: parentId,
+            eventTitle: regEventTitle,
+            createdAt: data.createdAt,
+          });
+        });
+        regs.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
+        setRegistrantsList(regs);
+      } catch (err) {
+        console.error("Error loading registrants", err);
+        registrantsLoadedRef.current = false;
+        setRegistrantsList([]);
+      } finally {
+        setLoadingRegistrants(false);
+      }
+    };
+    loadRegistrants();
+  }, [activePanel, db, user, isAdmin, allEventsRaw, events]);
+
+  useEffect(() => {
+    const loadRegisterEvents = async () => {
+      if (!db || !user || !isAdmin || !showRegisterEventsModal) return;
+      try {
+        const baseEvents = allEventsRaw.length ? allEventsRaw : null;
+        let allEv: any[] = [];
+        if (baseEvents && baseEvents.length > 0) {
+          allEv = baseEvents.map(ev => ({
+            id: ev.id,
+            title: (ev as any).title || "אירוע ללא שם",
+            description: (ev as any).description || (ev as any).goal || "",
+            location: (ev as any).location || "",
+            startTime: (ev as any).startTime,
+            officialFlyerUrl: (ev as any).officialFlyerUrl || (ev as any).previewImage || "",
+            createdBy: (ev as any).createdBy,
+            members: (ev as any).members || [],
+            team: (ev as any).team || [],
+          }));
+        } else {
+          const allEventsSnap = await getDocs(collection(db, "events"));
+          allEventsSnap.forEach(d => {
+            const data = d.data() as any;
+            allEv.push({
+              id: d.id,
+              title: data.title || "אירוע ללא שם",
+              description: data.description || data.goal || "",
+              location: data.location || "",
+              startTime: data.startTime,
+              officialFlyerUrl: data.officialFlyerUrl || data.previewImage || "",
+              createdBy: data.createdBy,
+              members: data.members || [],
+              team: data.team || [],
+            });
+          });
+        }
+
+        const cfgRef = doc(db, "settings", "public_register_events");
+        const cfgSnap = await getDoc(cfgRef);
+        const allowed: string[] = cfgSnap.exists() ? (cfgSnap.data() as any).allowedEventIds || [] : [];
+        const allowedSet = new Set<string>(allowed);
+        if (allowedSet.size === 0) {
+          allEv.forEach(ev => {
+            const hasAdmin =
+              (ev.createdBy === user.uid) ||
+              (Array.isArray(ev.members) && ev.members.includes(user.uid)) ||
+              ((ev.team || []).some((m: any) => (m.userId && m.userId === user.uid) || (m.email && m.email.toLowerCase() === (user.email || "").toLowerCase())));
+            if (hasAdmin) allowedSet.add(ev.id);
+          });
+        }
+        setRegisterEventsAll(allEv);
+        setRegisterEventsSelection(allowedSet);
+      } catch (err) {
+        console.error("Error loading events for register selection", err);
+        setRegisterEventsAll([]);
+      }
+    };
+    loadRegisterEvents();
+  }, [db, user, isAdmin, showRegisterEventsModal, allEventsRaw]);
 
   // Load completion approval requests for task owners
   useEffect(() => {
@@ -2214,11 +2189,6 @@ export default function Dashboard() {
       await deleteAllTasksFor("projects", projectId);
       await deleteDoc(doc(db, "projects", projectId));
       setProjects(prev => prev.filter(p => p.id !== projectId));
-      setProjectIndex(prev => {
-        const next = { ...prev };
-        delete next[projectId];
-        return next;
-      });
       setMyTasks(prev => prev.filter(t => !(t.scope === "project" && t.eventId === projectId)));
       setNotificationTasks(prev => prev.filter(t => !(t.scope === "project" && t.eventId === projectId)));
     } catch (err) {
@@ -2350,12 +2320,14 @@ export default function Dashboard() {
             const data = docSnap.data() as any;
             return data.eventId === req.eventId;
           }).length;
+          const remainingCount = Math.max(0, required - completedCount);
           const nextStatus = completedCount >= required ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
           await updateDoc(taskRef, {
             status: nextStatus,
             pendingApproval: false,
             pendingApprovalRequestId: "",
             lastApprovalDecision: "REJECTED",
+            remainingCompletions: remainingCount,
           });
         }
       } else {
@@ -2369,12 +2341,14 @@ export default function Dashboard() {
             const data = docSnap.data() as any;
             return data.eventId === req.eventId;
           }).length + 1;
+          const remainingCount = Math.max(0, required - completedCount);
           const nextStatus = completedCount >= required ? "DONE" : "IN_PROGRESS";
           await updateDoc(taskRef, {
             status: nextStatus,
             pendingApproval: false,
             pendingApprovalRequestId: "",
             lastApprovalDecision: "APPROVED",
+            remainingCompletions: remainingCount,
           });
         }
         const completionEmail = (req.volunteerEmail || "").toLowerCase();
@@ -2459,12 +2433,16 @@ export default function Dashboard() {
   const openAssigneeWhatsapp = async (task: Task, assignee: { name?: string; email?: string; userId?: string; phone?: string }) => {
     const name = assignee?.name || assignee?.email || "מתנדב/ת";
     const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const isVolunteerTask = task.isVolunteerTask === true || task.volunteerHours != null;
+    const volunteerAreaLink = origin ? `${origin}/volunteers/events` : "";
     const taskLink = origin ? `${origin}/tasks/${task.id}${task.eventId ? `?eventId=${task.eventId}` : ""}` : "";
     const defaultMessage = [
       `היי ${name},`,
       `יש לך משימה: "${task.title}".`,
       task.eventTitle ? `אירוע/פרויקט: ${task.eventTitle}` : "",
-      taskLink ? `קישור למשימה: ${taskLink}` : ""
+      isVolunteerTask
+        ? (volunteerAreaLink ? `אזור אישי למשימות שלך: ${volunteerAreaLink}` : "")
+        : (taskLink ? `קישור למשימה: ${taskLink}` : "")
     ].filter(Boolean).join("\n");
 
     setAssigneeWhatsappModal({

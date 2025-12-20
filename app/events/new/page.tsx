@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, CalendarPlus } from "lucide-react";
+import { ArrowRight, CalendarPlus, Link2, Copy, Check, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import PartnersInput from "@/components/PartnersInput";
 
@@ -46,9 +46,15 @@ export default function NewEventPage() {
     const searchParams = useSearchParams();
     const projectId = searchParams?.get("projectId") || "";
     const projectName = searchParams?.get("projectName") || "";
+    const creatorToken = searchParams?.get("creatorToken") || "";
+    const isSharedForm = !!creatorToken;
     const { user, loading: authLoading } = useAuth();
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    const [creatorOverride, setCreatorOverride] = useState<{ id: string; email: string; name: string } | null>(null);
+    const [creatorLookupLoading, setCreatorLookupLoading] = useState(false);
+    const [shareLinkCopying, setShareLinkCopying] = useState(false);
+    const [shareLinkCopied, setShareLinkCopied] = useState(false);
     const [formData, setFormData] = useState({
         title: "",
         location: "",
@@ -66,9 +72,52 @@ export default function NewEventPage() {
     });
     const [eventDates, setEventDates] = useState<string[]>([""]);
 
+    useEffect(() => {
+        const fetchCreatorFromToken = async () => {
+            if (!db || !creatorToken) {
+                setCreatorOverride(null);
+                return;
+            }
+            setCreatorLookupLoading(true);
+            try {
+                const snap = await getDoc(doc(db, "event_creation_links", creatorToken));
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    const ownerId = data.ownerId || data.userId;
+                    if (!ownerId) {
+                        setCreatorOverride(null);
+                        setError("קישור השיתוף חסר פרטי יוצר. בקש/י קישור חדש ממי ששיתף אותך.");
+                        return;
+                    }
+                    setCreatorOverride({
+                        id: ownerId,
+                        email: data.ownerEmail || "",
+                        name: data.ownerName || data.ownerEmail || "מנהל",
+                    });
+                    setError("");
+                } else {
+                    setCreatorOverride(null);
+                    setError("קישור השיתוף הזה לא תקף. בקש/י קישור חדש ממי ששיתף אותך.");
+                }
+            } catch (err) {
+                console.error("Error loading creator token", err);
+                setCreatorOverride(null);
+                setError("שגיאה בטעינת קישור השיתוף. נסו שוב או בקשו קישור חדש.");
+            } finally {
+                setCreatorLookupLoading(false);
+            }
+        };
+        fetchCreatorFromToken();
+    }, [creatorToken, db]);
+
     // Redirect if not authenticated
     if (!authLoading && !user) {
-        router.push("/login");
+        const redirectParams = new URLSearchParams();
+        if (creatorToken) redirectParams.set("creatorToken", creatorToken);
+        if (projectId) redirectParams.set("projectId", projectId);
+        if (projectName) redirectParams.set("projectName", projectName);
+        const redirectTarget = redirectParams.toString() ? `/events/new?${redirectParams.toString()}` : "/events/new";
+        router.push(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
         return null;
     }
 
@@ -93,6 +142,18 @@ export default function NewEventPage() {
 
         if (!user) {
             setError("עליך להתחבר כדי ליצור אירוע");
+            setSubmitting(false);
+            return;
+        }
+
+        if (creatorToken && !creatorOverride) {
+            setError("קישור השיתוף לא תקף. בקש/י קישור חדש מהמנהל ששיתף אותך.");
+            setSubmitting(false);
+            return;
+        }
+
+        if (creatorLookupLoading) {
+            setError("טוען את פרטי בעל הקישור, רגע...");
             setSubmitting(false);
             return;
         }
@@ -125,6 +186,17 @@ export default function NewEventPage() {
                 dateObjects[0] = computeNextOccurrence(dateObjects[0], formData.recurrence, recurrenceEnd);
             }
             const volunteersCountNum = formData.volunteersCount ? parseInt(formData.volunteersCount, 10) : null;
+            const creator = creatorOverride || {
+                id: user.uid,
+                email: user.email || "",
+                name: user.displayName || user.email?.split("@")[0] || "מנהל",
+            };
+            const submitter = {
+                id: user.uid,
+                email: user.email || "",
+                name: user.displayName || user.email?.split("@")[0] || "",
+            };
+
             // Create event in Firestore
             const eventData = {
                 title: formData.title,
@@ -142,27 +214,33 @@ export default function NewEventPage() {
                 recurrenceEndDate: recurrenceEnd,
                 needsVolunteers: formData.needsVolunteers,
                 volunteersCount: formData.needsVolunteers && Number.isFinite(volunteersCountNum) ? volunteersCountNum : null,
-                createdBy: user.uid,
-                createdByEmail: user.email || "",
-                members: [user.uid], // Add creator as a member
+                createdBy: creator.id,
+                createdByEmail: creator.email || user.email || "",
+                members: creator.id ? [creator.id] : [],
                 team: [
                     {
-                        name: user.displayName || user.email?.split('@')[0] || "מנהל",
+                        name: creator.name || creator.email || "מנהל",
                         role: "מנהל אירוע",
-                        email: user.email || "",
-                        userId: user.uid,
+                        email: creator.email || user.email || "",
+                        userId: creator.id,
                     }
                 ],
                 contactPerson: {
                     name: formData.contactName,
                     phone: formData.contactPhone,
-                    email: user.email || "",
+                    email: creator.email || user.email || "",
                 },
                 projectId: projectId || null,
                 projectName: projectName || null,
                 createdAt: serverTimestamp(),
                 responsibilities: [],
             };
+            if (creatorToken) {
+                (eventData as any).createdViaLinkToken = creatorToken;
+            }
+            if (creator.id !== submitter.id) {
+                (eventData as any).createdByProxy = submitter;
+            }
 
             const docRef = await addDoc(collection(db, "events"), eventData);
             console.log("Event created with ID:", docRef.id);
@@ -213,18 +291,109 @@ export default function NewEventPage() {
         window.open(url, "_blank", "noopener,noreferrer");
     };
 
+    const handleCopyShareLink = async () => {
+        if (!user) {
+            setError("התחבר כדי ליצור קישור שיתוף לטופס.");
+            return;
+        }
+        if (!db) {
+            setError("Firebase is not configured");
+            return;
+        }
+        setShareLinkCopying(true);
+        setError("");
+        try {
+            const linkDoc = await addDoc(collection(db, "event_creation_links"), {
+                ownerId: user.uid,
+                ownerEmail: user.email || "",
+                ownerName: user.displayName || user.email?.split("@")[0] || "מנהל",
+                createdAt: serverTimestamp(),
+            });
+            const origin = typeof window !== "undefined" ? window.location.origin : "";
+            const params = new URLSearchParams();
+            params.set("creatorToken", linkDoc.id);
+            if (projectId) params.set("projectId", projectId);
+            if (projectName) params.set("projectName", projectName);
+            const shareUrl = origin ? `${origin}/events/new?${params.toString()}` : `/events/new?${params.toString()}`;
+            if (navigator?.clipboard?.writeText) {
+                await navigator.clipboard.writeText(shareUrl);
+                setShareLinkCopied(true);
+                setError("");
+                setTimeout(() => setShareLinkCopied(false), 2000);
+            } else {
+                setError("לא הצלחנו להעתיק אוטומטית. ניתן להעתיק ידנית: " + shareUrl);
+            }
+        } catch (err: any) {
+            console.error("Error creating share link", err);
+            setError("לא הצלחנו ליצור קישור שיתוף: " + (err?.message || ""));
+        } finally {
+            setShareLinkCopying(false);
+        }
+    };
+
     return (
         <div className="min-h-screen bg-gray-50 p-6">
             <div className="max-w-2xl mx-auto">
                 <div className="mb-6">
-                    <Link href="/" className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm mb-2">
-                        <ArrowRight size={16} />
-                        חזרה לדשבורד
-                    </Link>
-                    <h1 className="text-3xl font-bold text-gray-900">יצירת אירוע חדש</h1>
-                    {projectId && (
-                        <div className="mt-2 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
-                            משויך לפרויקט: {projectName || projectId}
+                    {isSharedForm ? (
+                        <div className="flex flex-col gap-2">
+                            <h1 className="text-3xl font-bold text-gray-900">יצירת אירוע חדש</h1>
+                            {projectId && (
+                                <div className="mt-1 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                                    משויך לפרויקט: {projectName || projectId}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                            <div>
+                                <Link href="/" className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm mb-2">
+                                    <ArrowRight size={16} />
+                                    חזרה לדשבורד
+                                </Link>
+                                <h1 className="text-3xl font-bold text-gray-900">יצירת אירוע חדש</h1>
+                                {projectId && (
+                                    <div className="mt-2 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                                        משויך לפרויקט: {projectName || projectId}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex flex-col gap-2 w-full sm:w-auto">
+                                <button
+                                    type="button"
+                                    onClick={handleCopyShareLink}
+                                    disabled={shareLinkCopying}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 px-4 py-2 text-indigo-700 bg-white hover:bg-indigo-50 text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                    {shareLinkCopying ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+                                    {shareLinkCopying ? "יוצר קישור..." : "העתק קישור לטופס שיתוף"}
+                                    {!shareLinkCopying && <Copy size={14} className="text-indigo-500" />}
+                                </button>
+                                <p className="text-xs text-gray-600 text-right">הקישור יפתח טופס זה ויצור אירוע בשמי.</p>
+                                {shareLinkCopied && (
+                                    <div className="flex items-center gap-1 text-xs text-emerald-600 justify-end">
+                                        <Check size={14} />
+                                        הקישור הועתק
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                    {creatorLookupLoading && (
+                        <div className="mt-3 inline-flex items-center gap-2 text-xs text-gray-700 bg-gray-100 border border-gray-200 px-3 py-2 rounded-lg">
+                            <Loader2 size={14} className="animate-spin" />
+                            טוען פרטי בעל הקישור...
+                        </div>
+                    )}
+                    {creatorOverride && (
+                        <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-100 px-3 py-2 rounded-full">
+                            <Check size={14} />
+                            האירוע יפתח עבור {creatorOverride.name || "מנהל"} ({creatorOverride.email || "ללא אימייל"}), ורק הוא יראה אותו עד שתוסיפו אנשי צוות.
+                        </div>
+                    )}
+                    {creatorToken && !creatorOverride && !creatorLookupLoading && (
+                        <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                            קישור השיתוף לא נמצא. בקש/י קישור חדש מהמנהל ששיתף אותך.
                         </div>
                     )}
                 </div>
@@ -434,10 +603,10 @@ export default function NewEventPage() {
                             </button>
                             <button
                                 type="submit"
-                                disabled={submitting}
+                                disabled={submitting || creatorLookupLoading}
                                 className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                             >
-                                {submitting ? "יוצר אירוע..." : "צור אירוע"}
+                                {submitting ? "יוצר אירוע..." : creatorLookupLoading ? "טוען קישור..." : "צור אירוע"}
                             </button>
                         </div>
                     </form>

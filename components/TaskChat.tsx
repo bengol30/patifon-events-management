@@ -40,7 +40,7 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
     const [pendingMentions, setPendingMentions] = useState<{ name: string; userId?: string; email?: string }[]>([]);
     const [sendingMentions, setSendingMentions] = useState(false);
     const [eventTitle, setEventTitle] = useState("");
-    const [taskDetails, setTaskDetails] = useState<{ description?: string; dueDate?: any; priority?: string }>({});
+    const [taskDetails, setTaskDetails] = useState<{ description?: string; dueDate?: any; priority?: string; isVolunteerTask?: boolean; volunteerHours?: number | null }>({});
     const mentionQueueRef = useRef<{ name: string; userId?: string; email?: string; phone?: string }[]>([]);
 
     useEffect(() => {
@@ -102,6 +102,8 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                         description: data.description,
                         dueDate: data.dueDate,
                         priority: data.priority,
+                        isVolunteerTask: data.isVolunteerTask,
+                        volunteerHours: data.volunteerHours,
                     });
                 }
             })
@@ -277,6 +279,8 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
             }
             const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
             const origin = getPublicBaseUrl(cfg.baseUrl);
+            const isVolunteerTask = taskDetails.isVolunteerTask === true || taskDetails.volunteerHours != null;
+            const volunteerAreaLink = origin ? `${origin}/volunteers/events` : "";
             const taskLink = origin ? `${origin}/tasks/${taskId}?eventId=${eventId}` : "";
             const eventLink = origin ? `${origin}/events/${eventId}` : "";
             const senderName = user?.displayName || user?.email || "משתמש";
@@ -296,8 +300,12 @@ export default function TaskChat({ eventId, taskId, taskTitle, onClose }: TaskCh
                     due ? `דדליין: ${due}` : "",
                     taskDetails.priority ? `עדיפות: ${taskDetails.priority}` : "",
                     taskDetails.description ? `תיאור: ${taskDetails.description}` : "",
-                    taskLink ? `דף המשימה: ${taskLink}` : "",
-                    eventLink ? `דף האירוע: ${eventLink}` : "",
+                    isVolunteerTask
+                        ? (volunteerAreaLink ? `האזור האישי למשימות שלך: ${volunteerAreaLink}` : "")
+                        : [
+                            taskLink ? `דף המשימה: ${taskLink}` : "",
+                            eventLink ? `דף האירוע: ${eventLink}` : ""
+                          ].filter(Boolean).join("\n"),
                 ].filter(Boolean);
                 const message = messageLines.join("\n");
                 const res = await fetch(endpoint, {

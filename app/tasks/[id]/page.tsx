@@ -252,6 +252,8 @@ export default function TaskDetailPage() {
             }
             const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
             const origin = getPublicBaseUrl(cfg.baseUrl);
+            const isVolunteerTask = targetTask.isVolunteerTask === true || targetTask.volunteerHours != null;
+            const volunteerAreaLink = origin ? `${origin}/volunteers/events` : "";
             const taskLink = origin ? `${origin}/tasks/${targetTask.id}?eventId=${targetTask.eventId}` : "";
             const eventLink = origin ? `${origin}/events/${targetTask.eventId}` : "";
             const senderName = user?.displayName || user?.email || "משתמש";
@@ -270,8 +272,12 @@ export default function TaskDetailPage() {
                     due ? `דדליין: ${due}` : "",
                     targetTask.priority ? `עדיפות: ${targetTask.priority}` : "",
                     targetTask.description ? `תיאור: ${targetTask.description}` : "",
-                    taskLink ? `דף המשימה: ${taskLink}` : "",
-                    eventLink ? `דף האירוע: ${eventLink}` : "",
+                    isVolunteerTask
+                        ? (volunteerAreaLink ? `האזור האישי למשימות שלך: ${volunteerAreaLink}` : "")
+                        : [
+                            taskLink ? `דף המשימה: ${taskLink}` : "",
+                            eventLink ? `דף האירוע: ${eventLink}` : ""
+                          ].filter(Boolean).join("\n"),
                     `התוייג ע\"י: ${senderName}`,
                 ].filter(Boolean);
                 const message = lines.join("\n");

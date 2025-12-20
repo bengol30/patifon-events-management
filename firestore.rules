@@ -24,6 +24,10 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /event_creation_links/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
     // קולקציות נוספות (משימות קבועות, וכו') – מורשות רק למשתמשים מחוברים
     match /default_tasks/{docId} {
       allow read, write: if isSignedIn();
