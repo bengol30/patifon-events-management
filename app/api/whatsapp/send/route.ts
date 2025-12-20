@@ -51,13 +51,17 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: Request) {
+  console.log("[API] /api/whatsapp/send called");
   try {
     const body = await request.json();
     const { phone, message, method, chatId, file, fileName, urlFile, caption, idInstance, apiTokenInstance } = body;
 
+    console.log(`[API] Method: ${method || "text"}, Phone: ${phone}, ChatId: ${chatId}`);
+
     // File sending mode
     if (method === "base64" || method === "url") {
       if (!chatId || !idInstance || !apiTokenInstance) {
+        console.error("[API] Missing required parameters for file send");
         return NextResponse.json(
           { error: "Missing required parameters: chatId, idInstance, apiTokenInstance" },
           { status: 400, headers: corsHeaders }
@@ -98,6 +102,7 @@ export async function POST(request: Request) {
         };
       }
 
+      console.log(`[API] Sending to Green API: ${endpoint}`);
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -107,6 +112,7 @@ export async function POST(request: Request) {
       });
 
       const responseText = await response.text();
+      console.log(`[API] Green API response status: ${response.status}`);
 
       if (!response.ok) {
         console.error("Green API error:", responseText);
@@ -137,6 +143,7 @@ export async function POST(request: Request) {
 
     const cfg = await readConfig();
     if (!cfg) {
+      console.error("[API] Failed to read config");
       return NextResponse.json({ error: "חסרות הגדרות וואטסאפ (idInstance/apiTokenInstance בסביבה או במסד)" }, { status: 500, headers: corsHeaders });
     }
 
@@ -149,12 +156,8 @@ export async function POST(request: Request) {
     let lastError: { status: number; message: string } | null = null;
 
     for (const baseApi of baseCandidates) {
-      // Debug log without leaking the token (helps troubleshoot 405/500 issues in dev)
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[WA send] using base:", baseApi, "instance:", cfg.idInstance, "phone:", phoneClean);
-      }
-
       const endpoint = `${baseApi}/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+      console.log(`[API] Sending text to: ${endpoint}`);
       try {
         const res = await fetch(endpoint, {
           method: "POST",
@@ -167,12 +170,13 @@ export async function POST(request: Request) {
         }
 
         const text = await res.text();
+        console.error(`[API] Green API error (text): ${text}`);
         const safe = text?.trim() || `שליחה נכשלה (${res.status})`;
         lastError = { status: res.status || 500, message: safe };
 
-        // Try fallback (green-api) only if the configured base failed
         if (baseApi === defaultBase) break;
       } catch (err) {
+        console.error("[API] Fetch error:", err);
         lastError = {
           status: 500,
           message: err instanceof Error ? err.message : "שגיאה בשליחה",
@@ -186,7 +190,7 @@ export async function POST(request: Request) {
       { status: lastError?.status || 500, headers: corsHeaders },
     );
   } catch (err) {
-    console.error("WhatsApp send failed", err);
+    console.error("[API] Fatal error:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "שגיאה בשליחה" }, { status: 500, headers: corsHeaders });
   }
 }
