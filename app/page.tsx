@@ -62,6 +62,7 @@ interface Task {
   lastMessageText?: string;
   lastMessageMentions?: { name?: string; userId?: string; email?: string }[];
   pendingApproval?: boolean;
+  isVolunteerTask?: boolean;
   volunteerHours?: number | null;
   requiredCompletions?: number | null;
   remainingCompletions?: number | null;
