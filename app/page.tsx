@@ -66,6 +66,8 @@ interface Task {
   volunteerHours?: number | null;
   requiredCompletions?: number | null;
   remainingCompletions?: number | null;
+  completionCount?: number;
+  totalVolunteerHours?: number;
 }
 
 interface TeamNote {
@@ -192,7 +194,16 @@ export default function Dashboard() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [allEventsRaw, setAllEventsRaw] = useState<Event[]>([]);
   const [allProjectsRaw, setAllProjectsRaw] = useState<Project[]>([]);
-  const [skipTargetedTaskQuery, setSkipTargetedTaskQuery] = useState(false);
+  const [skipTargetedTaskQuery, setSkipTargetedTaskQuery] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return window.localStorage.getItem("skipTaskTargetQuery") === "true";
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  });
 
   // My Tasks State
   const [myTasks, setMyTasks] = useState<Task[]>([]);
@@ -243,6 +254,23 @@ export default function Dashboard() {
   const [volTasksHours, setVolTasksHours] = useState<number>(0);
   const [loadingVolTasks, setLoadingVolTasks] = useState(false);
   const [volTasksError, setVolTasksError] = useState<string | null>(null);
+  const [volunteerCompletions, setVolunteerCompletions] = useState<{ id: string; taskId?: string; taskTitle: string; volunteerHours: number | null; eventTitle?: string; eventId?: string; scope?: string; completedAt?: any }[]>([]);
+  const [loadingVolunteerCompletions, setLoadingVolunteerCompletions] = useState(false);
+  const [volunteerCompletionsError, setVolunteerCompletionsError] = useState<string | null>(null);
+  const [savingCompletionIds, setSavingCompletionIds] = useState<Record<string, boolean>>({});
+  const [deletingCompletionIds, setDeletingCompletionIds] = useState<Record<string, boolean>>({});
+  const [removingVolunteerTaskIds, setRemovingVolunteerTaskIds] = useState<Record<string, boolean>>({});
+  const volunteerCompletionOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: { title: string; hours: number | null }[] = [];
+    volunteerCompletions.forEach((c) => {
+      const key = `${c.taskTitle}||${c.volunteerHours ?? ""}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push({ title: c.taskTitle, hours: c.volunteerHours ?? null });
+    });
+    return options;
+  }, [volunteerCompletions]);
   const [completionRequests, setCompletionRequests] = useState<any[]>([]);
   const [showRequestsModal, setShowRequestsModal] = useState(false);
   const [volunteerErrorLog, setVolunteerErrorLog] = useState<VolunteerErrorEntry[]>([]);
@@ -1676,6 +1704,9 @@ export default function Dashboard() {
     setEditingVolunteer(null);
     resetManualTaskForm();
     setManualEventTitle("");
+    setVolunteerCompletions([]);
+    setVolunteerCompletionsError(null);
+    setRemovingVolunteerTaskIds({});
   };
 
   const startEditVolunteer = (vol: VolunteerRecord) => {
@@ -1685,6 +1716,7 @@ export default function Dashboard() {
     setEditVolunteerPhone(vol.phone || "");
     setManualEventTitle(vol.eventTitle || "");
     resetManualTaskForm();
+    loadVolunteerCompletions(vol);
   };
 
   const handleSendVolunteerWhatsapp = async (vol: VolunteerRecord) => {
@@ -1708,6 +1740,171 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Failed sending volunteer WhatsApp", err);
       alert("שגיאה בשליחת הודעת הוואטסאפ");
+    }
+  };
+
+  const removeVolunteerTaskFromView = async (task: Task, type: "pending" | "done") => {
+    if (!db || !viewVolunteer?.email) return;
+    const taskKey = `${task.id}-${task.eventId}-${type}`;
+    const emailLower = viewVolunteer.email.toLowerCase();
+    setRemovingVolunteerTaskIds((prev) => ({ ...prev, [taskKey]: true }));
+    try {
+      if (type === "done") {
+        const completionsSnap = await getDocs(query(
+          collection(db, "volunteer_completions"),
+          where("taskId", "==", task.id),
+          where("eventId", "==", task.eventId),
+          where("email", "==", emailLower)
+        ));
+        const deletions = completionsSnap.docs.map((d) => deleteDoc(d.ref));
+        await Promise.all(deletions);
+      }
+      if (task.scope !== "manual") {
+        try {
+          const taskRef = task.scope === "project"
+            ? doc(db, "projects", task.eventId, "tasks", task.id)
+            : doc(db, "events", task.eventId, "tasks", task.id);
+          const snap = await getDoc(taskRef);
+          if (snap.exists()) {
+            const data = snap.data() as any;
+            const required = data?.requiredCompletions != null ? Math.max(1, Number(data.requiredCompletions)) : 1;
+            let remaining = data?.remainingCompletions != null ? Math.max(0, Number(data.remainingCompletions)) : required;
+            const assignees = Array.isArray(data.assignees) ? data.assignees : [];
+            const filteredAssignees = assignees.filter((a: any) => (a?.email || "").toLowerCase() !== emailLower);
+            const completionsSnap = await getDocs(query(
+              collection(db, "volunteer_completions"),
+              where("taskId", "==", task.id),
+              where("eventId", "==", task.eventId)
+            ));
+            const completedCount = completionsSnap.docs.length;
+            remaining = Math.max(0, required - completedCount);
+            const nextStatus = completedCount >= required ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
+            const primary = filteredAssignees[0];
+            await updateDoc(taskRef, {
+              status: nextStatus,
+              remainingCompletions: remaining,
+              assignees: filteredAssignees,
+              assignee: primary?.name || "",
+              assigneeId: primary?.userId || "",
+              assigneeEmail: (primary?.email || "").toLowerCase() || "",
+            });
+          }
+        } catch (err) {
+          console.warn("Failed updating task after removal", err);
+        }
+      }
+      await loadVolunteerTasks(viewVolunteer);
+      await loadVolunteerCompletions({ email: viewVolunteer.email });
+    } catch (err) {
+      console.error("Failed removing volunteer task", err);
+      alert("שגיאה בהסרת המשימה מהמתנדב");
+    } finally {
+      setRemovingVolunteerTaskIds((prev) => {
+        const next = { ...prev };
+        delete next[taskKey];
+        return next;
+      });
+    }
+  };
+
+  const handleUpdateVolunteerCompletion = async (entryId: string, updates: { taskTitle?: string; volunteerHours?: number | null }) => {
+    if (!db || !editingVolunteer) return;
+    const current = volunteerCompletions.find((c) => c.id === entryId);
+    if (!current) {
+      await loadVolunteerCompletions(editingVolunteer);
+      return;
+    }
+    const title = (updates.taskTitle ?? current.taskTitle ?? "").trim();
+    const hoursVal = updates.volunteerHours;
+    const hours = hoursVal != null && Number.isFinite(hoursVal) && hoursVal > 0 ? Number(hoursVal) : null;
+    try {
+      setSavingCompletionIds((prev) => ({ ...prev, [entryId]: true }));
+      await updateDoc(doc(db, "volunteer_completions", entryId), {
+        taskTitle: title || "משימה",
+        volunteerHours: hours,
+      });
+      setVolunteerCompletions((prev) =>
+        prev.map((c) => (c.id === entryId ? { ...c, taskTitle: title || "משימה", volunteerHours: hours } : c))
+      );
+      if (viewVolunteer && viewVolunteer.email && viewVolunteer.email.toLowerCase() === editingVolunteer.email?.toLowerCase()) {
+        loadVolunteerTasks(viewVolunteer);
+      }
+      await loadVolunteerTasks(editingVolunteer);
+    } catch (err) {
+      console.error("Failed updating completion", err);
+      if ((err as any)?.code === "not-found") {
+        alert("הרישום לא נמצא. מרענן את הרשימה.");
+        await loadVolunteerCompletions(editingVolunteer);
+      } else {
+        alert("שגיאה בעדכון המשימה/שעות.");
+      }
+    } finally {
+      setSavingCompletionIds((prev) => {
+        const next = { ...prev };
+        delete next[entryId];
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteVolunteerCompletion = async (entryId: string) => {
+    if (!db || !editingVolunteer) return;
+    if (!confirm("למחוק את המשימה/שעות האלו?")) return;
+    const entry = volunteerCompletions.find((c) => c.id === entryId);
+    try {
+      setDeletingCompletionIds((prev) => ({ ...prev, [entryId]: true }));
+      await deleteDoc(doc(db, "volunteer_completions", entryId));
+      setVolunteerCompletions((prev) => prev.filter((c) => c.id !== entryId));
+      if (viewVolunteer && viewVolunteer.email && viewVolunteer.email.toLowerCase() === editingVolunteer.email?.toLowerCase()) {
+        loadVolunteerTasks(viewVolunteer);
+      }
+      const volunteerEmailLower = (editingVolunteer.email || "").toLowerCase();
+      const taskId = entry?.taskId || "";
+      const eventId = entry?.eventId || "";
+      const scope = (entry?.scope || "event") as "event" | "project" | "manual" | "general";
+      if (taskId && eventId && scope !== "manual") {
+        try {
+          const taskRef = scope === "project"
+            ? doc(db, "projects", eventId, "tasks", taskId)
+            : doc(db, "events", eventId, "tasks", taskId);
+          const taskSnap = await getDoc(taskRef);
+          if (taskSnap.exists()) {
+            const taskData = taskSnap.data() as any;
+            const required = taskData?.requiredCompletions != null ? Math.max(1, Number(taskData.requiredCompletions)) : 1;
+            const completionsSnap = await getDocs(query(
+              collection(db, "volunteer_completions"),
+              where("taskId", "==", taskId),
+              where("eventId", "==", eventId)
+            ));
+            const completedCount = completionsSnap.docs.length;
+            const remainingCount = Math.max(0, required - completedCount);
+              const nextStatus = completedCount >= required ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
+              const assignees = Array.isArray(taskData.assignees) ? taskData.assignees : [];
+              const filteredAssignees = assignees.filter((a: any) => (a?.email || "").toLowerCase() !== volunteerEmailLower);
+              const primary = filteredAssignees[0];
+              await updateDoc(taskRef, {
+                status: nextStatus,
+                remainingCompletions: remainingCount,
+                assignees: filteredAssignees,
+                assignee: primary?.name || "",
+                assigneeId: primary?.userId || "",
+                assigneeEmail: (primary?.email || "").toLowerCase() || "",
+              });
+            }
+          } catch (err) {
+            console.warn("Failed adjusting task after completion deletion", err);
+          }
+        }
+        await loadVolunteerTasks(editingVolunteer);
+    } catch (err) {
+      console.error("Failed deleting completion", err);
+      alert("שגיאה במחיקת המשימה/שעות.");
+    } finally {
+      setDeletingCompletionIds((prev) => {
+        const next = { ...prev };
+        delete next[entryId];
+        return next;
+      });
     }
   };
 
@@ -1840,6 +2037,7 @@ export default function Dashboard() {
       if (viewVolunteer && viewVolunteer.email && viewVolunteer.email.toLowerCase() === volunteerEmail) {
         loadVolunteerTasks(viewVolunteer);
       }
+      await loadVolunteerCompletions({ email: volunteerEmail });
     } catch (err) {
       console.error("Error adding manual completion:", err);
       recordVolunteerError({
@@ -1903,10 +2101,14 @@ export default function Dashboard() {
     const emailLower = vol.email.trim().toLowerCase();
     setLoadingVolTasks(true);
     try {
+      const normalizeHours = (value: any) => {
+        const num = Number(value);
+        return Number.isFinite(num) && num > 0 ? num : 0;
+      };
+
       const tasksSnap = await getDocs(collectionGroup(db, "tasks"));
       const pending: Task[] = [];
-      const done: Task[] = [];
-      let hours = 0;
+      const doneTaskByKey = new Map<string, Task>();
 
       tasksSnap.forEach((docSnap) => {
         const data = docSnap.data() as any;
@@ -1932,11 +2134,12 @@ export default function Dashboard() {
           eventTitle: data.eventTitle || (scope === "project" ? "פרויקט" : "אירוע"),
           scope,
           volunteerHours: data.volunteerHours ?? null,
+          requiredCompletions: data.requiredCompletions ?? null,
+          remainingCompletions: data.remainingCompletions ?? null,
         };
         if (task.status === "DONE") {
-          done.push(task);
-          const h = Number(task.volunteerHours);
-          if (Number.isFinite(h) && h > 0) hours += h;
+          const key = `${task.id}::${scope}::${parentId}`;
+          doneTaskByKey.set(key, task);
         } else {
           pending.push(task);
         }
@@ -1946,12 +2149,12 @@ export default function Dashboard() {
         collection(db, "volunteer_completions"),
         where("email", "==", emailLower)
       ));
-      const seenDone = new Set(done.map(t => t.id));
+      const completionAgg = new Map<string, { task: Task; count: number; hours: number }>();
+
       completionsSnap.forEach(c => {
         const d = c.data() as any;
         const taskId = d.taskId || "";
-        if (!taskId || seenDone.has(taskId)) return;
-        seenDone.add(taskId);
+        if (!taskId) return;
         const rawScope = (d.scope || d.eventScope || "").toString().toLowerCase();
         const scope: "event" | "project" =
           rawScope === "project"
@@ -1961,7 +2164,10 @@ export default function Dashboard() {
               : (d.eventId || "").startsWith("proj-") || (d.eventId || "").startsWith("project-")
                 ? "project"
                 : "event";
-        const task: Task = {
+        const eventId = d.eventId || "";
+        const key = `${taskId}::${scope}::${eventId}`;
+        const fromTask = doneTaskByKey.get(key);
+        const baseTask: Task = fromTask ? { ...fromTask } : {
           id: taskId,
           title: d.taskTitle || "משימה",
           description: "",
@@ -1971,19 +2177,53 @@ export default function Dashboard() {
           status: "DONE",
           dueDate: "",
           priority: "NORMAL",
-          eventId: d.eventId || "",
+          eventId,
           eventTitle: d.eventTitle || (scope === "project" ? "פרויקט" : "אירוע"),
           scope,
           volunteerHours: d.volunteerHours ?? null,
         };
-        done.push(task);
-        const h = Number(task.volunteerHours);
-        if (Number.isFinite(h) && h > 0) hours += h;
+        const hoursForEntry = normalizeHours(d.volunteerHours ?? baseTask.volunteerHours);
+        const existing = completionAgg.get(key);
+        if (existing) {
+          existing.count += 1;
+          existing.hours += hoursForEntry;
+          existing.task = { ...baseTask, ...existing.task };
+        } else {
+          completionAgg.set(key, { task: baseTask, count: 1, hours: hoursForEntry });
+        }
       });
+
+      doneTaskByKey.forEach((task, key) => {
+        if (completionAgg.has(key)) {
+          const agg = completionAgg.get(key)!;
+          agg.task = { ...task, ...agg.task };
+          if (agg.hours <= 0) {
+            const perHours = normalizeHours(task.volunteerHours);
+            if (perHours > 0) agg.hours = perHours * agg.count;
+          }
+          return;
+        }
+        const perHours = normalizeHours(task.volunteerHours);
+        completionAgg.set(key, { task, count: 1, hours: perHours });
+      });
+
+      const done = Array.from(completionAgg.values()).map(({ task, count, hours }) => {
+        const totalHours = hours > 0 ? hours : normalizeHours(task.volunteerHours) * count;
+        return {
+          ...task,
+          completionCount: count,
+          totalVolunteerHours: totalHours,
+        };
+      });
+
+      const hoursTotal = done.reduce((sum, t) => {
+        const h = Number(t.totalVolunteerHours);
+        return Number.isFinite(h) ? sum + h : sum;
+      }, 0);
 
       setVolTasksPending(pending);
       setVolTasksDone(done);
-      setVolTasksHours(hours);
+      setVolTasksHours(hoursTotal);
     } catch (err) {
       console.error("Failed loading volunteer tasks", err);
       setVolTasksPending([]);
@@ -1994,6 +2234,80 @@ export default function Dashboard() {
       setLoadingVolTasks(false);
     }
   };
+
+  const loadVolunteerCompletions = async (vol: { email?: string }) => {
+    if (!db || !vol.email) {
+      setVolunteerCompletions([]);
+      setVolunteerCompletionsError("לא נמצא אימייל למתנדב.");
+      return;
+    }
+    setVolunteerCompletionsError(null);
+    setLoadingVolunteerCompletions(true);
+    try {
+      const snap = await getDocs(query(collection(db, "volunteer_completions"), where("email", "==", vol.email.toLowerCase())));
+      const entries: { id: string; taskId?: string; taskTitle: string; volunteerHours: number | null; eventTitle?: string; eventId?: string; scope?: string; completedAt?: any }[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as any;
+        entries.push({
+          id: d.id,
+          taskId: data.taskId || "",
+          taskTitle: data.taskTitle || "משימה",
+          volunteerHours: data.volunteerHours ?? null,
+          eventTitle: data.eventTitle || "",
+          eventId: data.eventId || "",
+          scope: data.scope || data.eventScope || "",
+          completedAt: data.completedAt,
+        });
+      });
+      entries.sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
+      setVolunteerCompletions(entries);
+    } catch (err) {
+      console.error("Failed loading volunteer completions", err);
+      setVolunteerCompletions([]);
+      setVolunteerCompletionsError("שגיאה בטעינת משימות המתנדב.");
+    } finally {
+      setLoadingVolunteerCompletions(false);
+    }
+  };
+
+  // Live sync completions for the volunteer being edited כדי לשמור על התאמה לאזור האישי
+  useEffect(() => {
+    if (!db || !editingVolunteer?.email) return;
+    const emailLower = editingVolunteer.email.toLowerCase();
+    setLoadingVolunteerCompletions(true);
+    const q = query(collection(db, "volunteer_completions"), where("email", "==", emailLower));
+    const unsub = onSnapshot(q, (snap) => {
+      try {
+        const entries: { id: string; taskId?: string; taskTitle: string; volunteerHours: number | null; eventTitle?: string; eventId?: string; scope?: string; completedAt?: any }[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          entries.push({
+            id: d.id,
+            taskId: data.taskId || "",
+            taskTitle: data.taskTitle || "משימה",
+            volunteerHours: data.volunteerHours ?? null,
+            eventTitle: data.eventTitle || "",
+            eventId: data.eventId || "",
+            scope: data.scope || data.eventScope || "",
+            completedAt: data.completedAt,
+          });
+        });
+        entries.sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
+        setVolunteerCompletions(entries);
+        setVolunteerCompletionsError(null);
+        if (viewVolunteer && viewVolunteer.email && viewVolunteer.email.toLowerCase() === emailLower) {
+          loadVolunteerTasks(viewVolunteer);
+        }
+      } finally {
+        setLoadingVolunteerCompletions(false);
+      }
+    }, (err) => {
+      console.error("Live volunteer completions failed", err);
+      setVolunteerCompletionsError("שגיאה בטעינת משימות המתנדב.");
+      setLoadingVolunteerCompletions(false);
+    });
+    return () => unsub();
+  }, [db, editingVolunteer?.email]);
 
   const exportVolunteersToCsv = () => {
     if (typeof window === "undefined") return;
@@ -2344,11 +2658,19 @@ export default function Dashboard() {
           }).length + 1;
           const remainingCount = Math.max(0, required - completedCount);
           const nextStatus = completedCount >= required ? "DONE" : "IN_PROGRESS";
+          const volunteerEmailLower = (req.volunteerEmail || "").toLowerCase();
+          const existingAssignees = Array.isArray(taskData?.assignees) ? taskData.assignees : [];
+          const filteredAssignees = existingAssignees.filter((a: any) => (a?.email || "").toLowerCase() !== volunteerEmailLower);
+          const primary = filteredAssignees[0];
           await updateDoc(taskRef, {
             status: nextStatus,
             pendingApproval: false,
             pendingApprovalRequestId: "",
             lastApprovalDecision: "APPROVED",
+            assignees: filteredAssignees,
+            assignee: primary?.name || "",
+            assigneeId: primary?.userId || "",
+            assigneeEmail: (primary?.email || "").toLowerCase() || "",
             remainingCompletions: remainingCount,
           });
         }
@@ -3978,7 +4300,7 @@ export default function Dashboard() {
 
       {editingVolunteer && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">עריכת מתנדב</h3>
             <form className="space-y-4" onSubmit={handleSaveVolunteer}>
               <div>
@@ -4072,6 +4394,121 @@ export default function Dashboard() {
               >
                 {manualSaving ? "שומר..." : "הוסף משימה ידנית"}
               </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">משימות/שעות של המתנדב</p>
+                  <p className="text-xs text-gray-500">עריכה/מחיקה זמינים רק לאדמין</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => editingVolunteer && loadVolunteerCompletions(editingVolunteer)}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100"
+                >
+                  רענן
+                </button>
+              </div>
+              {volunteerCompletionsError && (
+                <div className="text-sm text-red-600 mb-2">{volunteerCompletionsError}</div>
+              )}
+              {loadingVolunteerCompletions ? (
+                <p className="text-sm text-gray-500">טוען...</p>
+              ) : volunteerCompletions.length === 0 ? (
+                <p className="text-sm text-gray-500">אין רישומי משימות/שעות למתנדב.</p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {volunteerCompletions.map((c) => (
+                    <div key={c.id} className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="text-[11px] text-gray-500 truncate">
+                          {c.eventTitle || c.eventId || "אירוע"} • {c.scope === "project" ? "פרויקט" : "אירוע"}
+                        </div>
+                        {c.completedAt?.seconds && (
+                          <div className="text-[11px] text-gray-400">
+                            {new Date(c.completedAt.seconds * 1000).toLocaleDateString("he-IL", { dateStyle: "short" })}
+                          </div>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
+                        <div>
+                          <label className="block text-[11px] text-gray-600 mb-1">שם המשימה</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              value={c.taskTitle}
+                              onChange={(e) =>
+                                setVolunteerCompletions((prev) =>
+                                  prev.map((row) => (row.id === c.id ? { ...row, taskTitle: e.target.value } : row))
+                                )
+                              }
+                            />
+                            <select
+                              className="text-xs rounded-lg border border-gray-300 px-2 py-2 bg-white"
+                              onChange={(e) => {
+                                const idx = Number(e.target.value);
+                                if (Number.isNaN(idx) || idx < 0) return;
+                                const opt = volunteerCompletionOptions[idx];
+                                if (!opt) return;
+                                setVolunteerCompletions((prev) =>
+                                  prev.map((row) =>
+                                    row.id === c.id
+                                      ? { ...row, taskTitle: opt.title, volunteerHours: opt.hours }
+                                      : row
+                                  )
+                                );
+                              }}
+                            >
+                              <option value={-1}>בחר מהרשימה</option>
+                              {volunteerCompletionOptions.map((opt, idx) => (
+                                <option key={`${opt.title}-${idx}`} value={idx}>
+                                  {opt.title} {opt.hours != null ? `(${opt.hours} ש\"ע)` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-gray-600 mb-1">שעות</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.25"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            value={c.volunteerHours ?? ""}
+                            onChange={(e) =>
+                              setVolunteerCompletions((prev) =>
+                                prev.map((row) => (row.id === c.id ? { ...row, volunteerHours: e.target.value === "" ? null : Number(e.target.value) } : row))
+                              )
+                            }
+                            placeholder="לדוגמה: 2"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteVolunteerCompletion(c.id)}
+                          disabled={!!deletingCompletionIds[c.id]}
+                          className="px-3 py-1.5 rounded-lg border border-red-200 text-red-700 text-xs hover:bg-red-50 disabled:opacity-60"
+                        >
+                          {deletingCompletionIds[c.id] ? "מוחק..." : "מחק"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateVolunteerCompletion(c.id, { taskTitle: c.taskTitle, volunteerHours: c.volunteerHours })}
+                          disabled={!!savingCompletionIds[c.id]}
+                          className="px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 text-xs hover:bg-indigo-50 disabled:opacity-60"
+                        >
+                          {savingCompletionIds[c.id] ? "שומר..." : "שמור"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -4183,7 +4620,18 @@ export default function Dashboard() {
                       <div key={t.id} className="p-2 rounded border border-gray-200 bg-white">
                         <div className="flex items-center justify-between text-sm mb-1">
                           <span className="font-semibold text-gray-900 truncate">{t.title}</span>
-                          <span className="text-xs text-gray-500">{t.eventTitle}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">{t.eventTitle}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeVolunteerTaskFromView(t, "pending")}
+                              disabled={!!removingVolunteerTaskIds[`${t.id}-${t.eventId}-pending`]}
+                              className="p-1 rounded-md border border-gray-200 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                              title="הסר משימה מהמתנדב"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
                         {t.volunteerHours != null && <p className="text-xs text-gray-700">שעות משימה: {t.volunteerHours}</p>}
                         {t.dueDate && <p className="text-xs text-gray-600">דד ליין: {t.dueDate}</p>}
@@ -4197,7 +4645,9 @@ export default function Dashboard() {
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">משימות שהושלמו</h4>
-                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white border border-green-200">{volTasksDone.length}</span>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white border border-green-200">
+                    {volTasksDone.reduce((sum, t) => sum + (t.completionCount || 1), 0)}
+                  </span>
                 </div>
                 {loadingVolTasks ? (
                   <p className="text-sm text-gray-500">טוען...</p>
@@ -4209,9 +4659,30 @@ export default function Dashboard() {
                       <div key={t.id} className="p-2 rounded border border-gray-200 bg-white">
                         <div className="flex items-center justify-between text-sm mb-1">
                           <span className="font-semibold text-gray-900 truncate">{t.title}</span>
-                          <span className="text-xs text-gray-500">{t.eventTitle}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">{t.eventTitle}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeVolunteerTaskFromView(t, "done")}
+                              disabled={!!removingVolunteerTaskIds[`${t.id}-${t.eventId}-done`]}
+                              className="p-1 rounded-md border border-gray-200 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                              title="הסר משימה מהמתנדב"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
-                        {t.volunteerHours != null && <p className="text-xs text-gray-700">שעות משימה: {t.volunteerHours}</p>}
+                        {t.completionCount && t.completionCount > 1 && (
+                          <p className="text-xs text-gray-700">בוצע {t.completionCount} פעמים</p>
+                        )}
+                        {t.totalVolunteerHours != null ? (
+                          <p className="text-xs text-gray-700">
+                            שעות שנספרו: {t.totalVolunteerHours}
+                            {t.volunteerHours != null && t.completionCount ? ` (${t.volunteerHours} × ${t.completionCount})` : ""}
+                          </p>
+                        ) : t.volunteerHours != null ? (
+                          <p className="text-xs text-gray-700">שעות משימה: {t.volunteerHours}</p>
+                        ) : null}
                         <p className="text-xs text-gray-600">סוג: {t.scope === "project" ? "פרויקט" : "אירוע"}</p>
                       </div>
                     ))}

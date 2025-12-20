@@ -479,6 +479,33 @@ export default function VolunteerEventsPage() {
         return () => unsub();
     }, [db, sessionIdentity.email]);
 
+    // Clean up local selections when המשימה כבר לא משויכת למתנדב (אחרי אישור/שחרור)
+    useEffect(() => {
+        if (!isAuthed || !sessionIdentity.email) return;
+        setSelectedTasksByEvent((prev) => {
+            let changed = false;
+            const next: Record<string, Set<string>> = {};
+            Object.entries(prev).forEach(([eventId, set]) => {
+                const tasks = tasksByEvent[eventId] || [];
+                const remaining = new Set<string>();
+                tasks.forEach((t) => {
+                    const assigned = (t.assignees || []).some((a) => (a.email || "").toLowerCase() === sessionIdentity.email);
+                    if (assigned && set.has(t.id)) {
+                        remaining.add(t.id);
+                    } else if (set.has(t.id)) {
+                        changed = true;
+                    }
+                });
+                if (remaining.size > 0) {
+                    next[eventId] = remaining;
+                } else if (set.size > 0) {
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [tasksByEvent, sessionIdentity.email, isAuthed]);
+
     const normalizePhone = (value: string) => {
         const digits = (value || "").replace(/\D/g, "");
         if (!digits) return "";
@@ -625,6 +652,9 @@ export default function VolunteerEventsPage() {
         const cfg = await fetchWhatsappConfig();
         if (!cfg || !cfg.rules?.notifyOnVolunteerDone) return;
         await ensureGlobalRateLimit();
+        const baseApi = ((cfg.baseUrl || "https://api.green-api.com").includes("green-api.com")
+            ? cfg.baseUrl
+            : "https://api.green-api.com").replace(/\/$/, "");
         const phone = normalizePhone(await getUserPhone(opts.ownerId, opts.ownerEmail));
         if (!phone) return;
         const origin = getPublicBaseUrl(cfg.baseUrl);
@@ -637,7 +667,7 @@ export default function VolunteerEventsPage() {
             `יש לאשר את הביצוע באזור האישי.`,
             origin ? `קישור: ${origin}` : ""
         ].filter(Boolean);
-        const endpoint = `https://api.green-api.com/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+        const endpoint = `${baseApi}/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
         try {
             const res = await fetch(endpoint, {
                 method: "POST",

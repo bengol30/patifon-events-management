@@ -68,7 +68,7 @@ export async function POST(request: Request) {
 
     const defaultBase = "https://api.green-api.com";
     const baseCandidates = Array.from(new Set([
-      (cfg.baseUrl || "").replace(/\/$/, ""),
+      (cfg.baseUrl || "").includes("green-api.com") ? (cfg.baseUrl || "").replace(/\/$/, "") : "",
       defaultBase,
     ].filter(Boolean)));
 

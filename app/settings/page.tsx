@@ -1075,7 +1075,9 @@ export default function SettingsPage() {
 
         setSendingGroupsMsg(true);
         try {
-            const baseApi = (whatsappConfig.baseUrl || "https://api.green-api.com").replace(/\/$/, "");
+            const baseApi = ((whatsappConfig.baseUrl || "https://api.green-api.com").includes("green-api.com")
+                ? whatsappConfig.baseUrl
+                : "https://api.green-api.com").replace(/\/$/, "");
             const messageEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
             const fileUploadEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByUpload/${whatsappConfig.apiTokenInstance.trim()}`;
             const fileUrlEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendFileByUrl/${whatsappConfig.apiTokenInstance.trim()}`;
