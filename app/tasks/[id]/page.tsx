@@ -1247,6 +1247,7 @@ export default function TaskDetailPage() {
                                 <input
                                     type="file"
                                     multiple
+                                    accept="*/*"
                                     onChange={(e) => setUploadFiles(e.target.files ? Array.from(e.target.files) : [])}
                                     className="text-sm"
                                 />

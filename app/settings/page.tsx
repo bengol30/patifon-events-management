@@ -1053,7 +1053,8 @@ export default function SettingsPage() {
                 return;
             }
             const eventData = eventSnap.data() as any;
-            textToSend = (eventData.officialPostText || "").trim();
+            const publicBase = getPublicBaseUrl(whatsappConfig.baseUrl || eventData?.baseUrl);
+            textToSend = replaceOrigin((eventData.officialPostText || "").trim(), publicBase);
             mediaUrl = (eventData.officialFlyerUrl || "").trim();
             if (!textToSend) {
                 setMessage({ text: "אין מלל רשמי לאירוע. עדכן בתוכן ומדיה.", type: "error" });
@@ -1077,6 +1078,18 @@ export default function SettingsPage() {
         const isLikelyUrl = (value: string) => /^(https?:\/\/|www\.|wa\.me\/)/i.test(value.trim());
         const normalizeLink = (value: string) => (/^https?:\/\//i.test(value) ? value : `https://${value}`);
         const trimLink = (value: string) => value.replace(/[),.!?]+$/g, "");
+        const replaceOrigin = (text: string, publicBase?: string) => {
+            const target = getPublicBaseUrl(publicBase);
+            if (!target) return text;
+            const local = typeof window !== "undefined" ? window.location.origin : "";
+            let out = text;
+            if (local && local !== target) {
+                out = out.split(local).join(target);
+            }
+            out = out.replace(/https?:\/\/localhost:\d+/g, target);
+            out = out.replace(/https?:\/\/127\.0\.0\.1:\d+/g, target);
+            return out;
+        };
 
         const extractLinks = (text: string) => {
             const links: string[] = [];

@@ -4428,6 +4428,7 @@ export default function EventDetailsPage() {
                                         ref={newTaskFileInputRef}
                                         type="file"
                                         multiple
+                                        accept="*/*"
                                         className="sr-only"
                                         onChange={(e) => {
                                             const files = e.target.files ? Array.from(e.target.files) : [];
@@ -5394,6 +5395,7 @@ export default function EventDetailsPage() {
                                     ref={eventFileInputRef}
                                     type="file"
                                     required
+                                    accept="*/*"
                                     onChange={(e) => {
                                         const file = e.target.files?.[0] || null;
                                         setEventFile(file);
