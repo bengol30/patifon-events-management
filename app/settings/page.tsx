@@ -158,6 +158,7 @@ export default function SettingsPage() {
         baseUrl: ""
     });
     const [bulkFailures, setBulkFailures] = useState<BulkFailure[]>([]);
+    const [checkingConnection, setCheckingConnection] = useState(false);
     const [useAiFormatting, setUseAiFormatting] = useState(true);
     const [waRules, setWaRules] = useState<{ notifyOnMention: boolean; notifyOnVolunteerDone: boolean }>({ notifyOnMention: false, notifyOnVolunteerDone: false });
     const [savingWaRules, setSavingWaRules] = useState(false);
@@ -667,6 +668,30 @@ export default function SettingsPage() {
             setMessage({ text: "שגיאה בשמירת חוקי ההתראות", type: "error" });
         } finally {
             setSavingWaRules(false);
+        }
+    };
+
+    const handleCheckConnection = async () => {
+        if (!whatsappConfig.idInstance || !whatsappConfig.apiTokenInstance) {
+            setMessage({ text: "חסר ID/Token", type: "error" });
+            return;
+        }
+        setCheckingConnection(true);
+        try {
+            const baseApi = "https://api.green-api.com";
+            const endpoint = `${baseApi}/waInstance${whatsappConfig.idInstance}/getStateInstance/${whatsappConfig.apiTokenInstance}`;
+            const res = await fetch(endpoint);
+            const data = await res.json();
+            if (data.stateInstance === "authorized") {
+                setMessage({ text: "מחובר ותקין (authorized)", type: "success" });
+            } else {
+                setMessage({ text: `לא מחובר: ${data.stateInstance}`, type: "error" });
+            }
+        } catch (err) {
+            console.error("Connection check failed", err);
+            setMessage({ text: "שגיאה בבדיקת חיבור", type: "error" });
+        } finally {
+            setCheckingConnection(false);
         }
     };
 
@@ -2576,6 +2601,14 @@ export default function SettingsPage() {
                                                     className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
                                                 >
                                                     {savingWhatsapp ? "שומר..." : "שמור הגדרות"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleCheckConnection}
+                                                    disabled={checkingConnection}
+                                                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
+                                                >
+                                                    {checkingConnection ? "בודק..." : "בדוק חיבור"}
                                                 </button>
                                                 <span className="text-xs text-gray-500">השמירה מתבצעת ב-Firestore ותהיה זמינה לכלי שליחה.</span>
                                             </div>
