@@ -55,6 +55,7 @@ export default function NewEventPage() {
     const [creatorLookupLoading, setCreatorLookupLoading] = useState(false);
     const [shareLinkCopying, setShareLinkCopying] = useState(false);
     const [shareLinkCopied, setShareLinkCopied] = useState(false);
+    const [generatedLink, setGeneratedLink] = useState("");
     const [formData, setFormData] = useState({
         title: "",
         location: "",
@@ -302,6 +303,7 @@ export default function NewEventPage() {
         }
         setShareLinkCopying(true);
         setError("");
+        setGeneratedLink("");
         try {
             const linkDoc = await addDoc(collection(db, "event_creation_links"), {
                 ownerId: user.uid,
@@ -315,17 +317,40 @@ export default function NewEventPage() {
             if (projectId) params.set("projectId", projectId);
             if (projectName) params.set("projectName", projectName);
             const shareUrl = origin ? `${origin}/events/new?${params.toString()}` : `/events/new?${params.toString()}`;
+
+            setGeneratedLink(shareUrl);
+
+            // Try native share first (works better on mobile)
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: 'יצירת אירוע חדש',
+                        text: 'קישור ליצירת אירוע חדש במערכת',
+                        url: shareUrl
+                    });
+                    return; // Share successful
+                } catch (shareErr) {
+                    console.log("Share failed or cancelled, trying copy", shareErr);
+                }
+            }
+
+            // Fallback to clipboard
             if (navigator?.clipboard?.writeText) {
                 await navigator.clipboard.writeText(shareUrl);
                 setShareLinkCopied(true);
                 setError("");
                 setTimeout(() => setShareLinkCopied(false), 2000);
             } else {
-                setError("לא הצלחנו להעתיק אוטומטית. ניתן להעתיק ידנית: " + shareUrl);
+                setError("הקישור נוצר! העתק אותו ידנית מהשדה למטה.");
             }
         } catch (err: any) {
             console.error("Error creating share link", err);
-            setError("לא הצלחנו ליצור קישור שיתוף: " + (err?.message || ""));
+            // If we have a generated link but copy failed, don't show a scary error
+            if (generatedLink) {
+                setError("הקישור נוצר! לא הצלחנו להעתיק אוטומטית, אנא העתק ידנית.");
+            } else {
+                setError("לא הצלחנו ליצור קישור שיתוף: " + (err?.message || ""));
+            }
         } finally {
             setShareLinkCopying(false);
         }
@@ -376,6 +401,33 @@ export default function NewEventPage() {
                                         הקישור הועתק
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                    )}
+
+                    {generatedLink && (
+                        <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg animate-in fade-in slide-in-from-top-2">
+                            <p className="text-xs text-gray-500 mb-1 font-medium">הקישור שלך מוכן (העתק ידנית אם לא הועתק):</p>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    readOnly
+                                    value={generatedLink}
+                                    className="w-full text-sm p-2 border rounded bg-white text-gray-700 select-all focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    onClick={(e) => e.currentTarget.select()}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(generatedLink);
+                                        setShareLinkCopied(true);
+                                        setTimeout(() => setShareLinkCopied(false), 2000);
+                                    }}
+                                    className="p-2 text-indigo-600 hover:bg-indigo-50 rounded border border-indigo-100 bg-white"
+                                    title="העתק שוב"
+                                >
+                                    <Copy size={16} />
+                                </button>
                             </div>
                         </div>
                     )}
