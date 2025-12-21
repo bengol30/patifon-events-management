@@ -1671,6 +1671,10 @@ export default function SettingsPage() {
             const origin = getPublicBaseUrl(whatsappConfig.baseUrl);
             const parentsIndex = await loadParentsIndex();
             setEventsOptions(Array.from(parentsIndex.events.values()) as any);
+            let successCount = 0;
+            let failCount = 0;
+            const failedNames: string[] = [];
+
             for (const target of targets) {
                 await ensureGlobalRateLimit();
                 const rec = target.record as any;
@@ -1683,6 +1687,8 @@ export default function SettingsPage() {
                 }
                 if (!phone) {
                     console.warn("No phone for contact", rec);
+                    failCount++;
+                    failedNames.push(`${displayName} (חסר טלפון)`);
                     continue;
                 }
                 let messageLines: string[] = [];
@@ -1723,12 +1729,24 @@ export default function SettingsPage() {
                 if (!res.ok) {
                     const errText = await res.text();
                     console.warn("Bulk WhatsApp failed", rec, errText);
+                    failCount++;
+                    failedNames.push(`${displayName} (שגיאת שליחה)`);
+                } else {
+                    successCount++;
                 }
             }
-            setMessage({ text: "ההודעות נשלחו (או דולגו למי שחסר לו מספר)", type: "success" });
+
+            if (failCount > 0) {
+                setMessage({
+                    text: `נשלח ל-${successCount} נמענים. נכשל עבור ${failCount}: ${failedNames.slice(0, 3).join(", ")}${failedNames.length > 3 ? "..." : ""}`,
+                    type: "error" // Use error style to draw attention, or maybe warning if available
+                });
+            } else {
+                setMessage({ text: `נשלח בהצלחה לכל ${successCount} הנמענים!`, type: "success" });
+            }
         } catch (err) {
             console.error("Failed bulk WhatsApp", err);
-            setMessage({ text: "שגיאה בשליחת ההודעות", type: "error" });
+            setMessage({ text: "שגיאה כללית בשליחת ההודעות", type: "error" });
         } finally {
             setBulkSending(false);
         }
