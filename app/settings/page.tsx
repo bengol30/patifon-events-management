@@ -121,6 +121,15 @@ const PREDEFINED_TASKS = [
     }
 ];
 
+interface BulkFailure {
+    id: string;
+    name: string;
+    phone: string;
+    reason: string;
+    type: "user" | "volunteer";
+    record: any;
+}
+
 export default function SettingsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -148,6 +157,7 @@ export default function SettingsPage() {
         senderPhone: "",
         baseUrl: ""
     });
+    const [bulkFailures, setBulkFailures] = useState<BulkFailure[]>([]);
     const [useAiFormatting, setUseAiFormatting] = useState(true);
     const [waRules, setWaRules] = useState<{ notifyOnMention: boolean; notifyOnVolunteerDone: boolean }>({ notifyOnMention: false, notifyOnVolunteerDone: false });
     const [savingWaRules, setSavingWaRules] = useState(false);
@@ -1646,6 +1656,38 @@ export default function SettingsPage() {
         return upcoming.slice(0, 3);
     };
 
+    const generateMessageLines = async (rec: any, origin: string, parentsIndex: any) => {
+        const displayName = rec.fullName || rec.name || rec.email || "מתנדב/ת";
+        if (bulkTemplate === "custom") {
+            return [bulkCustomMessage.trim()];
+        } else if (bulkTemplate === "openTasks") {
+            const tasks = await fetchOpenTasksForUser(rec.id, rec.email, rec.fullName || rec.name, rec.phone, parentsIndex);
+            const list = tasks.slice(0, 5).map((t: any) => {
+                const due = t.dueDate ? new Date(t.dueDate).toLocaleDateString("he-IL") : "";
+                const ev = t.eventTitle ? ` | אירוע: ${t.eventTitle}` : "";
+                return `- ${t.title}${ev}${due ? ` (דדליין: ${due})` : ""}`;
+            });
+            return [
+                `היי ${displayName},`,
+                "תזכורת למשימות פתוחות שלך:",
+                ...(list.length ? list : ["לא נמצאו משימות פתוחות."]),
+                origin ? `כניסה למערכת: ${origin}` : "",
+            ].filter(Boolean);
+        } else {
+            const events = await fetchUpcomingEventsForUser(rec.id, rec.email, rec.fullName || rec.name, rec.phone, parentsIndex);
+            const list = events.map((ev: any) => {
+                const date = ev.startTime ? new Date(ev.startTime).toLocaleDateString("he-IL") : "";
+                return `- ${ev.title}${date ? ` (${date})` : ""}${ev.location ? ` @ ${ev.location}` : ""}`;
+            });
+            return [
+                `היי ${displayName},`,
+                "הנה 3 האירועים הקרובים:",
+                ...(list.length ? list : ["לא נמצאו אירועים קרובים."]),
+                origin ? `כניסה למערכת: ${origin}` : "",
+            ].filter(Boolean);
+        }
+    };
+
     const handleSendBulk = async () => {
         if (!db || !user || !isAdmin) return;
         if (!whatsappConfig.idInstance.trim() || !whatsappConfig.apiTokenInstance.trim()) {
@@ -1673,7 +1715,8 @@ export default function SettingsPage() {
             setEventsOptions(Array.from(parentsIndex.events.values()) as any);
             let successCount = 0;
             let failCount = 0;
-            const failedNames: string[] = [];
+            setBulkFailures([]);
+            const currentFailures: BulkFailure[] = [];
 
             for (const target of targets) {
                 await ensureGlobalRateLimit();
@@ -1688,38 +1731,18 @@ export default function SettingsPage() {
                 if (!phone) {
                     console.warn("No phone for contact", rec);
                     failCount++;
-                    failedNames.push(`${displayName} (חסר טלפון)`);
+                    currentFailures.push({
+                        id: rec.id,
+                        name: displayName,
+                        phone: "",
+                        reason: "חסר מספר טלפון",
+                        type: target.type,
+                        record: rec
+                    });
                     continue;
                 }
-                let messageLines: string[] = [];
-                if (bulkTemplate === "custom") {
-                    messageLines = [bulkCustomMessage.trim()];
-                } else if (bulkTemplate === "openTasks") {
-                    const tasks = await fetchOpenTasksForUser(rec.id, rec.email, rec.fullName || rec.name, rec.phone, parentsIndex);
-                    const list = tasks.slice(0, 5).map((t: any) => {
-                        const due = t.dueDate ? new Date(t.dueDate).toLocaleDateString("he-IL") : "";
-                        const ev = t.eventTitle ? ` | אירוע: ${t.eventTitle}` : "";
-                        return `- ${t.title}${ev}${due ? ` (דדליין: ${due})` : ""}`;
-                    });
-                    messageLines = [
-                        `היי ${displayName},`,
-                        "תזכורת למשימות פתוחות שלך:",
-                        ...(list.length ? list : ["לא נמצאו משימות פתוחות."]),
-                        origin ? `כניסה למערכת: ${origin}` : "",
-                    ].filter(Boolean);
-                } else {
-                    const events = await fetchUpcomingEventsForUser(rec.id, rec.email, rec.fullName || rec.name, rec.phone, parentsIndex);
-                    const list = events.map((ev: any) => {
-                        const date = ev.startTime ? new Date(ev.startTime).toLocaleDateString("he-IL") : "";
-                        return `- ${ev.title}${date ? ` (${date})` : ""}${ev.location ? ` @ ${ev.location}` : ""}`;
-                    });
-                    messageLines = [
-                        `היי ${displayName},`,
-                        "הנה 3 האירועים הקרובים:",
-                        ...(list.length ? list : ["לא נמצאו אירועים קרובים."]),
-                        origin ? `כניסה למערכת: ${origin}` : "",
-                    ].filter(Boolean);
-                }
+
+                const messageLines = await generateMessageLines(rec, origin, parentsIndex);
 
                 const res = await fetch("/api/whatsapp/send", {
                     method: "POST",
@@ -1730,16 +1753,25 @@ export default function SettingsPage() {
                     const errText = await res.text();
                     console.warn("Bulk WhatsApp failed", rec, errText);
                     failCount++;
-                    failedNames.push(`${displayName} (שגיאת שליחה)`);
+                    currentFailures.push({
+                        id: rec.id,
+                        name: displayName,
+                        phone: phone,
+                        reason: `שגיאת שליחה: ${errText || "לא ידוע"}`,
+                        type: target.type,
+                        record: rec
+                    });
                 } else {
                     successCount++;
                 }
             }
 
+            setBulkFailures(currentFailures);
+
             if (failCount > 0) {
                 setMessage({
-                    text: `נשלח ל-${successCount} נמענים. נכשל עבור ${failCount}: ${failedNames.slice(0, 3).join(", ")}${failedNames.length > 3 ? "..." : ""}`,
-                    type: "error" // Use error style to draw attention, or maybe warning if available
+                    text: `נשלח ל-${successCount} נמענים. נכשל עבור ${failCount}. בדוק את דוח התקלות למטה.`,
+                    type: "error"
                 });
             } else {
                 setMessage({ text: `נשלח בהצלחה לכל ${successCount} הנמענים!`, type: "success" });
@@ -1750,6 +1782,39 @@ export default function SettingsPage() {
         } finally {
             setBulkSending(false);
         }
+    };
+
+    const handleRetryBulkItem = async (item: BulkFailure) => {
+        if (!item.phone) {
+            setMessage({ text: "לא ניתן לנסות שוב ללא מספר טלפון", type: "error" });
+            return;
+        }
+        try {
+            const origin = getPublicBaseUrl(whatsappConfig.baseUrl);
+            const parentsIndex = await loadParentsIndex();
+            const messageLines = await generateMessageLines(item.record, origin, parentsIndex);
+
+            const res = await fetch("/api/whatsapp/send", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ phone: item.phone, message: messageLines.join("\n") }),
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                setMessage({ text: `עדיין נכשל: ${errText}`, type: "error" });
+            } else {
+                setMessage({ text: "נשלח בהצלחה!", type: "success" });
+                setBulkFailures(prev => prev.filter(f => f.id !== item.id));
+            }
+        } catch (err) {
+            console.error("Retry failed", err);
+            setMessage({ text: "שגיאה בנסיון חוזר", type: "error" });
+        }
+    };
+
+    const handleRemoveBulkFailure = (id: string) => {
+        setBulkFailures(prev => prev.filter(f => f.id !== id));
     };
 
     const handleCopyUid = async () => {
@@ -2725,6 +2790,42 @@ export default function SettingsPage() {
                                     >
                                         {bulkSending ? "שולח..." : "שלח לנבחרים"}
                                     </button>
+
+                                    {bulkFailures.length > 0 && (
+                                        <div className="mt-6 bg-red-50 border border-red-200 rounded-xl p-4">
+                                            <div className="flex items-center gap-2 mb-3 text-red-800">
+                                                <AlertTriangle size={20} />
+                                                <h4 className="font-bold">דוח תקלות בשליחה ({bulkFailures.length})</h4>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {bulkFailures.map((fail) => (
+                                                    <div key={fail.id} className="bg-white p-3 rounded-lg border border-red-100 flex items-center justify-between gap-4">
+                                                        <div>
+                                                            <p className="font-medium text-gray-900">{fail.name}</p>
+                                                            <p className="text-xs text-red-600">{fail.reason}</p>
+                                                            {fail.phone && <p className="text-xs text-gray-500">{fail.phone}</p>}
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            {fail.phone && (
+                                                                <button
+                                                                    onClick={() => handleRetryBulkItem(fail)}
+                                                                    className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-100 transition"
+                                                                >
+                                                                    נסה שוב
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                onClick={() => handleRemoveBulkFailure(fail.id)}
+                                                                className="text-gray-400 hover:text-red-500 transition"
+                                                            >
+                                                                <X size={16} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
