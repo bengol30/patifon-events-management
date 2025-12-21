@@ -133,12 +133,17 @@ export async function POST(request: Request) {
     }
 
     // Regular text message mode
-    if (!phone || !message) {
-      return NextResponse.json({ error: "phone and message are required" }, { status: 400, headers: corsHeaders });
+    if ((!phone && !chatId) || !message) {
+      return NextResponse.json({ error: "phone (or chatId) and message are required" }, { status: 400, headers: corsHeaders });
     }
-    const phoneClean = normalizePhoneForWhatsApp(phone);
-    if (!phoneClean) {
-      return NextResponse.json({ error: "מספר טלפון לא תקין" }, { status: 400, headers: corsHeaders });
+
+    let targetChatId = chatId;
+    if (!targetChatId && phone) {
+      const phoneClean = normalizePhoneForWhatsApp(phone);
+      if (!phoneClean) {
+        return NextResponse.json({ error: "מספר טלפון לא תקין" }, { status: 400, headers: corsHeaders });
+      }
+      targetChatId = `${phoneClean}@c.us`;
     }
 
     const cfg = await readConfig();
@@ -162,7 +167,7 @@ export async function POST(request: Request) {
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatId: `${phoneClean}@c.us`, message }),
+          body: JSON.stringify({ chatId: targetChatId, message }),
         });
 
         if (res.ok) {

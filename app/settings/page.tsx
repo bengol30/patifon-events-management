@@ -1266,8 +1266,7 @@ export default function SettingsPage() {
         setSendingGroupsMsg(true);
         try {
             // Text messages still use direct API call (no CORS issue for simple POST)
-            const baseApi = "https://api.green-api.com";
-            const messageEndpoint = `${baseApi}/waInstance${whatsappConfig.idInstance.trim()}/SendMessage/${whatsappConfig.apiTokenInstance.trim()}`;
+
             const errors: string[] = [];
             const mediaFileName = mediaFile?.name || "media";
             // No need for base64 conversion - we upload to storage now
@@ -1326,7 +1325,7 @@ export default function SettingsPage() {
                     } else if (linkMessage) {
                         await sleep(2000);
                         await ensureGlobalRateLimit();
-                        const resLink = await fetch(messageEndpoint, {
+                        const resLink = await fetch("/api/whatsapp/send", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ chatId: g.chatId, message: linkMessage }),
@@ -1360,7 +1359,7 @@ export default function SettingsPage() {
                     } else if (linkMessage) {
                         await sleep(2000);
                         await ensureGlobalRateLimit();
-                        const resLink = await fetch(messageEndpoint, {
+                        const resLink = await fetch("/api/whatsapp/send", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ chatId: g.chatId, message: linkMessage }),
@@ -1372,7 +1371,7 @@ export default function SettingsPage() {
                     }
                 } else {
                     // Case 3: Text only
-                    const res = await fetch(messageEndpoint, {
+                    const res = await fetch("/api/whatsapp/send", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ chatId: g.chatId, message: captionToUse }),
@@ -1383,7 +1382,7 @@ export default function SettingsPage() {
                     } else if (linkMessage) {
                         await sleep(2000);
                         await ensureGlobalRateLimit();
-                        const resLink = await fetch(messageEndpoint, {
+                        const resLink = await fetch("/api/whatsapp/send", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ chatId: g.chatId, message: linkMessage }),
