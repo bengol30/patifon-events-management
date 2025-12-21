@@ -111,10 +111,9 @@ export default function NewEventPage() {
         fetchCreatorFromToken();
     }, [creatorToken, db]);
 
-    // Redirect if not authenticated
-    if (!authLoading && !user) {
+    // Redirect if not authenticated AND not using a share link
+    if (!authLoading && !user && !creatorToken) {
         const redirectParams = new URLSearchParams();
-        if (creatorToken) redirectParams.set("creatorToken", creatorToken);
         if (projectId) redirectParams.set("projectId", projectId);
         if (projectName) redirectParams.set("projectName", projectName);
         const redirectTarget = redirectParams.toString() ? `/events/new?${redirectParams.toString()}` : "/events/new";
@@ -141,7 +140,8 @@ export default function NewEventPage() {
             return;
         }
 
-        if (!user) {
+        // Allow submission if user is logged in OR if using a valid share token
+        if (!user && !creatorToken) {
             setError("עליך להתחבר כדי ליצור אירוע");
             setSubmitting(false);
             return;
@@ -187,15 +187,29 @@ export default function NewEventPage() {
                 dateObjects[0] = computeNextOccurrence(dateObjects[0], formData.recurrence, recurrenceEnd);
             }
             const volunteersCountNum = formData.volunteersCount ? parseInt(formData.volunteersCount, 10) : null;
-            const creator = creatorOverride || {
+
+            // Determine creator (owner of the event)
+            const creator = creatorOverride || (user ? {
                 id: user.uid,
                 email: user.email || "",
                 name: user.displayName || user.email?.split("@")[0] || "מנהל",
-            };
-            const submitter = {
+            } : null);
+
+            if (!creator) {
+                setError("שגיאה בזיהוי יוצר האירוע");
+                setSubmitting(false);
+                return;
+            }
+
+            // Determine submitter (who actually filled the form)
+            const submitter = user ? {
                 id: user.uid,
                 email: user.email || "",
                 name: user.displayName || user.email?.split("@")[0] || "",
+            } : {
+                id: "guest",
+                email: formData.contactName || "guest", // Use contact name as identifier for guest
+                name: formData.contactName || "אורח",
             };
 
             // Create event in Firestore
@@ -216,20 +230,20 @@ export default function NewEventPage() {
                 needsVolunteers: formData.needsVolunteers,
                 volunteersCount: formData.needsVolunteers && Number.isFinite(volunteersCountNum) ? volunteersCountNum : null,
                 createdBy: creator.id,
-                createdByEmail: creator.email || user.email || "",
-                members: creator.id ? [creator.id] : [],
+                createdByEmail: creator.email,
+                members: [creator.id],
                 team: [
                     {
-                        name: creator.name || creator.email || "מנהל",
+                        name: creator.name,
                         role: "מנהל אירוע",
-                        email: creator.email || user.email || "",
+                        email: creator.email,
                         userId: creator.id,
                     }
                 ],
                 contactPerson: {
                     name: formData.contactName,
                     phone: formData.contactPhone,
-                    email: creator.email || user.email || "",
+                    email: creator.email, // Contact person email defaults to creator's email for notifications
                 },
                 projectId: projectId || null,
                 projectName: projectName || null,
@@ -239,7 +253,7 @@ export default function NewEventPage() {
             if (creatorToken) {
                 (eventData as any).createdViaLinkToken = creatorToken;
             }
-            if (creator.id !== submitter.id) {
+            if (submitter.id === "guest" || (user && creator.id !== user.uid)) {
                 (eventData as any).createdByProxy = submitter;
             }
 
