@@ -9,8 +9,8 @@ export async function POST(request: Request) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      console.error("OpenAI API key is missing in environment variables");
-      return NextResponse.json({ error: "OpenAI API key not configured" }, { status: 500 });
+      console.warn("OpenAI API key is missing. Returning original text.");
+      return NextResponse.json({ formatted: text, warning: "OpenAI API key not configured" });
     }
 
     const prompt = `
