@@ -56,6 +56,7 @@ export default function NewEventPage() {
     const [shareLinkCopying, setShareLinkCopying] = useState(false);
     const [shareLinkCopied, setShareLinkCopied] = useState(false);
     const [generatedLink, setGeneratedLink] = useState("");
+    const [submitted, setSubmitted] = useState(false);
     const [formData, setFormData] = useState({
         title: "",
         location: "",
@@ -260,7 +261,11 @@ export default function NewEventPage() {
             const docRef = await addDoc(collection(db, "events"), eventData);
             console.log("Event created with ID:", docRef.id);
 
-            router.push("/");
+            if (user) {
+                router.push("/");
+            } else {
+                setSubmitted(true);
+            }
         } catch (err: any) {
             console.error("Error creating event:", err);
             setError("שגיאה ביצירת האירוע: " + err.message);
@@ -372,312 +377,334 @@ export default function NewEventPage() {
 
     return (
         <div className="min-h-screen bg-gray-50 p-6">
-            <div className="max-w-2xl mx-auto">
-                <div className="mb-6">
-                    {isSharedForm ? (
-                        <div className="flex flex-col gap-2">
-                            <h1 className="text-3xl font-bold text-gray-900">יצירת אירוע חדש</h1>
-                            {projectId && (
-                                <div className="mt-1 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
-                                    משויך לפרויקט: {projectName || projectId}
-                                </div>
-                            )}
+            {submitted ? (
+                <div className="min-h-[60vh] flex items-center justify-center">
+                    <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full text-center">
+                        <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Check size={32} />
                         </div>
-                    ) : (
-                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                            <div>
-                                <Link href="/" className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm mb-2">
-                                    <ArrowRight size={16} />
-                                    חזרה לדשבורד
-                                </Link>
+                        <h2 className="text-2xl font-bold text-gray-900 mb-2">האירוע נוצר בהצלחה!</h2>
+                        <p className="text-gray-600 mb-6">
+                            הפרטים נשלחו והאירוע נוסף למערכת.
+                            <br />
+                            תודה רבה!
+                        </p>
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="text-indigo-600 hover:text-indigo-800 font-medium"
+                        >
+                            שלח אירוע נוסף
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <div className="max-w-2xl mx-auto">
+                    <div className="mb-6">
+                        {isSharedForm ? (
+                            <div className="flex flex-col gap-2">
                                 <h1 className="text-3xl font-bold text-gray-900">יצירת אירוע חדש</h1>
                                 {projectId && (
-                                    <div className="mt-2 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                                    <div className="mt-1 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
                                         משויך לפרויקט: {projectName || projectId}
                                     </div>
                                 )}
                             </div>
-                            <div className="flex flex-col gap-2 w-full sm:w-auto">
-                                <button
-                                    type="button"
-                                    onClick={handleCopyShareLink}
-                                    disabled={shareLinkCopying}
-                                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 px-4 py-2 text-indigo-700 bg-white hover:bg-indigo-50 text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
-                                >
-                                    {shareLinkCopying ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
-                                    {shareLinkCopying ? "יוצר קישור..." : "העתק קישור לטופס שיתוף"}
-                                    {!shareLinkCopying && <Copy size={14} className="text-indigo-500" />}
-                                </button>
-                                <p className="text-xs text-gray-600 text-right">הקישור יפתח טופס זה ויצור אירוע בשמי.</p>
-                                {shareLinkCopied && (
-                                    <div className="flex items-center gap-1 text-xs text-emerald-600 justify-end">
-                                        <Check size={14} />
-                                        הקישור הועתק
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {generatedLink && (
-                        <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg animate-in fade-in slide-in-from-top-2">
-                            <p className="text-xs text-gray-500 mb-1 font-medium">הקישור שלך מוכן (העתק ידנית אם לא הועתק):</p>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="text"
-                                    readOnly
-                                    value={generatedLink}
-                                    className="w-full text-sm p-2 border rounded bg-white text-gray-700 select-all focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    onClick={(e) => e.currentTarget.select()}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(generatedLink);
-                                        setShareLinkCopied(true);
-                                        setTimeout(() => setShareLinkCopied(false), 2000);
-                                    }}
-                                    className="p-2 text-indigo-600 hover:bg-indigo-50 rounded border border-indigo-100 bg-white"
-                                    title="העתק שוב"
-                                >
-                                    <Copy size={16} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                    {creatorLookupLoading && (
-                        <div className="mt-3 inline-flex items-center gap-2 text-xs text-gray-700 bg-gray-100 border border-gray-200 px-3 py-2 rounded-lg">
-                            <Loader2 size={14} className="animate-spin" />
-                            טוען פרטי בעל הקישור...
-                        </div>
-                    )}
-                    {creatorOverride && (
-                        <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-100 px-3 py-2 rounded-full">
-                            <Check size={14} />
-                            האירוע יפתח עבור {creatorOverride.name || "מנהל"} ({creatorOverride.email || "ללא אימייל"}), ורק הוא יראה אותו עד שתוסיפו אנשי צוות.
-                        </div>
-                    )}
-                    {creatorToken && !creatorOverride && !creatorLookupLoading && (
-                        <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                            קישור השיתוף לא נמצא. בקש/י קישור חדש מהמנהל ששיתף אותך.
-                        </div>
-                    )}
-                </div>
-
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                    {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
-                                <input
-                                    type="text"
-                                    required
-                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                    value={formData.title}
-                                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                                    placeholder="לדוגמה: פסטיבל אביב 2025"
-                                />
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ) : (
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">איש קשר</label>
-                                    <input
-                                        type="text"
-                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                        value={formData.contactName || ""}
-                                        onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
-                                        placeholder="שם איש קשר"
-                                    />
+                                    <Link href="/" className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm mb-2">
+                                        <ArrowRight size={16} />
+                                        חזרה לדשבורד
+                                    </Link>
+                                    <h1 className="text-3xl font-bold text-gray-900">יצירת אירוע חדש</h1>
+                                    {projectId && (
+                                        <div className="mt-2 inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                                            משויך לפרויקט: {projectName || projectId}
+                                        </div>
+                                    )}
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">טלפון איש קשר</label>
-                                    <input
-                                        type="tel"
-                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                        value={formData.contactPhone || ""}
-                                        onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
-                                        placeholder="05x-xxxxxxx"
-                                    />
+                                <div className="flex flex-col gap-2 w-full sm:w-auto">
+                                    <button
+                                        type="button"
+                                        onClick={handleCopyShareLink}
+                                        disabled={shareLinkCopying}
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 px-4 py-2 text-indigo-700 bg-white hover:bg-indigo-50 text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        {shareLinkCopying ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+                                        {shareLinkCopying ? "יוצר קישור..." : "העתק קישור לטופס שיתוף"}
+                                        {!shareLinkCopying && <Copy size={14} className="text-indigo-500" />}
+                                    </button>
+                                    <p className="text-xs text-gray-600 text-right">הקישור יפתח טופס זה ויצור אירוע בשמי.</p>
+                                    {shareLinkCopied && (
+                                        <div className="flex items-center gap-1 text-xs text-emerald-600 justify-end">
+                                            <Check size={14} />
+                                            הקישור הועתק
+                                        </div>
+                                    )}
                                 </div>
                             </div>
-                        </div>
+                        )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תאריכים ושעות</label>
-                                {eventDates.map((d, idx) => (
-                                    <div key={idx} className="flex items-center gap-2">
-                                        <input
-                                            type="datetime-local"
-                                            required={idx === 0}
-                                            className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                            value={d}
-                                            onChange={(e) => {
-                                                const copy = [...eventDates];
-                                                copy[idx] = e.target.value;
-                                                setEventDates(copy);
-                                            }}
-                                        />
-                                        {eventDates.length > 1 && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setEventDates(prev => prev.filter((_, i) => i !== idx))}
-                                                className="text-red-500 text-sm px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200"
-                                            >
-                                                מחק
-                                            </button>
-                                        )}
-                                    </div>
-                                ))}
-                                <button
-                                    type="button"
-                                    onClick={() => setEventDates(prev => [...prev, ""])}
-                                    className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                                >
-                                    הוסף תאריך נוסף
-                                </button>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">מיקום</label>
-                                <input
-                                    type="text"
-                                    required
-                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                    value={formData.location}
-                                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                                    placeholder="לדוגמה: פארק הזהב"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">מתנדבים לערב</label>
+                        {generatedLink && (
+                            <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg animate-in fade-in slide-in-from-top-2">
+                                <p className="text-xs text-gray-500 mb-1 font-medium">הקישור שלך מוכן (העתק ידנית אם לא הועתק):</p>
                                 <div className="flex items-center gap-2">
                                     <input
-                                        id="needsVolunteers"
-                                        type="checkbox"
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        checked={formData.needsVolunteers}
-                                        onChange={(e) => setFormData({ ...formData, needsVolunteers: e.target.checked })}
+                                        type="text"
+                                        readOnly
+                                        value={generatedLink}
+                                        className="w-full text-sm p-2 border rounded bg-white text-gray-700 select-all focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        onClick={(e) => e.currentTarget.select()}
                                     />
-                                    <label htmlFor="needsVolunteers" className="text-gray-800 text-sm">
-                                        צריך מתנדבים לערב הזה?
-                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(generatedLink);
+                                            setShareLinkCopied(true);
+                                            setTimeout(() => setShareLinkCopied(false), 2000);
+                                        }}
+                                        className="p-2 text-indigo-600 hover:bg-indigo-50 rounded border border-indigo-100 bg-white"
+                                        title="העתק שוב"
+                                    >
+                                        <Copy size={16} />
+                                    </button>
                                 </div>
-                                {formData.needsVolunteers && (
+                            </div>
+                        )}
+                        {creatorLookupLoading && (
+                            <div className="mt-3 inline-flex items-center gap-2 text-xs text-gray-700 bg-gray-100 border border-gray-200 px-3 py-2 rounded-lg">
+                                <Loader2 size={14} className="animate-spin" />
+                                טוען פרטי בעל הקישור...
+                            </div>
+                        )}
+                        {creatorOverride && (
+                            <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-100 px-3 py-2 rounded-full">
+                                <Check size={14} />
+                                האירוע יפתח עבור {creatorOverride.name || "מנהל"} ({creatorOverride.email || "ללא אימייל"}), ורק הוא יראה אותו עד שתוסיפו אנשי צוות.
+                            </div>
+                        )}
+                        {creatorToken && !creatorOverride && !creatorLookupLoading && (
+                            <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                קישור השיתוף לא נמצא. בקש/י קישור חדש מהמנהל ששיתף אותך.
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                        {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        value={formData.title}
+                                        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                                        placeholder="לדוגמה: פסטיבל אביב 2025"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">כמה מתנדבים?</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">איש קשר</label>
                                         <input
-                                            type="number"
-                                            min={0}
+                                            type="text"
                                             className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                            value={formData.volunteersCount}
-                                            onChange={(e) => setFormData({ ...formData, volunteersCount: e.target.value })}
-                                            placeholder="מספר המתנדבים הדרוש"
-                                            required={formData.needsVolunteers}
+                                            value={formData.contactName || ""}
+                                            onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
+                                            placeholder="שם איש קשר"
                                         />
                                     </div>
-                                )}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">טלפון איש קשר</label>
+                                        <input
+                                            type="tel"
+                                            className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            value={formData.contactPhone || ""}
+                                            onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
+                                            placeholder="05x-xxxxxxx"
+                                        />
+                                    </div>
+                                </div>
                             </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תאריכים ושעות</label>
+                                    {eventDates.map((d, idx) => (
+                                        <div key={idx} className="flex items-center gap-2">
+                                            <input
+                                                type="datetime-local"
+                                                required={idx === 0}
+                                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                                value={d}
+                                                onChange={(e) => {
+                                                    const copy = [...eventDates];
+                                                    copy[idx] = e.target.value;
+                                                    setEventDates(copy);
+                                                }}
+                                            />
+                                            {eventDates.length > 1 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEventDates(prev => prev.filter((_, i) => i !== idx))}
+                                                    className="text-red-500 text-sm px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200"
+                                                >
+                                                    מחק
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <button
+                                        type="button"
+                                        onClick={() => setEventDates(prev => [...prev, ""])}
+                                        className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                    >
+                                        הוסף תאריך נוסף
+                                    </button>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מיקום</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        value={formData.location}
+                                        onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                                        placeholder="לדוגמה: פארק הזהב"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מתנדבים לערב</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            id="needsVolunteers"
+                                            type="checkbox"
+                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={formData.needsVolunteers}
+                                            onChange={(e) => setFormData({ ...formData, needsVolunteers: e.target.checked })}
+                                        />
+                                        <label htmlFor="needsVolunteers" className="text-gray-800 text-sm">
+                                            צריך מתנדבים לערב הזה?
+                                        </label>
+                                    </div>
+                                    {formData.needsVolunteers && (
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">כמה מתנדבים?</label>
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                                value={formData.volunteersCount}
+                                                onChange={(e) => setFormData({ ...formData, volunteersCount: e.target.value })}
+                                                placeholder="מספר המתנדבים הדרוש"
+                                                required={formData.needsVolunteers}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תדירות חוזרת</label>
+                                    <select
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        value={formData.recurrence}
+                                        onChange={(e) => setFormData({ ...formData, recurrence: e.target.value as any })}
+                                    >
+                                        <option value="NONE">חד פעמי</option>
+                                        <option value="WEEKLY">כל שבוע</option>
+                                        <option value="BIWEEKLY">כל שבועיים</option>
+                                        <option value="MONTHLY">כל חודש</option>
+                                    </select>
+                                    {formData.recurrence !== "NONE" && (
+                                        <div className="mt-2 space-y-1">
+                                            <label className="block text-xs font-medium text-gray-600">עד איזה תאריך האירוע יחזור?</label>
+                                            <input
+                                                type="date"
+                                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                                value={formData.recurrenceEndDate}
+                                                onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                                                placeholder="בחר תאריך סיום חזרתיות"
+                                            />
+                                            <p className="text-xs text-gray-500">אופציונלי: בחר תאריך אחרון שבו האירוע יתקיים.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">כמות משתתפים רצויה</label>
+                                    <input
+                                        type="number"
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        value={formData.participantsCount}
+                                        onChange={(e) => setFormData({ ...formData, participantsCount: e.target.value })}
+                                        placeholder="0"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תקציב משוער (₪)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        value={formData.budget}
+                                        onChange={(e) => setFormData({ ...formData, budget: e.target.value })}
+                                        placeholder="0"
+                                    />
+                                </div>
+                            </div>
+
+                            <PartnersInput
+                                label="שותפים (רכזת נוספת, ארגון וכו')"
+                                value={formData.partners}
+                                onChange={(partners) => setFormData({ ...formData, partners })}
+                                placeholder="הוסף שותף ולחץ אנטר"
+                            />
+
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תדירות חוזרת</label>
-                                <select
+                                <label className="block text-sm font-medium text-gray-700 mb-1">מטרת האירוע</label>
+                                <textarea
+                                    rows={3}
                                     className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                    value={formData.recurrence}
-                                    onChange={(e) => setFormData({ ...formData, recurrence: e.target.value as any })}
+                                    value={formData.goal}
+                                    onChange={(e) => setFormData({ ...formData, goal: e.target.value })}
+                                    placeholder="על איזה צורך עונה האירוע? עם איזה תחושות המשתתפים יצאו?"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">תיאור כללי</label>
+                                <textarea
+                                    rows={4}
+                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                    value={formData.description}
+                                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                    placeholder="פרטים נוספים על האירוע..."
+                                />
+                            </div>
+
+                            <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleSaveToCalendar}
+                                    className="w-full border-2 border-indigo-200 text-indigo-700 py-2 px-4 rounded-lg hover:bg-indigo-50 transition font-semibold flex items-center justify-center gap-2"
                                 >
-                                    <option value="NONE">חד פעמי</option>
-                                    <option value="WEEKLY">כל שבוע</option>
-                                    <option value="BIWEEKLY">כל שבועיים</option>
-                                    <option value="MONTHLY">כל חודש</option>
-                                </select>
-                                {formData.recurrence !== "NONE" && (
-                                    <div className="mt-2 space-y-1">
-                                        <label className="block text-xs font-medium text-gray-600">עד איזה תאריך האירוע יחזור?</label>
-                                        <input
-                                            type="date"
-                                            className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                            value={formData.recurrenceEndDate}
-                                            onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
-                                            placeholder="בחר תאריך סיום חזרתיות"
-                                        />
-                                        <p className="text-xs text-gray-500">אופציונלי: בחר תאריך אחרון שבו האירוע יתקיים.</p>
-                                    </div>
-                                )}
+                                    <CalendarPlus size={18} />
+                                    שמור ביומן
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={submitting || creatorLookupLoading}
+                                    className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                                >
+                                    {submitting ? "יוצר אירוע..." : creatorLookupLoading ? "טוען קישור..." : "צור אירוע"}
+                                </button>
                             </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">כמות משתתפים רצויה</label>
-                                <input
-                                    type="number"
-                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                    value={formData.participantsCount}
-                                    onChange={(e) => setFormData({ ...formData, participantsCount: e.target.value })}
-                                    placeholder="0"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תקציב משוער (₪)</label>
-                                <input
-                                    type="number"
-                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                    value={formData.budget}
-                                    onChange={(e) => setFormData({ ...formData, budget: e.target.value })}
-                                    placeholder="0"
-                                />
-                            </div>
-                        </div>
-
-                        <PartnersInput
-                            label="שותפים (רכזת נוספת, ארגון וכו')"
-                            value={formData.partners}
-                            onChange={(partners) => setFormData({ ...formData, partners })}
-                            placeholder="הוסף שותף ולחץ אנטר"
-                        />
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">מטרת האירוע</label>
-                            <textarea
-                                rows={3}
-                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                value={formData.goal}
-                                onChange={(e) => setFormData({ ...formData, goal: e.target.value })}
-                                placeholder="על איזה צורך עונה האירוע? עם איזה תחושות המשתתפים יצאו?"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">תיאור כללי</label>
-                            <textarea
-                                rows={4}
-                                className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                value={formData.description}
-                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                placeholder="פרטים נוספים על האירוע..."
-                            />
-                        </div>
-
-                        <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
-                            <button
-                                type="button"
-                                onClick={handleSaveToCalendar}
-                                className="w-full border-2 border-indigo-200 text-indigo-700 py-2 px-4 rounded-lg hover:bg-indigo-50 transition font-semibold flex items-center justify-center gap-2"
-                            >
-                                <CalendarPlus size={18} />
-                                שמור ביומן
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={submitting || creatorLookupLoading}
-                                className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                            >
-                                {submitting ? "יוצר אירוע..." : creatorLookupLoading ? "טוען קישור..." : "צור אירוע"}
-                            </button>
-                        </div>
-                    </form>
+                        </form>
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 }
