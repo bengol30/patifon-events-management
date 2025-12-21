@@ -2790,6 +2790,9 @@ export default function SettingsPage() {
                                     >
                                         {bulkSending ? "שולח..." : "שלח לנבחרים"}
                                     </button>
+                                    <p className="text-xs text-gray-400 mt-2">
+                                        דוח תקלות יופיע כאן במידה והיו שגיאות בשליחה.
+                                    </p>
 
                                     {bulkFailures.length > 0 && (
                                         <div className="mt-6 bg-red-50 border border-red-200 rounded-xl p-4">
