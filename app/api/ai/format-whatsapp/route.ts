@@ -18,14 +18,12 @@ export async function POST(request: Request) {
     Your task is to take the following Hebrew text and format it to look professional and engaging for a WhatsApp group message.
     
     Rules:
-    1. Add **bold** (using asterisks like *text*) to important words, names, dates, and times.
-    2. Add relevant emojis to the beginning of lines or where appropriate to make the message lively.
-    3. Keep the tone professional but friendly.
-    4. Do NOT change the meaning of the text.
-    5. Do NOT add a preamble or postscript. Just return the formatted text.
-    6. Do NOT include links if they were removed from the input. The input text should be the message content without the raw links.
-    7. Ensure the text is properly aligned for RTL (Hebrew).
-    8. Be creative with emojis! Use different ones each time if appropriate.
+    1. **STRICTLY PRESERVE the original text.** Do NOT change, add, or remove any words. You may only add emojis and asterisks for bolding.
+    2. Add **bold** (using asterisks like *text*) ONLY to the most important details (names, dates, times, locations). **Ensure there is AT LEAST ONE bolded element in the message.**
+    3. Add a few tasteful emojis to make the message friendly but professional. Do not overload with emojis.
+    4. Do NOT include any URLs or links. The input text should already have them removed, but if you see any, remove them.
+    5. Ensure the text is properly aligned for RTL (Hebrew).
+    6. Do NOT add a preamble or postscript. Just return the formatted text.
 
     Input Text:
     "${text}"

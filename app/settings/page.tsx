@@ -148,6 +148,7 @@ export default function SettingsPage() {
         senderPhone: "",
         baseUrl: ""
     });
+    const [useAiFormatting, setUseAiFormatting] = useState(true);
     const [waRules, setWaRules] = useState<{ notifyOnMention: boolean; notifyOnVolunteerDone: boolean }>({ notifyOnMention: false, notifyOnVolunteerDone: false });
     const [savingWaRules, setSavingWaRules] = useState(false);
     const [loadingWhatsapp, setLoadingWhatsapp] = useState(true);
@@ -1097,35 +1098,61 @@ export default function SettingsPage() {
         const formatWhatsappText = (raw: string) => {
             const trimmed = (raw || "").trim();
             if (!trimmed) return "";
+
+            // Expanded emoji lists for variety
+            const emojiMap: Record<string, string[]> = {
+                important: ["❗", "⚠️", "🔴", "📢", "🔥"],
+                reminder: ["⏰", "⏳", "📅", "🔔", "⌚"],
+                event: ["🎉", "🥳", "🎊", "🎈", "✨"],
+                task: ["📝", "✅", "📋", "📌", "🔨"],
+                link: ["🔗", "🌐", "💻", "📲", "👉"],
+                thanks: ["🙏", "❤️", "💐", "🙌", "😊"],
+                general: ["✨", "💫", "🌟", "💡", "📍"]
+            };
+
+            const getRandomEmoji = (category: string) => {
+                const list = emojiMap[category] || emojiMap.general;
+                return list[Math.floor(Math.random() * list.length)];
+            };
+
             const emojiRules = [
-                { rx: /חשוב/i, emoji: "❗" },
-                { rx: /תזכורת/i, emoji: "⏰" },
-                { rx: /אירוע/i, emoji: "🎉" },
-                { rx: /משימה/i, emoji: "📝" },
-                { rx: /קישור|לינק/i, emoji: "🔗" },
-                { rx: /תודה/i, emoji: "🙏" },
+                { rx: /חשוב|דחוף|שימו לב/i, category: "important" },
+                { rx: /תזכורת|מתי|שעה|תאריך/i, category: "reminder" },
+                { rx: /אירוע|מסיבה|חגיגה/i, category: "event" },
+                { rx: /משימה|מטלה|לביצוע/i, category: "task" },
+                { rx: /קישור|לינק|להרשמה|כנסו/i, category: "link" },
+                { rx: /תודה|בהצלחה|מזל טוב/i, category: "thanks" },
             ];
+
             const boldify = (line: string) => {
                 const rawLine = line.trim();
                 if (!rawLine) return rawLine;
                 if (isLikelyUrl(rawLine)) return rawLine;
+
+                // Bold bullet points
                 const bulletMatch = rawLine.match(/^\s*[-•]\s+(.*)$/);
                 if (bulletMatch) {
                     const content = bulletMatch[1].trim();
                     if (!content) return "•";
                     if (isLikelyUrl(content)) return `• ${content}`;
+
+                    // Bold text before colon
                     const colonIdx = content.indexOf(":");
                     if (colonIdx > 0 && content.slice(colonIdx, colonIdx + 3) !== "://") {
                         const title = content.slice(0, colonIdx).trim();
                         const rest = content.slice(colonIdx + 1).trim();
                         return `• *${title}*: ${rest}`;
                     }
+
+                    // Bold first few words if no colon
                     const words = content.split(/\s+/);
                     const headCount = Math.min(words.length, 3);
                     const head = words.slice(0, headCount).join(" ");
                     const tail = words.slice(headCount).join(" ");
                     return `• *${head}*${tail ? ` ${tail}` : ""}`;
                 }
+
+                // Bold text before colon in regular lines
                 const idx = rawLine.indexOf(":");
                 if (idx > 0 && rawLine.slice(idx, idx + 3) !== "://") {
                     const title = rawLine.slice(0, idx).trim();
@@ -1134,19 +1161,67 @@ export default function SettingsPage() {
                 }
                 return rawLine;
             };
+
             const addEmoji = (line: string) => {
                 let out = line;
-                emojiRules.forEach(rule => {
-                    if (rule.rx.test(out) && !out.includes(rule.emoji)) {
-                        out = `${rule.emoji} ${out}`;
+                // Only add emoji if line doesn't start with one
+                if (/^[\u{1F300}-\u{1F9FF}]/u.test(out)) return out;
+
+                for (const rule of emojiRules) {
+                    if (rule.rx.test(out)) {
+                        return `${getRandomEmoji(rule.category)} ${out}`;
                     }
-                });
+                }
+
+                // Randomly add general emoji removed to reduce clutter
+                // if (Math.random() < 0.2 && out.length > 10) {
+                //     return `${getRandomEmoji("general")} ${out}`;
+                // }
+
                 return out;
             };
-            return trimmed
+
+            let formatted = trimmed
                 .split("\n")
                 .map((line) => addEmoji(boldify(line.trim())))
                 .join("\n");
+
+            // Ensure at least one bold element exists
+            if (!formatted.includes("*")) {
+                const lines = formatted.split("\n");
+                if (lines.length > 0) {
+                    // Bold the first line or part of it
+                    const firstLine = lines[0];
+                    // If it's a short title line, bold the whole thing
+                    if (firstLine.length < 50 && !isLikelyUrl(firstLine)) {
+                        const emojiMatch = firstLine.match(/^(\s*[\u{1F300}-\u{1F9FF}]+\s*)/u);
+                        const cleanLine = firstLine.replace(/^\s*[\u{1F300}-\u{1F9FF}]+\s*/u, "");
+                        lines[0] = (emojiMatch ? emojiMatch[1] : "") + `*${cleanLine}*`;
+                    } else {
+                        // Bold first 3 words
+                        const words = firstLine.split(/\s+/);
+                        if (words.length > 1) {
+                            // Handle emoji at start
+                            let startIndex = 0;
+                            if (/^[\u{1F300}-\u{1F9FF}]/u.test(words[0])) {
+                                startIndex = 1;
+                            }
+
+                            const headCount = Math.min(words.length - startIndex, 3);
+                            if (headCount > 0) {
+                                const head = words.slice(startIndex, startIndex + headCount).join(" ");
+                                const tail = words.slice(startIndex + headCount).join(" ");
+                                const prefix = startIndex > 0 ? words[0] + " " : "";
+
+                                lines[0] = `${prefix}*${head}* ${tail}`;
+                            }
+                        }
+                    }
+                    formatted = lines.join("\n");
+                }
+            }
+
+            return formatted;
         };
 
         const formatWithAi = async (raw: string) => {
@@ -1202,9 +1277,15 @@ export default function SettingsPage() {
             }
 
             const { cleaned: rawWithoutLinks, links } = extractLinks(textToSend);
-            const aiFormatted = await formatWithAi(rawWithoutLinks);
-            const formattedBase = aiFormatted || formatWhatsappText(rawWithoutLinks);
-            const captionToUse = formattedBase || (links.length ? "🔗 קישור מצורף" : textToSend);
+
+            let captionToUse = rawWithoutLinks;
+            if (useAiFormatting) {
+                const aiFormatted = await formatWithAi(rawWithoutLinks);
+                const formattedBase = aiFormatted || formatWhatsappText(rawWithoutLinks);
+                captionToUse = formattedBase || (links.length ? "🔗 קישור מצורף" : textToSend);
+            } else {
+                captionToUse = rawWithoutLinks || (links.length ? "🔗 קישור מצורף" : textToSend);
+            }
             const linkMessage = links.length ? links.map((l) => `🔗 ${normalizeLink(l)}`).join("\n") : "";
 
             for (const g of selected) {
@@ -2766,6 +2847,19 @@ export default function SettingsPage() {
                                                 <p className="text-xs text-gray-500">נשלח המלל והתמונה הרשמיים מתוך "תוכן ומדיה" של האירוע.</p>
                                             </div>
                                         )}
+
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <input
+                                                type="checkbox"
+                                                id="useAiFormatting"
+                                                checked={useAiFormatting}
+                                                onChange={(e) => setUseAiFormatting(e.target.checked)}
+                                                className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                            />
+                                            <label htmlFor="useAiFormatting" className="text-sm text-gray-700 select-none cursor-pointer">
+                                                עיצוב חכם (AI) - הדגשות ואימוג'ים אוטומטיים
+                                            </label>
+                                        </div>
 
                                         <button
                                             type="button"
