@@ -1300,7 +1300,11 @@ export default function SettingsPage() {
             } else {
                 captionToUse = rawWithoutLinks || (links.length ? "🔗 קישור מצורף" : textToSend);
             }
-            const linkMessage = links.length ? links.map((l) => `🔗 ${normalizeLink(l)}`).join("\n") : "";
+            let linkMessage = links.length ? links.map((l) => `🔗 ${normalizeLink(l)}`).join("\n") : "";
+
+            if (groupSendMode === "event") {
+                linkMessage = "https://patifon-events-management.vercel.app/events/register";
+            }
 
             for (const g of selected) {
                 await ensureGlobalRateLimit();
