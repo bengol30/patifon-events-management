@@ -7,8 +7,12 @@ export default function CronScheduler() {
         if (typeof window === "undefined") return;
 
         const runCron = async () => {
+            const lastRun = localStorage.getItem("lastCronRun");
+            if (lastRun && Date.now() - parseInt(lastRun) < 60000) return;
+
+            localStorage.setItem("lastCronRun", Date.now().toString());
             try {
-                console.log("Triggering internal cron job...");
+                // console.log("Triggering internal cron job...");
                 await fetch("/api/cron/publish-scheduled");
             } catch (e) {
                 console.error("Cron trigger failed", e);
