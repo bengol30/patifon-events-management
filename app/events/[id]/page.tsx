@@ -1752,6 +1752,8 @@ export default function EventDetailsPage() {
                         eventId: id,
                         taskTitle: newTask.title,
                         taskDescription: newTask.description || "",
+                        eventDate: event?.startTime,
+                        eventTitle: event?.title,
                     }),
                 });
 
