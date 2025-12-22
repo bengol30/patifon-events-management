@@ -234,6 +234,8 @@ export default function EventDetailsPage() {
         requiredCompletions: 1,
     });
     const [saveNewTaskToLibrary, setSaveNewTaskToLibrary] = useState(false);
+    const [newTaskDateManuallyChanged, setNewTaskDateManuallyChanged] = useState(false);
+    const [loadingAiDateSuggestion, setLoadingAiDateSuggestion] = useState(false);
     const newTaskFileInputRef = useRef<HTMLInputElement | null>(null);
     const [newTaskFiles, setNewTaskFiles] = useState<File[]>([]);
     const normalizeTaskKey = (title: string) =>
@@ -449,6 +451,7 @@ export default function EventDetailsPage() {
         setNewTaskDueMode(mode);
         setNewTaskOffsetDays(offsetRaw);
         setNewTaskTime(timeStr);
+        setNewTaskDateManuallyChanged(true); // Mark as manually changed
         const offsetParsed = parseOffset(offsetRaw);
         if (offsetParsed === null) return;
         const normalized = computeDueDateFromMode(mode, offsetParsed, timeStr);
@@ -1731,6 +1734,44 @@ export default function EventDetailsPage() {
     useEffect(() => {
         setBaseUrl(getPublicBaseUrl());
     }, []);
+
+    // AI-powered automatic date suggestion for new tasks
+    useEffect(() => {
+        if (!showNewTask || !newTask.title || newTaskDateManuallyChanged || loadingAiDateSuggestion) {
+            return;
+        }
+
+        // Debounce: wait for user to finish typing
+        const debounceTimer = setTimeout(async () => {
+            setLoadingAiDateSuggestion(true);
+            try {
+                const response = await fetch("/api/ai/suggest-deadline", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        eventId: id,
+                        taskTitle: newTask.title,
+                        taskDescription: newTask.description || "",
+                    }),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.suggestedDate && !newTaskDateManuallyChanged) {
+                        // Only set if user hasn't changed it manually in the meantime
+                        setNewTask(prev => ({ ...prev, dueDate: data.suggestedDate }));
+                    }
+                }
+            } catch (error) {
+                console.error("Error getting AI date suggestion:", error);
+            } finally {
+                setLoadingAiDateSuggestion(false);
+            }
+        }, 1500); // Wait 1.5 seconds after user stops typing
+
+        return () => clearTimeout(debounceTimer);
+    }, [showNewTask, newTask.title, newTask.description, newTaskDateManuallyChanged, loadingAiDateSuggestion, id]);
+
 
     const uploadTaskFiles = async (taskId: string, taskTitle: string, files: File[]) => {
         if (!storage || !db || files.length === 0) return [];
@@ -4252,6 +4293,7 @@ export default function EventDetailsPage() {
                                     const next = !showNewTask;
                                     setShowNewTask(next);
                                     if (!next) setSaveNewTaskToLibrary(false);
+                                    if (next) setNewTaskDateManuallyChanged(false); // Reset on open
                                 }}
                                 className="patifon-gradient text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90 transition text-sm font-medium vinyl-shadow"
                             >

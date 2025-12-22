@@ -134,7 +134,7 @@ export default function SettingsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user, loading: authLoading } = useAuth();
-    const validTabs = ["defaultTasks", "documents", "account", "whatsapp", "metricool", "instagram"] as const;
+    const validTabs = ["defaultTasks", "documents", "account", "whatsapp", "metricool", "instagram", "exportDocs"] as const;
     const getInitialTab = () => {
         const tabParam = searchParams.get("tab");
         // Start on WhatsApp tab only after auth check; default to main tab on first render
@@ -178,6 +178,12 @@ export default function SettingsPage() {
     });
     const [loadingInstagram, setLoadingInstagram] = useState(true);
     const [savingInstagram, setSavingInstagram] = useState(false);
+
+    // Export docs state
+    const [exportSelectedEventId, setExportSelectedEventId] = useState("");
+    const [generatingSummary, setGeneratingSummary] = useState(false);
+    const [eventSummary, setEventSummary] = useState("");
+    const [exportEvents, setExportEvents] = useState<{ id: string; title: string; startTime: any }[]>([]);
 
     // Instagram Publish State
     const [igPostType, setIgPostType] = useState<"IMAGE" | "VIDEO" | "STORY">("IMAGE");
@@ -508,6 +514,26 @@ export default function SettingsPage() {
             return () => clearTimeout(timer);
         }
     }, [message]);
+
+    // Load events for export
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "exportDocs") return;
+
+        const eventsRef = collection(db, "events");
+        const q = query(eventsRef, orderBy("startTime", "desc"), limit(50));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const eventsData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                title: doc.data().title || "ללא שם",
+                startTime: doc.data().startTime
+            }));
+            setExportEvents(eventsData);
+        });
+
+        return () => unsubscribe();
+    }, [db, isAdmin, activeTab]);
+
 
     const handleOpenAddModal = () => {
         setEditingTask({
@@ -1842,6 +1868,53 @@ export default function SettingsPage() {
         setBulkFailures(prev => prev.filter(f => f.id !== id));
     };
 
+    const handleGenerateEventSummary = async () => {
+        if (!exportSelectedEventId) {
+            setMessage({ text: "בחר אירוע לסיכום", type: "error" });
+            return;
+        }
+
+        setGeneratingSummary(true);
+        setEventSummary("");
+
+        try {
+            const response = await fetch("/api/ai/summarize-event", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ eventId: exportSelectedEventId }),
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || "Failed to generate summary");
+            }
+
+            const data = await response.json();
+            setEventSummary(data.summary || "");
+            setMessage({ text: "הסיכום נוצר בהצלחה!", type: "success" });
+        } catch (error: any) {
+            console.error("Error generating summary:", error);
+            setMessage({ text: `שגיאה ביצירת סיכום: ${error.message}`, type: "error" });
+        } finally {
+            setGeneratingSummary(false);
+        }
+    };
+
+    const handleDownloadSummary = () => {
+        if (!eventSummary) return;
+
+        const blob = new Blob([eventSummary], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        const eventTitle = exportEvents.find(e => e.id === exportSelectedEventId)?.title || "event";
+        link.download = `${eventTitle}_summary.txt`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
     const handleCopyUid = async () => {
         if (!user?.uid) return;
         try {
@@ -2354,6 +2427,16 @@ export default function SettingsPage() {
                                     >
                                         <Instagram size={18} />
                                         אינסטגרם (ישיר)
+                                    </button>
+                                    <button
+                                        onClick={() => handleTabChange("exportDocs")}
+                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "exportDocs"
+                                            ? "bg-indigo-50 text-indigo-700"
+                                            : "text-gray-600 hover:bg-gray-50"
+                                            }`}
+                                    >
+                                        <FileText size={18} />
+                                        מסמכים לייצוא
                                     </button>
                                 </>
                             )}
@@ -3339,6 +3422,74 @@ export default function SettingsPage() {
                                             </button>
                                         </div>
                                     </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "exportDocs" && isAdmin && (
+                            <div className="space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <FileText size={20} className="text-indigo-500" />
+                                        <h2 className="text-xl font-bold text-gray-900">סיכום אירועים מקיף</h2>
+                                    </div>
+                                    <p className="text-gray-500 text-sm mb-6">
+                                        יצר סיכום מקיף של אירוע עם כל הפרטים: משימות, מתנדבים, שעות ואחראים.
+                                        הסיכום נוצר באמצעות GPT ומכיל את כל המידע המלא לייצוא.
+                                    </p>
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                בחר אירוע לסיכום
+                                            </label>
+                                            <select
+                                                value={exportSelectedEventId}
+                                                onChange={(e) => setExportSelectedEventId(e.target.value)}
+                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                            >
+                                                <option value="">-- בחר אירוע --</option>
+                                                {exportEvents.map(event => (
+                                                    <option key={event.id} value={event.id}>
+                                                        {event.title}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={handleGenerateEventSummary}
+                                                disabled={!exportSelectedEventId || generatingSummary}
+                                                className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {generatingSummary ? "מייצר סיכום..." : "צור סיכום מקיף"}
+                                            </button>
+
+                                            {eventSummary && (
+                                                <button
+                                                    onClick={handleDownloadSummary}
+                                                    className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition text-sm font-medium"
+                                                >
+                                                    💾 הורד כקובץ טקסט
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {eventSummary && (
+                                            <div className="mt-6">
+                                                <h3 className="text-lg font-bold text-gray-900 mb-3">סיכום האירוע:</h3>
+                                                <div className="bg-gray-50 border rounded-lg p-6 max-h-[600px] overflow-y-auto">
+                                                    <pre className="whitespace-pre-wrap text-sm text-gray-800 font-sans">
+                                                        {eventSummary}
+                                                    </pre>
+                                                </div>
+                                                <p className="text-xs text-gray-500 mt-2">
+                                                    💡 טיפ: העתק את הטקסט מעלה או הורד אותו כקובץ והעלה ל-NotebookLM שלך
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )}

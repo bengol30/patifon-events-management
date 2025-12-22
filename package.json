@@ -12,6 +12,7 @@
     "@vercel/blob": "^2.0.0",
     "date-fns": "^4.1.0",
     "firebase": "^12.6.0",
+    "firebase-admin": "^13.6.0",
     "googleapis": "^166.0.0",
     "heic-convert": "^2.1.0",
     "heic2any": "^0.0.4",
