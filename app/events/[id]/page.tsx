@@ -1759,9 +1759,11 @@ export default function EventDetailsPage() {
 
                 if (response.ok) {
                     const data = await response.json();
-                    if (data.suggestedDate && !newTaskDateManuallyChanged) {
-                        // Only set if user hasn't changed it manually in the meantime
-                        setNewTask(prev => ({ ...prev, dueDate: data.suggestedDate }));
+                    if (data.offsetDays !== undefined && !newTaskDateManuallyChanged) {
+                        // Use the AI-suggested offset with the existing system
+                        const offset = data.offsetDays.toString();
+                        const currentTime = newTaskTime || extractTimeString(getEventStartDate() || new Date());
+                        syncNewTaskDueDate("offset", offset, currentTime);
                     }
                 }
             } catch (error) {

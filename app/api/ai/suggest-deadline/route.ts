@@ -11,12 +11,16 @@ export async function POST(request: Request) {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
             console.warn("OpenAI API key is missing.");
-            return NextResponse.json({ error: "OpenAI API key not configured" }, { status: 500 });
+            // Fallback to -7 days before event
+            return NextResponse.json({
+                offsetDays: -7,
+                reasoning: "ברירת מחדל - שבוע לפני האירוע"
+            });
         }
 
-        // Create prompt for GPT - simplified version without Firebase
+        // Create prompt for GPT asking for relative days
         const prompt = `
-אתה עוזר AI מקצועי שעוזר לתכנן אירועים. תפקידך להציע תאריך deadline מתאים למשימה.
+אתה עוזר AI מקצועי שעוזר לתכנן אירועים. תפקידך להציע **כמה ימים לפני או אחרי האירוע** משימה צריכה להתבצע.
 
 **פרטי האירוע:**
 - שם האירוע: ${eventTitle || "ללא שם"}
@@ -27,84 +31,96 @@ export async function POST(request: Request) {
 - תיאור: ${taskDescription || "אין"}
 
 **הנחיות:**
-1. קח בחשבון את תאריך האירוע
-2. קח בחשבון את סוג המשימה וכמה זמן צריך לבצע אותה
-3. וודא שהמשימה תושלם **לפני** האירוע
-4. השתמש בהיגיון נכון - למשל:
-   - משימות תכנון/עיצוב: 2-3 שבועות לפני
-   - הזמנת ציוד/אולם: 3-4 שבועות לפני
-   - קידום ושיווק: 1-2 שבועות לפני
-   - משימות טכניות: שבוע לפני
-   - משימות אחרונות/בדיקות: 2-3 ימים לפני
+1. חשוב היטב על סוג המשימה
+2. החזר **רק מספר** שמייצג כמה ימים לפני/אחרי האירוע
+3. מספר שלילי = לפני האירוע (לדוגמה: -7 = שבוע לפני)
+4. מספר חיובי = אחרי האירוע (לדוגמה: +3 = 3 ימים אחרי)
+5. אפס = ביום האירוע עצמו
+
+**דוגמאות להנחיות זמן:**
+- משימות תכנון/עיצוב: -14 עד -21 (2-3 שבועות לפני)
+- הזמנת ציוד/אולם: -21 עד -28 (3-4 שבועות לפני)
+- קידום ושיווק: -7 עד -14 (1-2 שבועות לפני)
+- משימות טכניות/תיאום: -7 (שבוע לפני)
+- בדיקות אחרונות: -2 עד -3 (2-3 ימים לפני)
+- משימות במהלך האירוע: 0 (ביום האירוע)
+- דיווח/סיכום: +1 עד +3 (מספר ימים אחרי)
 
 **פורמט התשובה:**
-החזר **רק** תאריך בפורמט ISO 8601 (YYYY-MM-DD), ללא טקסט נוסף.
-לדוגמה: 2024-01-15
+החזר **רק מספר שלם**, לדוגמה: -7 או 0 או +2
+ללא טקסט נוסף!
 
-אם אין תאריך לאירוע, הצע תאריך שבוע מהיום.
+אם לא בטוח, העדף -7 (שבוע לפני).
 `;
 
-        // Call OpenAI API
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model: "gpt-4o",
-                messages: [
-                    {
-                        role: "system",
-                        content: "אתה עוזר AI מקצועי לניהול אירועים. אתה מומחה בתכנון זמנים ותאריכי deadline. תמיד החזר רק תאריך בפורמט YYYY-MM-DD ללא טקסט נוסף."
-                    },
-                    { role: "user", content: prompt }
-                ],
-                temperature: 0.5,
-                max_tokens: 50,
-            }),
-        });
+        try {
+            // Call OpenAI API
+            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify({
+                    model: "gpt-4o",
+                    messages: [
+                        {
+                            role: "system",
+                            content: "אתה מומחה בתכנון זמנים לאירועים. החזר רק מספר שלם שמייצג כמה ימים לפני (שלילי) או אחרי (חיובי) האירוע המשימה צריכה להתבצע. אל תוסיף שום טקסט נוסף!"
+                        },
+                        { role: "user", content: prompt }
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 10,
+                }),
+            });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error("OpenAI API error:", errorText);
-            // Return fallback date instead of error
-            const fallbackDate = new Date();
-            fallbackDate.setDate(fallbackDate.getDate() + 7);
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error("OpenAI API error:", errorText);
+                // Fallback
+                return NextResponse.json({
+                    offsetDays: -7,
+                    reasoning: "ברירת מחדל - שבוע לפני האירוע"
+                });
+            }
+
+            const data = await response.json();
+            const aiResponse = data.choices[0]?.message?.content?.trim() || "";
+
+            // Parse the number from AI response
+            const numberMatch = aiResponse.match(/(-?\d+)/);
+            if (!numberMatch) {
+                // Fallback if no number found
+                return NextResponse.json({
+                    offsetDays: -7,
+                    reasoning: "ברירת מחדל - שבוע לפני האירוע"
+                });
+            }
+
+            const offsetDays = parseInt(numberMatch[1], 10);
+
+            // Sanity check: limit to reasonable range (-60 to +30 days)
+            const safeOffset = Math.max(-60, Math.min(30, offsetDays));
+
             return NextResponse.json({
-                suggestedDate: fallbackDate.toISOString().split('T')[0],
-                reasoning: "תאריך ברירת מחדל (שבוע מהיום)"
+                offsetDays: safeOffset,
+                reasoning: `${Math.abs(safeOffset)} ימים ${safeOffset < 0 ? 'לפני' : safeOffset > 0 ? 'אחרי' : 'ביום'} האירוע`
+            });
+
+        } catch (error) {
+            console.error("Error calling OpenAI:", error);
+            return NextResponse.json({
+                offsetDays: -7,
+                reasoning: "ברירת מחדל - שבוע לפני האירוע"
             });
         }
-
-        const data = await response.json();
-        const suggestedDateStr = data.choices[0]?.message?.content?.trim() || "";
-
-        // Parse and validate the date
-        const dateMatch = suggestedDateStr.match(/(\d{4}-\d{2}-\d{2})/);
-        if (!dateMatch) {
-            // Fallback: suggest 1 week from now
-            const fallbackDate = new Date();
-            fallbackDate.setDate(fallbackDate.getDate() + 7);
-            return NextResponse.json({
-                suggestedDate: fallbackDate.toISOString().split('T')[0],
-                reasoning: "תאריך ברירת מחדל (שבוע מהיום)"
-            });
-        }
-
-        return NextResponse.json({
-            suggestedDate: dateMatch[1],
-            reasoning: "תאריך מוצע על ידי AI"
-        });
 
     } catch (error) {
         console.error("Error in suggest deadline API:", error);
-        // Return fallback instead of error
-        const fallbackDate = new Date();
-        fallbackDate.setDate(fallbackDate.getDate() + 7);
         return NextResponse.json({
-            suggestedDate: fallbackDate.toISOString().split('T')[0],
-            reasoning: "תאריך ברירת מחדל"
+            offsetDays: -7,
+            reasoning: "ברירת מחדל - שבוע לפני האירוע"
         });
     }
 }

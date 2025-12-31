@@ -3,7 +3,8 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { db, storage } from "@/lib/firebase";
+import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { auth, db, storage } from "@/lib/firebase";
 import { DEFAULT_INSTAGRAM_TAGS } from "@/lib/instagram";
 import { doc, getDoc, updateDoc, serverTimestamp, addDoc, collection } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -25,6 +26,8 @@ export default function ContentFormPage() {
     const id = params.id as string;
 
     const [event, setEvent] = useState<EventData | null>(null);
+    const [authReady, setAuthReady] = useState(() => !auth);
+    const [authFailed, setAuthFailed] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [submitted, setSubmitted] = useState(false);
@@ -41,6 +44,29 @@ export default function ContentFormPage() {
     const [tagInput, setTagInput] = useState("");
 
     useEffect(() => {
+        if (!auth) {
+            setAuthReady(true);
+            return;
+        }
+
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            if (user) {
+                setAuthReady(true);
+                return;
+            }
+            signInAnonymously(auth).catch((err) => {
+                console.error("Anonymous auth failed for content form", err);
+                setError("לא הצלחנו להתחבר בשביל לשמור את הטופס. נסו לרענן או לבקש מהמארגן לשלוח שוב.");
+                setAuthFailed(true);
+                setLoading(false);
+            });
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        if (!authReady || authFailed) return;
         const fetchEvent = async () => {
             if (!db || !id) return;
             try {
@@ -72,7 +98,7 @@ export default function ContentFormPage() {
             }
         };
         fetchEvent();
-    }, [id]);
+    }, [authFailed, authReady, id]);
 
     const eventDate = useMemo(() => {
         const raw = event?.startTime;
@@ -110,6 +136,10 @@ export default function ContentFormPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db) return;
+        if (!authReady || !auth?.currentUser) {
+            setError("אנחנו עדיין מתחברים בשביל לשמור את הטופס. נסו שוב בעוד רגע.");
+            return;
+        }
         if (!form.officialText.trim() && !file) {
             setError("יש להזין מלל רשמי או לצרף תמונה רשמית");
             return;
