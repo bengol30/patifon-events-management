@@ -54,6 +54,13 @@ export default function ContentFormPage() {
                 setAuthReady(true);
                 return;
             }
+            if (!auth) {
+                console.error("Auth is not initialized");
+                setError("לא הצלחנו להתחבר בשביל לשמור את הטופס. נסו לרענן או לבקש מהמארגן לשלוח שוב.");
+                setAuthFailed(true);
+                setLoading(false);
+                return;
+            }
             signInAnonymously(auth).catch((err) => {
                 console.error("Anonymous auth failed for content form", err);
                 setError("לא הצלחנו להתחבר בשביל לשמור את הטופס. נסו לרענן או לבקש מהמארגן לשלוח שוב.");
