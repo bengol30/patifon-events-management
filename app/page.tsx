@@ -3507,7 +3507,7 @@ export default function Dashboard() {
         {isAdmin && (
           <button
             onClick={() => setActivePanel(prev => prev === "registrants" ? null : "registrants")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full border transition text-sm font-medium ${activePanel === "registrants" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl border transition text-sm font-medium min-h-[44px] ${activePanel === "registrants" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
           >
             <Users size={18} />
             נרשמים לאירועים
