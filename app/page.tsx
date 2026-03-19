@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit, AlertTriangle } from "lucide-react";
 import { db, auth, storage } from "@/lib/firebase";
+import { deleteEventCascade, deleteProjectCascade } from "@/lib/firestoreCleanup";
 import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc, onSnapshot, limit } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import TaskChat from "@/components/TaskChat";
@@ -38,6 +39,8 @@ interface JoinRequest {
   requesterEmail?: string;
   ownerId?: string;
   ownerEmail?: string;
+  createdAt?: any;
+  respondedAt?: any;
   status: "PENDING" | "APPROVED" | "REJECTED";
 }
 
@@ -279,6 +282,7 @@ export default function Dashboard() {
   const [openUserEventsId, setOpenUserEventsId] = useState<string | null>(null);
   const [joinRequests, setJoinRequests] = useState<Record<string, "PENDING" | "APPROVED" | "REJECTED">>({});
   const [incomingJoinRequests, setIncomingJoinRequests] = useState<JoinRequest[]>([]);
+  const [loadingJoinRequests, setLoadingJoinRequests] = useState(true);
   const [loadingNotifications, setLoadingNotifications] = useState(true);
   const [notificationTasks, setNotificationTasks] = useState<Task[]>([]);
   const [deleteEventRemoveTasks, setDeleteEventRemoveTasks] = useState(false);
@@ -764,11 +768,76 @@ export default function Dashboard() {
     checkOnboarding();
   }, [user]);
 
+  useEffect(() => {
+    if (!db || !user) {
+      setJoinRequests({});
+      setIncomingJoinRequests([]);
+      setLoadingJoinRequests(false);
+      return;
+    }
+
+    setLoadingJoinRequests(true);
+    const normEmail = normalizeKey(user.email);
+    const ownedEventIds = new Set(
+      events
+        .filter((ev) => (ev.createdBy && ev.createdBy === user.uid) || (ev.createdByEmail && normEmail && normalizeKey(ev.createdByEmail) === normEmail))
+        .map((ev) => ev.id)
+    );
+
+    const unsubscribers: Array<() => void> = [];
+    const selfReqSnaps: any[] = [];
+    const incomingSnaps: any[] = [];
+
+    const mergeSelfJoinRequests = () => {
+      const next: Record<string, "PENDING" | "APPROVED" | "REJECTED"> = {};
+      selfReqSnaps.forEach((items: any[] = []) => items.forEach((item) => {
+        if (item?.eventId && item?.status) next[item.eventId] = item.status;
+      }));
+      setJoinRequests(next);
+    };
+
+    const mergeIncomingJoinRequests = () => {
+      const map = new Map<string, JoinRequest>();
+      incomingSnaps.forEach((items: any[] = []) => items.forEach((item) => {
+        if (item?.id && item?.eventId && ownedEventIds.has(item.eventId)) map.set(item.id, item as JoinRequest);
+      }));
+      const list = Array.from(map.values()).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setIncomingJoinRequests(list);
+      setLoadingJoinRequests(false);
+    };
+
+    if (user.uid) {
+      const qByUser = query(collection(db, "join_requests"), where("requesterId", "==", user.uid));
+      unsubscribers.push(onSnapshot(qByUser, (snap) => {
+        selfReqSnaps[0] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        mergeSelfJoinRequests();
+      }));
+    }
+    if (normEmail) {
+      const qByEmail = query(collection(db, "join_requests"), where("requesterEmail", "==", normEmail));
+      unsubscribers.push(onSnapshot(qByEmail, (snap) => {
+        selfReqSnaps[1] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        mergeSelfJoinRequests();
+      }));
+    }
+
+    const incomingQuery = query(collection(db, "join_requests"), where("status", "==", "PENDING"));
+    unsubscribers.push(onSnapshot(incomingQuery, (snap) => {
+      incomingSnaps[0] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      mergeIncomingJoinRequests();
+    }, (err) => {
+      console.error("Failed loading join requests", err);
+      setLoadingJoinRequests(false);
+    }));
+
+    return () => unsubscribers.forEach((unsub) => unsub());
+  }, [db, user, events]);
+
   // Refresh notifications (messages/join requests) when panel opens
   useEffect(() => {
     if (!db || !user || activePanel !== "notifications") return;
-    setLoadingNotifications(false);
-  }, [activePanel, user, db, notificationTasks.length]);
+    setLoadingNotifications(loadingJoinRequests);
+  }, [activePanel, user, db, notificationTasks.length, loadingJoinRequests]);
 
   // Fetch unread edit requests for admin badge
   useEffect(() => {
@@ -1151,18 +1220,25 @@ export default function Dashboard() {
         setNotificationTasks(notifTasks);
         setUnassignedTasksCount(unassignedCount);
 
-        const attendeesByEvent = await Promise.all(
+        const attendeeCountsByEvent = await Promise.all(
           myCreatedEvents.map(async (ev) => {
             try {
-              const attendeesSnap = await getDocs(collection(db!, "events", ev.id, "attendees"));
-              return attendeesSnap.size;
+              const [attendeesSnap, registrantsSnap] = await Promise.all([
+                getDocs(collection(db!, "events", ev.id, "attendees")),
+                getDocs(collection(db!, "events", ev.id, "registrants")),
+              ]);
+              const eventTotal = attendeesSnap.size + registrantsSnap.size;
+              return { eventId: ev.id, count: eventTotal };
             } catch (err) {
-              console.error("Error loading attendees for event", ev.id, err);
-              return 0;
+              console.error("Error loading attendees/registrants for event", ev.id, err);
+              return { eventId: ev.id, count: 0 };
             }
           })
         );
-        const totalAttendees = attendeesByEvent.reduce((sum, num) => sum + num, 0);
+        const attendeeCountMap = Object.fromEntries(attendeeCountsByEvent.map(({ eventId, count }) => [eventId, count]));
+        const totalAttendees = attendeeCountsByEvent.reduce((sum, entry) => sum + entry.count, 0);
+        setEvents(myCreatedEvents.map((ev) => ({ ...ev, attendeesCount: attendeeCountMap[ev.id] ?? (ev as any).attendeesCount ?? 0 })));
+        setAllEventsRaw(allEventsData.map((ev) => ({ ...ev, attendeesCount: attendeeCountMap[ev.id] ?? (ev as any).attendeesCount ?? 0 })) as Event[]);
         setStats({
           myEvents: myCreatedEvents.length,
           attendees: totalAttendees,
@@ -2457,15 +2533,6 @@ export default function Dashboard() {
     }
   };
 
-  const deleteAllTasksFor = async (type: "events" | "projects", id: string) => {
-    try {
-      const tasksSnap = await getDocs(collection(db!, type, id, "tasks"));
-      await Promise.all(tasksSnap.docs.map(d => deleteDoc(d.ref).catch(err => console.error("Error deleting task doc", err))));
-    } catch (err) {
-      console.error(`Error deleting tasks for ${type}/${id}`, err);
-    }
-  };
-
   const handleDeleteEvent = async (eventId: string) => {
     if (!db || !user) return;
     const ev = events.find(e => e.id === eventId);
@@ -2479,9 +2546,9 @@ export default function Dashboard() {
       return;
     }
     try {
-      await deleteAllTasksFor("events", eventId);
-      await deleteDoc(doc(db, "events", eventId));
+      await deleteEventCascade(db, eventId, storage);
       setEvents(prev => prev.filter(e => e.id !== eventId));
+      setAllEventsRaw(prev => prev.filter(e => e.id !== eventId));
       setMyTasks(prev => prev.filter(t => t.eventId !== eventId));
       setNotificationTasks(prev => prev.filter(t => t.eventId !== eventId));
       setConfirmingEventId(null);
@@ -2501,9 +2568,9 @@ export default function Dashboard() {
       return;
     }
     try {
-      await deleteAllTasksFor("projects", projectId);
-      await deleteDoc(doc(db, "projects", projectId));
+      await deleteProjectCascade(db, projectId, storage);
       setProjects(prev => prev.filter(p => p.id !== projectId));
+      setAllProjectsRaw(prev => prev.filter(p => p.id !== projectId));
       setMyTasks(prev => prev.filter(t => !(t.scope === "project" && t.eventId === projectId)));
       setNotificationTasks(prev => prev.filter(t => !(t.scope === "project" && t.eventId === projectId)));
     } catch (err) {

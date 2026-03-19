@@ -6,6 +6,7 @@ import TaskCard from "@/components/TaskCard";
 import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat, PauseCircle } from "lucide-react";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { db, storage } from "@/lib/firebase";
+import { deleteEventCascade } from "@/lib/firestoreCleanup";
 import { DEFAULT_INSTAGRAM_TAGS } from "@/lib/instagram";
 import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc, arrayUnion, query, orderBy, deleteDoc, writeBatch, getDocs, increment, setDoc, where, collectionGroup } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
@@ -2546,55 +2547,7 @@ export default function EventDetailsPage() {
             } else if (type === 'budget' && itemId) {
                 await deleteDoc(doc(db, "events", id, "budgetItems", itemId));
             } else if (type === 'event') {
-                // מחיקה של קבצי האירוע ושל קבצי המשימות כדי לא לצבור עלויות אחסון
-                const storagePaths = new Set<string>();
-                const collectPath = (path?: string | null) => {
-                    if (path) storagePaths.add(path);
-                };
-
-                // קבצי האירוע (מאגר מרכזי)
-                try {
-                    const filesSnap = await getDocs(collection(db, "events", id, "files"));
-                    const deletions = filesSnap.docs.map(async (d) => {
-                        const data = d.data() as any;
-                        collectPath(data.storagePath);
-                        try { await deleteDoc(d.ref); } catch (err) { console.error("Failed deleting file doc", err); }
-                    });
-                    await Promise.all(deletions);
-                } catch (err) {
-                    console.error("Error cleaning event files:", err);
-                }
-
-                // קבצי משימות (בתוך כל משימה)
-                try {
-                    const tasksSnap = await getDocs(collection(db, "events", id, "tasks"));
-                    for (const taskDoc of tasksSnap.docs) {
-                        try {
-                            const taskFilesSnap = await getDocs(collection(db, "events", id, "tasks", taskDoc.id, "files"));
-                            const deleteTaskFiles = taskFilesSnap.docs.map(async (fd) => {
-                                const data = fd.data() as any;
-                                collectPath(data.storagePath);
-                                try { await deleteDoc(fd.ref); } catch (err) { console.error("Failed deleting task file doc", err); }
-                            });
-                            await Promise.all(deleteTaskFiles);
-                        } catch (err) {
-                            console.error("Error cleaning task files:", err);
-                        }
-                        try { await deleteDoc(taskDoc.ref); } catch (err) { console.error("Failed deleting task doc", err); }
-                    }
-                } catch (err) {
-                    console.error("Error cleaning tasks:", err);
-                }
-
-                // מחיקת קבצים מ-Storage
-                if (storage && storagePaths.size > 0) {
-                    const storageDeletes = Array.from(storagePaths).map(path =>
-                        deleteObject(ref(storage!, path)).catch(err => console.error("Failed deleting storage file", err))
-                    );
-                    await Promise.all(storageDeletes);
-                }
-
-                await deleteDoc(doc(db, "events", id));
+                await deleteEventCascade(db, id, storage);
                 router.push("/");
             }
         } catch (err) {
@@ -3159,7 +3112,7 @@ export default function EventDetailsPage() {
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
     const partnersLabel = Array.isArray(event.partners) ? event.partners.join(", ") : (event.partners || "");
     const teamTasks = tasks.filter(t => !t.isVolunteerTask);
-    const volunteerTasks = tasks.filter(t => t.isVolunteerTask);
+    const volunteerTasks = tasks.filter(t => t.isVolunteerTask === true || t.volunteerHours != null);
     const openTasksCount = tasks.filter(t => t.status !== 'DONE').length;
     const doneTasksCount = tasks.filter(t => t.status === 'DONE').length;
     const overdueTasksCount = tasks.filter(t => t.status !== 'DONE' && t.dueDate && !isNaN(new Date(t.dueDate).getTime()) && new Date(t.dueDate) < new Date()).length;
@@ -3873,8 +3826,8 @@ export default function EventDetailsPage() {
                                         <Users size={16} />
                                         <span>
                                             {event.volunteersCount != null
-                                                ? `צריך ${event.volunteersCount} מתנדבים לערב`
-                                                : "צריך מתנדבים לערב הזה"}
+                                                ? `יעד מתנדבים: ${event.volunteersCount}`
+                                                : "מחפש מתנדבים לאירוע הזה"}
                                         </span>
                                     </div>
                                 )}

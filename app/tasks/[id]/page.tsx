@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, type Firestore, setDoc, increment, getDocs, where } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, type Firestore, setDoc, increment, getDocs, where, CollectionReference, DocumentReference } from "firebase/firestore";
 import Link from "next/link";
 import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake, Repeat } from "lucide-react";
 import { storage } from "@/lib/firebase";
@@ -88,6 +88,15 @@ export default function TaskDetailPage() {
     const [dueMode, setDueMode] = useState<"event_day" | "offset">("event_day");
     const [dueOffsetDays, setDueOffsetDays] = useState<string>("0");
     const [dueTime, setDueTime] = useState<string>("09:00");
+
+    const getTaskBasePath = (targetTask: Task) => {
+        const collectionName = targetTask.scope === "project" ? "projects" : "events";
+        return [collectionName, targetTask.eventId, "tasks", targetTask.id] as const;
+    };
+
+    const getTaskDocRef = (targetTask: Task): DocumentReference => doc(db!, ...getTaskBasePath(targetTask));
+    const getTaskSubcollectionRef = (targetTask: Task, name: string): CollectionReference => collection(db!, ...getTaskBasePath(targetTask), name);
+    const getContainerDocRef = (targetTask: Task): DocumentReference => doc(db!, targetTask.scope === "project" ? "projects" : "events", targetTask.eventId);
 
     // Backfill creator contact details from the user profile (registration info)
     useEffect(() => {
@@ -696,10 +705,12 @@ export default function TaskDetailPage() {
                         handleUpdateField("dueDate", effectiveDue);
                     }
 
+                    const taskCollectionName = foundTask.scope === "project" ? "projects" : "events";
+
                     // Subscribe to chat
                     if (!db) return;
                     const qChat = query(
-                        collection(db, "events", foundEventId, "tasks", taskId, "messages"),
+                        collection(db, taskCollectionName, foundEventId, "tasks", taskId, "messages"),
                         orderBy("createdAt", "asc")
                     );
                     const unsubscribeChat = onSnapshot(qChat, (snapshot) => {
@@ -722,7 +733,7 @@ export default function TaskDetailPage() {
 
                     // Subscribe to task updates
                     if (!db) return;
-                    const unsubscribeTask = onSnapshot(doc(db, "events", foundEventId, "tasks", taskId), (docSnap) => {
+                    const unsubscribeTask = onSnapshot(doc(db, taskCollectionName, foundEventId, "tasks", taskId), (docSnap) => {
                         if (docSnap.exists()) {
                             const data = docSnap.data();
                             setTask(prev => ({
@@ -737,26 +748,35 @@ export default function TaskDetailPage() {
                         }
                     });
 
-                    // Subscribe to event updates for team changes
+                    // Subscribe to container updates for team changes
                     if (!db) return;
-                    const unsubscribeEvent = onSnapshot(doc(db, "events", foundEventId), (docSnap) => {
+                    const unsubscribeEvent = onSnapshot(doc(db, taskCollectionName, foundEventId), (docSnap) => {
                         if (docSnap.exists()) {
                             const data = docSnap.data();
-                            setEventTeam((data.team as EventTeamMember[]) || []);
+                            const nextTeam = taskCollectionName === "projects"
+                                ? (((data as any).teamMembers || []).map((member: any) => ({
+                                    userId: member.userId,
+                                    email: member.email,
+                                    name: member.fullName || member.name || member.email || "משתמש",
+                                    role: member.role || "member",
+                                })) as EventTeamMember[])
+                                : (((data as any).team as EventTeamMember[]) || []);
+                            setEventTeam(nextTeam);
                             const creatorName =
                                 (data as any).createdByName ||
                                 (data as any).ownerName ||
                                 (data as any).creatorName ||
                                 (data as any).createdByEmail ||
+                                (data as any).ownerEmail ||
                                 "";
                             setEventCreatorName(creatorName || "");
-                            setEventNeedsVolunteers(!!data.needsVolunteers);
+                            setEventNeedsVolunteers(taskCollectionName === "projects" ? !!(data as any).needsScholarshipVolunteers : !!(data as any).needsVolunteers);
                         }
                     });
 
                     if (!db) return;
                     const unsubFiles = onSnapshot(
-                        collection(db, "events", foundEventId, "tasks", taskId, "files"),
+                        collection(db, taskCollectionName, foundEventId, "tasks", taskId, "files"),
                         (snap) => {
                             const files = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
                             setAttachments(files);
@@ -941,8 +961,9 @@ export default function TaskDetailPage() {
         if (!task || !storage || !db || uploadFiles.length === 0) return;
         setUploading(true);
         try {
+            const rootCollection = task.scope === "project" ? "projects" : "events";
             const uploads = uploadFiles.map(async (file) => {
-                const path = `events/${task.eventId}/tasks/${task.id}/${Date.now()}-${file.name}`;
+                const path = `${rootCollection}/${task.eventId}/tasks/${task.id}/${Date.now()}-${file.name}`;
                 const storageRef = ref(storage!, path);
                 await uploadBytes(storageRef, file);
                 const url = await getDownloadURL(storageRef);
@@ -953,10 +974,11 @@ export default function TaskDetailPage() {
                     taskId: task.id,
                     taskTitle: task.title,
                     createdAt: serverTimestamp(),
+                    scope: task.scope || (rootCollection === "projects" ? "project" : "event"),
                 };
                 await Promise.all([
-                    addDoc(collection(db!, "events", task.eventId, "tasks", task.id, "files"), fileData),
-                    addDoc(collection(db!, "events", task.eventId, "files"), fileData),
+                    addDoc(collection(db!, rootCollection, task.eventId, "tasks", task.id, "files"), fileData),
+                    addDoc(collection(db!, rootCollection, task.eventId, "files"), fileData),
                 ]);
             });
             await Promise.all(uploads);

@@ -1,7 +1,8 @@
 "use client";
 
 import { useAuth } from "@/context/AuthContext";
-import { db } from "@/lib/firebase";
+import { db, storage } from "@/lib/firebase";
+import { deleteProjectCascade } from "@/lib/firestoreCleanup";
 import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc, query, where, deleteDoc, addDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -370,10 +371,7 @@ export default function ProjectDetailsPage() {
     const confirmDelete = window.confirm("למחוק את הפרויקט הזה וכל המשימות שלו?");
     if (!confirmDelete) return;
     try {
-      const tasksSnap = await getDocs(collection(db, "projects", project.id, "tasks"));
-      const deletes = tasksSnap.docs.map((d) => deleteDoc(d.ref).catch(err => console.error("Failed deleting project task", err)));
-      await Promise.all(deletes);
-      await deleteDoc(doc(db, "projects", project.id));
+      await deleteProjectCascade(db, project.id, storage);
       alert("הפרויקט נמחק בהצלחה");
       router.push("/projects");
     } catch (err) {

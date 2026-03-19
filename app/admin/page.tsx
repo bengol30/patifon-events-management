@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
-import { db } from "@/lib/firebase";
+import { db, storage } from "@/lib/firebase";
+import { deleteEventCascade, deleteProjectCascade } from "@/lib/firestoreCleanup";
 import { collection, getDocs, orderBy, query, collectionGroup, deleteDoc as firestoreDeleteDoc, doc as firestoreDoc, updateDoc } from "firebase/firestore";
 import { ShieldCheck, Users, Calendar, AlertTriangle, ArrowRight, Repeat, ClipboardList, Trash2, Edit2, Save, X } from "lucide-react";
 
@@ -226,23 +227,13 @@ export default function AdminDashboard() {
         }
     };
 
-    const deleteAllTasksFor = async (type: "events" | "projects", id: string) => {
-        try {
-            const tasksSnap = await getDocs(collection(db!, type, id, "tasks"));
-            await Promise.all(tasksSnap.docs.map(d => firestoreDeleteDoc(d.ref).catch(err => console.error("Error deleting task doc", err))));
-        } catch (err) {
-            console.error(`Error deleting tasks for ${type}/${id}`, err);
-        }
-    };
-
     const handleDeleteEvent = async (eventId: string) => {
         if (!db) return;
         const ok = confirm("למחוק את האירוע הזה?");
         if (!ok) return;
         setDeletingEventId(eventId);
         try {
-            await deleteAllTasksFor("events", eventId);
-            await firestoreDeleteDoc(firestoreDoc(db, "events", eventId));
+            await deleteEventCascade(db, eventId, storage);
             setEventsData(prev => prev.filter(e => e.id !== eventId));
         } catch (err) {
             console.error("Error deleting event", err);
@@ -258,8 +249,7 @@ export default function AdminDashboard() {
         if (!ok) return;
         setDeletingProjectId(projectId);
         try {
-            await deleteAllTasksFor("projects", projectId);
-            await firestoreDeleteDoc(firestoreDoc(db, "projects", projectId));
+            await deleteProjectCascade(db, projectId, storage);
             setProjectsData(prev => prev.filter(p => p.id !== projectId));
         } catch (err) {
             console.error("Error deleting project", err);
