@@ -249,7 +249,7 @@ export default function TaskCard({
                 {onDelete && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        className="text-gray-400 hover:text-red-500 p-2 rounded-full border border-transparent hover:border-red-100 transition"
+                        className="patifon-touch-target text-gray-500 hover:text-red-600 p-2 rounded-full border border-transparent hover:border-red-100 transition flex items-center justify-center"
                         title="מחק משימה"
                     >
                         <Trash2 size={16} />
