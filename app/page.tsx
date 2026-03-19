@@ -3194,15 +3194,47 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* My Tasks Section */}
-        <div className="bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-          <div className="flex items-center gap-2 mb-4">
-            <CheckSquare style={{ color: 'var(--patifon-red)' }} />
-            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>המשימות שלי</h2>
-            <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--patifon-yellow)', color: 'var(--patifon-burgundy)' }}>
-              {filteredTasks.length}
-            </span>
+        <div className="overflow-hidden rounded-[28px] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+          <div className="border-b border-[rgba(74,26,44,0.08)] bg-gradient-to-l from-[rgba(255,184,76,0.20)] via-white to-[rgba(74,26,44,0.04)] p-5 sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="text-right">
+                <div className="flex flex-wrap items-center justify-end gap-2 mb-2">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--patifon-yellow)] text-[var(--patifon-burgundy)] border border-amber-200">
+                    {filteredTasks.length} מוצגות
+                  </span>
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-white text-slate-700 border border-slate-200">
+                    {myTasks.length} פתוחות בסך הכול
+                  </span>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>המשימות שלי</h2>
+                  <CheckSquare style={{ color: 'var(--patifon-red)' }} />
+                </div>
+                <p className="mt-1 text-sm text-gray-600">כאן רואים מהר מה דורש טיפול, מה דחוף, ואילו פעולות זמינות על כל משימה.</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[340px]">
+                <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">דחופות</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900">{myTasks.filter((task) => task.priority === "CRITICAL" || task.priority === "HIGH").length}</p>
+                </div>
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-red-600">תקועות</p>
+                  <p className="mt-1 text-lg font-bold text-red-700">{myTasks.filter((task) => task.status === "STUCK").length}</p>
+                </div>
+                <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">עם הודעות</p>
+                  <p className="mt-1 text-lg font-bold text-fuchsia-800">{filteredTasks.filter((task) => task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid).length}</p>
+                </div>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">לשבוע הקרוב</p>
+                  <p className="mt-1 text-lg font-bold text-amber-900">{myTasks.filter((task) => task.dueDate && !isNaN(new Date(task.dueDate).getTime()) && new Date(task.dueDate).getTime() <= Date.now() + 7 * 24 * 60 * 60 * 1000).length}</p>
+                </div>
+              </div>
+            </div>
           </div>
 
+          <div className="p-5 sm:p-6">
           {/* Filters */}
           <div className="flex gap-2 mb-4 flex-wrap">
             <div className="flex items-center gap-2">
@@ -3306,6 +3338,7 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+          </div>
         </div>
 
         {/* Active Events Section */}

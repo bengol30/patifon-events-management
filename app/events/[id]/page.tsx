@@ -4276,50 +4276,63 @@ export default function EventDetailsPage() {
 
                 {/* Main Content - Tasks */}
                 <div className="space-y-6">
-                    <div className="rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 p-4 shadow-sm backdrop-blur-sm sm:p-5">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-3">
-                            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>משימות לביצוע</h2>
-                            <span className="px-2 py-0.5 rounded-full text-sm font-medium" style={{ background: 'var(--patifon-yellow)', color: 'var(--patifon-burgundy)' }}>
-                                {tasks.filter(t => t.status !== 'DONE').length}
-                            </span>
+                    <div className="rounded-[28px] border border-[rgba(74,26,44,0.10)] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)] overflow-hidden">
+                        <div className="bg-gradient-to-l from-[rgba(255,184,76,0.22)] via-white to-[rgba(74,26,44,0.06)] p-4 sm:p-5">
+                            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                <div className="space-y-3 text-right">
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">{openTasksCount} פתוחות עכשיו</span>
+                                        {overdueTasksCount > 0 && (
+                                            <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">{overdueTasksCount} באיחור</span>
+                                        )}
+                                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{doneTasksCount} הושלמו</span>
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>משימות לביצוע</h2>
+                                        <p className="mt-1 text-sm text-gray-600">חלוקה ברורה יותר בין סיכום, רשימות ופעולות — כדי לעבוד מהר יותר גם במובייל.</p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                        <div className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">סה״כ</p><p className="mt-1 text-lg font-bold text-slate-900">{tasks.length}</p></div>
+                                        <div className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">צוות</p><p className="mt-1 text-lg font-bold text-slate-900">{teamTasks.length}</p></div>
+                                        <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">מתנדבים</p><p className="mt-1 text-lg font-bold text-amber-900">{volunteerTasks.length}</p></div>
+                                        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700">לביצוע</p><p className="mt-1 text-lg font-bold text-indigo-900">{openTasksCount}</p></div>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:w-[420px]">
+                                    <button
+                                        onClick={() => {
+                                            setShowSuggestions(true);
+                                            handleLibraryEditStart();
+                                        }}
+                                        className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 bg-white px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5"
+                                        style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                    >
+                                        <Repeat size={16} />
+                                        משימות חוזרות
+                                    </button>
+                                    <button
+                                        onClick={() => setShowSpecialModal(true)}
+                                        className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 bg-white px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5"
+                                        style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                    >
+                                        <Sparkles size={16} />
+                                        משימות מיוחדות
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const next = !showNewTask;
+                                            setShowNewTask(next);
+                                            if (!next) setSaveNewTaskToLibrary(false);
+                                            if (next) setNewTaskDateManuallyChanged(false);
+                                        }}
+                                        className="patifon-gradient flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:opacity-90"
+                                    >
+                                        <Plus size={18} />
+                                        משימה חדשה
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => {
-                                    setShowSuggestions(true);
-                                    handleLibraryEditStart();
-                                }}
-                                className="bg-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:opacity-80 transition text-xs md:text-sm font-medium vinyl-shadow"
-                                style={{ border: '2px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                            >
-                                <Repeat size={16} />
-                                משימות חוזרות
-                            </button>
-                            <button
-                                onClick={() => setShowSpecialModal(true)}
-                                className="bg-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:opacity-80 transition text-xs md:text-sm font-medium vinyl-shadow"
-                                style={{ border: '2px solid var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                            >
-                                <Sparkles size={16} />
-                                משימות מיוחדות
-                            </button>
-                            <button
-                                onClick={() => {
-                                    const next = !showNewTask;
-                                    setShowNewTask(next);
-                                    if (!next) setSaveNewTaskToLibrary(false);
-                                    if (next) setNewTaskDateManuallyChanged(false); // Reset on open
-                                }}
-                                className="patifon-gradient text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90 transition text-sm font-medium vinyl-shadow"
-                            >
-                                <Plus size={18} />
-                                משימה חדשה
-                            </button>
-                        </div>
-                    </div>
-
-                    </div>
                     </div>
 
                     {showNewTask && (
@@ -4575,16 +4588,24 @@ export default function EventDetailsPage() {
 
                     <div className="space-y-5">
                         {tasks.length === 0 ? (
-                            <p className="text-gray-500 text-center py-8">אין משימות עדיין. צור את המשימה הראשונה!</p>
+                            <div className="rounded-[28px] border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-gray-500 shadow-sm">אין משימות עדיין. צור את המשימה הראשונה כדי להתחיל לעבוד מסודר.</div>
                         ) : (
                             <>
-                                <div className="rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 p-4 shadow-sm sm:p-5">
-                                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
-                                        משימות צוות
-                                        <span className="text-xs text-gray-500">({tasks.filter(t => !t.isVolunteerTask).length})</span>
-                                    </h3>
-                                    <div className="space-y-3">
-                                        {tasks.filter(t => !t.isVolunteerTask).map((task) => {
+                                <div className="rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)] overflow-hidden">
+                                    <div className="border-b border-slate-200 bg-gradient-to-l from-slate-100 to-white px-4 py-4 sm:px-5">
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="text-right">
+                                                <h3 className="text-lg font-black text-slate-900">משימות צוות</h3>
+                                                <p className="mt-1 text-sm text-slate-600">עבודה שוטפת של הצוות, עם דגש על עדכונים, דד ליינים ופעולות מיידיות.</p>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{teamTasks.length} משימות</span>
+                                                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{teamTasks.filter((task) => task.status !== 'DONE').length} פתוחות</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3 bg-slate-50/60 p-4 sm:p-5">
+                                        {teamTasks.map((task) => {
                                             const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
                                             return (
                                                 <TaskCard
@@ -4622,19 +4643,27 @@ export default function EventDetailsPage() {
                                                 />
                                             );
                                         })}
-                                        {tasks.filter(t => !t.isVolunteerTask).length === 0 && (
-                                            <p className="text-xs text-gray-500">אין משימות צוות כרגע.</p>
+                                        {teamTasks.length === 0 && (
+                                            <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">אין משימות צוות כרגע.</p>
                                         )}
                                     </div>
                                 </div>
 
-                                <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 shadow-sm sm:p-5">
-                                    <h3 className="text-sm font-semibold text-amber-900 flex items-center gap-2 mb-3">
-                                        משימות למתנדבים
-                                        <span className="text-xs text-gray-500">({tasks.filter(t => t.isVolunteerTask).length})</span>
-                                    </h3>
-                                    <div className="space-y-3 bg-amber-50/60 border border-amber-100 rounded-xl p-3">
-                                        {tasks.filter(t => t.isVolunteerTask).map((task) => {
+                                <div className="rounded-[28px] border border-amber-200 bg-white shadow-[0_16px_40px_rgba(245,158,11,0.10)] overflow-hidden">
+                                    <div className="border-b border-amber-200 bg-gradient-to-l from-amber-100/90 to-white px-4 py-4 sm:px-5">
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="text-right">
+                                                <h3 className="text-lg font-black text-amber-950">משימות למתנדבים</h3>
+                                                <p className="mt-1 text-sm text-amber-900/80">משימות גמישות יותר, עם דגש על הקצאות, כמות ביצועים ושיתוף ברור מול המתנדבים.</p>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-900">{volunteerTasks.length} משימות</span>
+                                                <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">{volunteerTasks.filter((task) => task.status !== 'DONE').length} פעילות</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3 bg-amber-50/70 p-4 sm:p-5">
+                                        {volunteerTasks.map((task) => {
                                             const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
                                             return (
                                                 <TaskCard
@@ -4672,8 +4701,8 @@ export default function EventDetailsPage() {
                                                 />
                                             );
                                         })}
-                                        {tasks.filter(t => t.isVolunteerTask).length === 0 && (
-                                            <p className="text-xs text-gray-500">אין משימות למתנדבים כרגע.</p>
+                                        {volunteerTasks.length === 0 && (
+                                            <p className="rounded-2xl border border-dashed border-amber-300 bg-white px-4 py-6 text-center text-sm text-amber-800">אין משימות למתנדבים כרגע.</p>
                                         )}
                                     </div>
                                 </div>
@@ -6059,6 +6088,7 @@ export default function EventDetailsPage() {
                     </div>
                 </div>
             )}
+        </div>
         </div>
     );
 }

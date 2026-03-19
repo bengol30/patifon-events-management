@@ -1041,28 +1041,53 @@ export default function ProjectDetailsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-4">
-        <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <CheckSquare style={{ color: "var(--patifon-orange)" }} size={20} />
-              <h2 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--patifon-burgundy)" }}>
-                משימות הקשורות לפרויקט
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowNewTask(true)}
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-white text-sm font-semibold hover:bg-indigo-700 transition"
-              >
-                <PlusCircle size={16} />
-                משימה חדשה
-              </button>
-              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
-                {projectTasks.length}
-              </span>
+        <div className="overflow-hidden rounded-[28px] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+          <div className="border-b border-[rgba(74,26,44,0.08)] bg-gradient-to-l from-[rgba(255,184,76,0.18)] via-white to-[rgba(74,26,44,0.04)] p-4 sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="text-right">
+                <div className="flex flex-wrap items-center justify-end gap-2 mb-2">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100">
+                    {projectTasks.length} משימות
+                  </span>
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-white text-slate-700 border border-slate-200">
+                    {projectTasks.filter((task) => task.status !== "DONE").length} פתוחות
+                  </span>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <h2 className="text-lg sm:text-2xl font-black tracking-tight" style={{ color: "var(--patifon-burgundy)" }}>
+                    משימות הקשורות לפרויקט
+                  </h2>
+                  <CheckSquare style={{ color: "var(--patifon-orange)" }} size={20} />
+                </div>
+                <p className="mt-1 text-sm text-gray-600">כל המשימות של הפרויקט והאירועים המשויכים, עם היררכיה ברורה יותר ופעולות נגישות במובייל.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">בתהליך</p>
+                    <p className="mt-1 text-lg font-bold text-slate-900">{projectTasks.filter((task) => task.status === "IN_PROGRESS").length}</p>
+                  </div>
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-right">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-red-600">תקועות</p>
+                    <p className="mt-1 text-lg font-bold text-red-700">{projectTasks.filter((task) => task.status === "STUCK").length}</p>
+                  </div>
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-right">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">בוצעו</p>
+                    <p className="mt-1 text-lg font-bold text-emerald-800">{projectTasks.filter((task) => task.status === "DONE").length}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNewTask(true)}
+                  className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2 text-white text-sm font-semibold hover:bg-indigo-700 transition"
+                >
+                  <PlusCircle size={16} />
+                  משימה חדשה
+                </button>
+              </div>
             </div>
           </div>
+          <div className="p-4 sm:p-6">
           {loadingProjectTasks ? (
             <div className="flex items-center gap-2 text-gray-600 py-4">
               <Loader2 size={16} className="animate-spin" />
@@ -1114,6 +1139,7 @@ export default function ProjectDetailsPage() {
               ))}
             </div>
           )}
+          </div>
         </div>
         <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
           <div className="flex items-center gap-2 mb-4">

@@ -1,6 +1,15 @@
 "use client";
 
-import { CheckCircle, Circle, Clock, AlertTriangle, Trash2, MessageCircle, UserPlus } from "lucide-react";
+import {
+    AlertTriangle,
+    CheckCircle,
+    ChevronLeft,
+    Circle,
+    Clock,
+    MessageCircle,
+    Trash2,
+    UserPlus,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 
 interface TaskProps {
@@ -72,29 +81,77 @@ export default function TaskCard({
 }: TaskProps) {
     const router = useRouter();
 
-    const getStatusIcon = () => {
+    const getStatusMeta = () => {
         switch (status) {
-            case "DONE": return <CheckCircle className="text-green-500" />;
-            case "STUCK": return <AlertTriangle className="text-red-500" />;
-            case "IN_PROGRESS": return <Circle className="text-indigo-500" />;
-            default: return <Circle className="text-gray-300" />;
+            case "DONE":
+                return {
+                    icon: <CheckCircle size={18} className="text-emerald-600" />,
+                    label: "בוצע",
+                    chip: "bg-emerald-50 text-emerald-700 border-emerald-200",
+                    button: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+                    accent: "from-emerald-500/15 via-emerald-500/5 to-transparent",
+                };
+            case "STUCK":
+                return {
+                    icon: <AlertTriangle size={18} className="text-red-600" />,
+                    label: "תקוע",
+                    chip: "bg-red-50 text-red-700 border-red-200",
+                    button: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
+                    accent: "from-red-500/15 via-red-500/5 to-transparent",
+                };
+            case "IN_PROGRESS":
+                return {
+                    icon: <Circle size={18} className="text-indigo-600" />,
+                    label: "בתהליך",
+                    chip: "bg-indigo-50 text-indigo-700 border-indigo-200",
+                    button: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+                    accent: "from-indigo-500/15 via-indigo-500/5 to-transparent",
+                };
+            default:
+                return {
+                    icon: <Circle size={18} className="text-slate-500" />,
+                    label: "לביצוע",
+                    chip: "bg-slate-100 text-slate-700 border-slate-200",
+                    button: "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                    accent: "from-slate-400/10 via-slate-400/5 to-transparent",
+                };
         }
     };
 
+    const getPriorityMeta = () => {
+        switch (priority) {
+            case "CRITICAL":
+                return { label: "קריטי", chip: "bg-red-600 text-white border-red-600" };
+            case "HIGH":
+                return { label: "גבוה", chip: "bg-orange-100 text-orange-800 border-orange-200" };
+            default:
+                return { label: "רגיל", chip: "bg-gray-100 text-gray-700 border-gray-200" };
+        }
+    };
+
+    const statusMeta = getStatusMeta();
+    const priorityMeta = getPriorityMeta();
+    const taskAssignees = assignees && assignees.length > 0 ? assignees : [{ name: assignee }];
+    const dueDateLabel = dueDate ? new Date(dueDate).toLocaleDateString("he-IL") : "ללא תאריך";
+    const completionRequired = Math.max(requiredCompletions ?? 0, 0);
+    const completionRemaining = Math.max(remainingCompletions ?? requiredCompletions ?? 0, 0);
+    const showCompletionCounter = completionRequired > 1;
+    const summaryCount = [description, currentStatus, nextStep].filter(Boolean).length;
+
     const handleStatusClick = (e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent card navigation
-        e.preventDefault(); // Prevent default button behavior
+        e.stopPropagation();
+        e.preventDefault();
         if (!onStatusChange) return;
 
-        const nextStatus = status === "TODO" ? "IN_PROGRESS" :
-            status === "IN_PROGRESS" ? "DONE" :
-                status === "DONE" ? "TODO" : "TODO";
+        const nextStatus =
+            status === "TODO" ? "IN_PROGRESS" :
+                status === "IN_PROGRESS" ? "DONE" :
+                    status === "DONE" ? "TODO" : "TODO";
         onStatusChange(nextStatus);
     };
 
-    // Helper to trigger onEditStatus with all props
     const handleEditStatusClick = (e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent card navigation
+        e.stopPropagation();
         if (onEditStatus) {
             onEditStatus({
                 id, title, description, assignee, status, dueDate, priority,
@@ -140,151 +197,238 @@ export default function TaskCard({
             onKeyDown={handleKeyActivate}
             role="button"
             tabIndex={0}
-            className={`p-4 rounded-xl shadow-sm border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-100'} flex flex-col hover:shadow-md transition group cursor-pointer relative overflow-hidden`}
+            className={`group relative overflow-hidden rounded-3xl border bg-white shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(15,23,42,0.10)] ${isSelected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200/80"
+                }`}
         >
-            <div className="flex items-start justify-between gap-3 w-full mb-3">
-                <button
-                    onClick={handleStatusClick}
-                    className="hover:bg-gray-50 p-1.5 rounded-full transition z-10 shrink-0 border border-gray-200"
-                    title="שנה סטטוס"
-                >
-                    {getStatusIcon()}
-                </button>
-                <div className="flex-1 min-w-0 text-right">
-                    <h3 className={`font-semibold text-gray-900 leading-tight break-words ${status === 'DONE' ? 'line-through text-gray-400' : ''}`} title="צפייה בפרטי המשימה">
-                        {title}
-                    </h3>
-                    {description && (
-                        <p className="text-sm text-gray-600 mt-1 line-clamp-2">{description}</p>
-                    )}
-                    {eventId && eventTitle && (
-                        <button
-                            type="button"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(`/events/${eventId}`);
-                            }}
-                            className="text-xs text-indigo-600 font-medium hover:underline mt-1"
-                        >
-                            📅 {eventTitle}
-                        </button>
-                    )}
-                </div>
-            </div>
+            <div className={`pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b ${statusMeta.accent}`} />
 
-            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
-                <div className="flex items-center gap-2 flex-wrap max-w-full">
-                    <span className="text-xs text-gray-500">אחראי:</span>
-                    {(assignees && assignees.length > 0 ? assignees : [{ name: assignee }]).map((a, idx) => {
-                        const label = a.name || 'לא משויך';
-                        return (
-                            <button
-                                key={idx}
-                                type="button"
-                                onClick={(e) => {
-                                    // Always stop navigation; optionally open modal/handler
-                                    e.stopPropagation();
-                                    onAssigneeClick?.(a);
-                                }}
-                                className="px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs border border-gray-200 hover:border-indigo-200 hover:text-indigo-700"
-                                title="שליחת הודעת מערכת למשתמש"
-                            >
-                                {label}
-                            </button>
-                        );
-                    })}
+            <div className="relative flex flex-col gap-4 p-4 sm:p-5">
+                <div className="flex items-start gap-3">
+                    <button
+                        type="button"
+                        onClick={handleStatusClick}
+                        className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition ${statusMeta.button}`}
+                        title="שנה סטטוס"
+                    >
+                        {statusMeta.icon}
+                    </button>
+
+                    <div className="min-w-0 flex-1 text-right">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${priorityMeta.chip}`}>
+                                {priorityMeta.label}
+                            </span>
+                            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusMeta.chip}`}>
+                                {statusMeta.label}
+                            </span>
+                            {hasUnreadMessages && (
+                                <span className="inline-flex items-center rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-1 text-[11px] font-semibold text-fuchsia-700">
+                                    הודעה חדשה
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                                <ChevronLeft size={18} className="mt-1 shrink-0 text-slate-300 transition group-hover:text-slate-500" />
+                                <div className="min-w-0 flex-1">
+                                    <h3 className={`text-base font-bold leading-tight text-slate-900 sm:text-lg ${status === "DONE" ? "line-through text-slate-400" : ""}`}>
+                                        {title}
+                                    </h3>
+                                    {eventId && eventTitle && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                router.push(`/events/${eventId}`);
+                                            }}
+                                            className="mt-1 inline-flex max-w-full items-center gap-1 text-xs font-semibold text-indigo-700 hover:underline"
+                                        >
+                                            <span className="truncate">{eventTitle}</span>
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {description && (
+                                <p className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-3 py-2.5 text-sm leading-6 text-slate-700 line-clamp-3">
+                                    {description}
+                                </p>
+                            )}
+                        </div>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <div
-                        className="flex items-center gap-1 hover:bg-gray-50 px-2 py-1 rounded-lg transition z-10 text-xs sm:text-sm border border-gray-100"
+
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
+                    <button
+                        type="button"
                         onClick={handleDateClick}
+                        className="flex min-h-[56px] items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-right transition hover:border-indigo-200 hover:bg-indigo-50/50"
                         title="לחץ לשינוי תאריך"
                     >
-                        <Clock size={14} />
-                        <span className="font-medium">{dueDate ? new Date(dueDate).toLocaleDateString('he-IL') : '-'}</span>
+                        <div className="text-right">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">דד ליין</p>
+                            <p className="mt-1 text-sm font-semibold text-slate-800">{dueDateLabel}</p>
+                        </div>
+                        <Clock size={16} className="shrink-0 text-slate-500" />
+                    </button>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">אחראים</span>
+                            <span className="text-[11px] font-semibold text-slate-400">{taskAssignees.length}</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap justify-end gap-2">
+                            {taskAssignees.map((a, idx) => {
+                                const label = a.name || "לא משויך";
+                                return (
+                                    <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onAssigneeClick?.(a);
+                                        }}
+                                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                                        title="שליחת הודעת מערכת למשתמש"
+                                    >
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
-                    {onUpdateCompletions && (
-                        <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); onUpdateCompletions(); }}
-                            className="p-1.5 rounded-full border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 transition"
-                            title="עדכן מספר ביצועים"
-                        >
-                            <span className="text-[10px] font-bold leading-none">+1</span>
-                        </button>
-                    )}
                 </div>
-            </div>
 
-            {(requiredCompletions || remainingCompletions) && (requiredCompletions || 0) > 1 && (
-                <div className="mt-2 flex items-center gap-2 text-xs text-indigo-800">
-                    <span className="px-2 py-1 rounded-full bg-indigo-50 border border-indigo-200 font-semibold">
-                        {Math.max(remainingCompletions ?? requiredCompletions ?? 0, 0)} / {requiredCompletions ?? 0} נותרו
-                    </span>
-                </div>
-            )}
+                {(currentStatus || nextStep || showCompletionCounter) && (
+                    <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
+                        <div className="mb-3 flex items-center justify-between gap-2 text-right">
+                            <div className="flex items-center gap-2">
+                                {showCompletionCounter && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onUpdateCompletions?.();
+                                        }}
+                                        className="inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-indigo-200 bg-white px-2 text-[11px] font-bold text-indigo-700 transition hover:bg-indigo-50"
+                                        title="עדכן מספר ביצועים"
+                                    >
+                                        +1
+                                    </button>
+                                )}
+                            </div>
+                            <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">מצב עבודה</p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">
+                                    {summaryCount > 0 ? "מה קורה עכשיו" : "מוכן לעבודה"}
+                                </p>
+                            </div>
+                        </div>
 
-            <div className="mt-3 flex items-center gap-2 justify-end text-sm text-gray-500">
-                {onManageAssignees && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onManageAssignees(); }}
-                        className="text-gray-400 hover:text-indigo-600 p-2 rounded-full border border-transparent hover:border-indigo-100 transition"
-                        title="נהל אחראים"
-                    >
-                        <UserPlus size={16} />
-                    </button>
-                )}
-                {onChat && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onChat(); }}
-                        className="text-gray-400 hover:text-purple-500 p-2 rounded-full border border-transparent hover:border-purple-100 transition relative"
-                        title="צ'אט הודעות"
-                    >
-                        <MessageCircle size={16} />
-                        {hasUnreadMessages && (
-                            <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                            {currentStatus && (
+                                <div
+                                    onClick={handleEditStatusClick}
+                                    className="cursor-pointer rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-right transition hover:bg-amber-100/80"
+                                >
+                                    <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">איפה זה עומד</p>
+                                    <p className="mt-1.5 text-sm font-medium leading-6 text-amber-950 break-words">{currentStatus}</p>
+                                </div>
+                            )}
+
+                            {nextStep && (
+                                <div
+                                    onClick={handleEditStatusClick}
+                                    className="cursor-pointer rounded-2xl border border-orange-200 bg-orange-500 px-3 py-3 text-right transition hover:bg-orange-600"
+                                >
+                                    <p className="text-[11px] font-bold uppercase tracking-wide text-orange-50">הצעד הבא</p>
+                                    <p className="mt-1.5 text-sm font-semibold leading-6 text-white break-words">{nextStep}</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {showCompletionCounter && (
+                            <div className="mt-3 flex justify-end">
+                                <div className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-800">
+                                    נותרו {completionRemaining} מתוך {completionRequired}
+                                </div>
+                            </div>
                         )}
-                    </button>
+                    </div>
                 )}
-                {onDelete && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        className="patifon-touch-target text-gray-500 hover:text-red-600 p-2 rounded-full border border-transparent hover:border-red-100 transition flex items-center justify-center"
-                        title="מחק משימה"
-                    >
-                        <Trash2 size={16} />
-                    </button>
-                )}
-            </div>
 
-            {(currentStatus || nextStep) && (
-                <div className="mt-3 flex flex-wrap gap-2 w-full relative z-10">
-                    {currentStatus && (
-                        <div
-                            onClick={handleEditStatusClick}
-                            className="p-1.5 rounded-lg flex-1 min-w-[200px] hover:opacity-90 transition cursor-pointer"
-                            style={{ background: 'var(--patifon-yellow)', border: '1px solid var(--patifon-yellow-orange)' }}
-                        >
-                            <div className="flex items-start gap-2">
-                                <span className="font-bold text-xs shrink-0" style={{ color: 'var(--patifon-burgundy)' }}>📍 איפה זה עומד:</span>
-                                <span className="text-xs font-medium" style={{ color: 'var(--patifon-burgundy)' }}>{currentStatus}</span>
-                            </div>
-                        </div>
-                    )}
-                    {nextStep && (
-                        <div
-                            onClick={handleEditStatusClick}
-                            className="p-1.5 rounded-lg flex-1 min-w-[200px] hover:opacity-90 transition cursor-pointer"
-                            style={{ background: 'var(--patifon-orange)', border: '1px solid var(--patifon-orange-dark)' }}
-                        >
-                            <div className="flex items-start gap-2">
-                                <span className="font-bold text-xs shrink-0 text-white">➡️ הצעד הבא:</span>
-                                <span className="text-xs font-medium text-white break-words">{nextStep}</span>
-                            </div>
-                        </div>
-                    )}
+                <div className="rounded-[26px] border border-slate-200 bg-white p-3 sm:p-4">
+                    <div className="mb-3 text-right">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">פעולות</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">מה אפשר לעשות עכשיו</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {onManageAssignees && (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onManageAssignees();
+                                }}
+                                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                                title="נהל אחראים"
+                            >
+                                <UserPlus size={16} />
+                                <span>אחראים</span>
+                            </button>
+                        )}
+
+                        {onChat && (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onChat();
+                                }}
+                                className="relative flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-sm font-semibold text-fuchsia-700 transition hover:bg-fuchsia-100"
+                                title="צ'אט הודעות"
+                            >
+                                <MessageCircle size={16} />
+                                <span>צ׳אט</span>
+                                {hasUnreadMessages && (
+                                    <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-red-500" />
+                                )}
+                            </button>
+                        )}
+
+                        {onEdit && (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEdit();
+                                }}
+                                className="flex min-h-[48px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                                title="עריכת משימה"
+                            >
+                                ערוך
+                            </button>
+                        )}
+
+                        {onDelete && (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete();
+                                }}
+                                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                                title="מחק משימה"
+                            >
+                                <Trash2 size={16} />
+                                <span>מחק</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 }
