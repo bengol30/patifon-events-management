@@ -3158,6 +3158,24 @@ export default function EventDetailsPage() {
 
     const totalBudgetUsed = budgetItems.reduce((sum, item) => sum + item.amount, 0);
     const partnersLabel = Array.isArray(event.partners) ? event.partners.join(", ") : (event.partners || "");
+    const teamTasks = tasks.filter(t => !t.isVolunteerTask);
+    const volunteerTasks = tasks.filter(t => t.isVolunteerTask);
+    const openTasksCount = tasks.filter(t => t.status !== 'DONE').length;
+    const doneTasksCount = tasks.filter(t => t.status === 'DONE').length;
+    const overdueTasksCount = tasks.filter(t => t.status !== 'DONE' && t.dueDate && !isNaN(new Date(t.dueDate).getTime()) && new Date(t.dueDate) < new Date()).length;
+    const startDate = event.startTime?.seconds ? new Date(event.startTime.seconds * 1000) : (event.startTime ? new Date(event.startTime) : null);
+    const startDateLabel = startDate && !isNaN(startDate.getTime())
+        ? startDate.toLocaleDateString("he-IL", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
+        : "";
+    const startTimeLabel = startDate && !isNaN(startDate.getTime())
+        ? startDate.toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' })
+        : "";
+    const summaryCards = [
+        { label: "משימות פתוחות", value: openTasksCount, tone: "bg-white/80 text-[var(--patifon-burgundy)] border-[rgba(74,26,44,0.12)]" },
+        { label: "משימות שהושלמו", value: doneTasksCount, tone: "bg-emerald-50 text-emerald-700 border-emerald-100" },
+        { label: "אנשי צוות", value: event.team?.length || 0, tone: "bg-indigo-50 text-indigo-700 border-indigo-100" },
+        { label: event.needsVolunteers ? "מתנדבים רשומים" : "משימות למתנדבים", value: event.needsVolunteers ? combinedVolunteers.length : volunteerTasks.length, tone: "bg-amber-50 text-amber-800 border-amber-100" },
+    ];
     const specialTasks = tasks.filter((task) => {
         const type = (task as any).specialType || "";
         return (
@@ -3169,7 +3187,8 @@ export default function EventDetailsPage() {
     });
 
     return (
-        <div className="min-h-screen bg-gray-50 p-6 relative">
+        <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(241,143,58,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf5_0%,_#f7efe6_48%,_#f4e7d7_100%)] px-4 py-4 sm:px-6 sm:py-6 relative">
+            <div className="mx-auto max-w-7xl">
             {/* Confirmation Modal */}
             {confirmModal.isOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -3788,26 +3807,41 @@ export default function EventDetailsPage() {
                 </Link>
             </div>
 
-            <header className="mb-8 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '3px solid var(--patifon-orange)' }}>
-                <div className="flex flex-col gap-4 mb-4">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-3 w-full">
-                            <h1 className="text-3xl font-bold leading-tight" style={{ color: 'var(--patifon-burgundy)' }}>{event.title}</h1>
-                            <p className="text-sm font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>
+            <header className="mb-6 overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/80 shadow-[0_16px_50px_rgba(74,26,44,0.12)] backdrop-blur-sm">
+                <div className="bg-[linear-gradient(135deg,rgba(74,26,44,0.97),rgba(193,39,45,0.9),rgba(241,143,58,0.85))] px-5 py-6 text-white sm:px-7">
+                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="space-y-4 w-full">
+                            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                                <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">דף ניהול אירוע</span>
+                                {event.projectId ? (
+                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">פרויקט: {event.projectName || event.projectId}</span>
+                                ) : (
+                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">ללא פרויקט משויך</span>
+                                )}
+                                {event.status && (
+                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">סטטוס: {event.status}</span>
+                                )}
+                                {overdueTasksCount > 0 && (
+                                    <span className="rounded-full border border-red-200/60 bg-red-500/20 px-3 py-1 text-red-50">{overdueTasksCount} משימות באיחור</span>
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <h1 className="text-3xl font-black leading-tight sm:text-4xl">{event.title}</h1>
+                                <p className="max-w-3xl text-sm text-white/85 sm:text-base">
+                                    {event.description || "כל פרטי האירוע, הצוות, המשימות, התוכן והקבצים במקום אחד ברור ונגיש."}
+                                </p>
+                            </div>
+                            <p className="text-sm font-semibold text-white/90">
                                 יוצר האירוע: {creatorName || event.creatorName || event.createdByEmail || event.createdBy || "לא ידוע"}
                             </p>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" style={{ color: 'var(--patifon-orange)' }}>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/90">
                                 <div className="flex items-center gap-1">
                                     <MapPin size={16} />
                                     <span>{event.location}</span>
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <Calendar size={16} />
-                                    <span>
-                                        {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleDateString("he-IL") : ""}
-                                        {" | "}
-                                        {event.startTime?.seconds ? new Date(event.startTime.seconds * 1000).toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' }) : ""}
-                                    </span>
+                                    <span>{startDateLabel}{startTimeLabel ? ` | ${startTimeLabel}` : ""}</span>
                                 </div>
                                 {event.dates && event.dates.length > 1 && (
                                     <div className="flex items-center gap-2 flex-wrap text-xs text-indigo-800">
@@ -4038,10 +4072,34 @@ export default function EventDetailsPage() {
                         </div>
                     </div>
                 </div>
+                <div className="grid grid-cols-2 gap-3 border-t border-[rgba(74,26,44,0.08)] bg-white/70 px-4 py-4 sm:grid-cols-4 sm:px-6">
+                    {summaryCards.map((card) => (
+                        <div key={card.label} className={`rounded-2xl border px-4 py-3 shadow-sm ${card.tone}`}>
+                            <p className="text-xs font-semibold opacity-80">{card.label}</p>
+                            <p className="mt-1 text-2xl font-black">{card.value}</p>
+                        </div>
+                    ))}
+                </div>
             </header>
 
+            <div className="mb-6 rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/70 px-4 py-4 shadow-sm backdrop-blur-sm sm:px-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <p className="text-sm font-semibold text-gray-900">גישה מהירה</p>
+                        <p className="text-xs text-gray-600">הפעולות הכי שימושיות מבלי לחפש בתוך הדף.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <button onClick={() => { const next = !showNewTask; setShowNewTask(next); if (!next) setSaveNewTaskToLibrary(false); if (next) setNewTaskDateManuallyChanged(false); }} className="patifon-action-primary text-sm">משימה חדשה</button>
+                        <button onClick={copyInviteLink} className="patifon-action-secondary text-sm">שיתוף צוות</button>
+                        <button onClick={copyRegisterLink} className="patifon-action-secondary text-sm">קישור הרשמה</button>
+                        {event.needsVolunteers && <button onClick={copyVolunteerLink} className="patifon-action-secondary text-sm">קישור מתנדבים</button>}
+                        <button onClick={handleOpenContentModal} className="patifon-action-secondary text-sm">תוכן ומדיה</button>
+                    </div>
+                </div>
+            </div>
+
             {(event.infoBlocks?.length || event.customSections?.length) && (
-                <div className="mb-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <div className="mb-6 rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 p-5 shadow-sm backdrop-blur-sm sm:p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                         <FileText size={18} className="text-indigo-600" />
                         מידע נוסף על האירוע
@@ -4143,7 +4201,7 @@ export default function EventDetailsPage() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)]">
                 {/* Recurring Tasks Modal */}
                 {showSuggestions && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -4265,7 +4323,8 @@ export default function EventDetailsPage() {
 
                 {/* Main Content - Tasks */}
                 <div className="space-y-6">
-                    <div className="flex justify-between items-center">
+                    <div className="rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-3">
                             <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>משימות לביצוע</h2>
                             <span className="px-2 py-0.5 rounded-full text-sm font-medium" style={{ background: 'var(--patifon-yellow)', color: 'var(--patifon-burgundy)' }}>
@@ -4307,8 +4366,11 @@ export default function EventDetailsPage() {
                         </div>
                     </div>
 
+                    </div>
+                    </div>
+
                     {showNewTask && (
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 mb-4 animate-in fade-in slide-in-from-top-2">
+                        <div className="rounded-2xl border border-indigo-100 bg-white/95 p-4 shadow-sm animate-in fade-in slide-in-from-top-2 sm:p-5">
                             <h3 className="font-medium mb-3">הוספת משימה חדשה</h3>
                             <form onSubmit={handleAddTask} className="space-y-3">
                                 <input
@@ -4558,13 +4620,13 @@ export default function EventDetailsPage() {
                         </div>
                     )}
 
-                    <div className="space-y-4">
+                    <div className="space-y-5">
                         {tasks.length === 0 ? (
                             <p className="text-gray-500 text-center py-8">אין משימות עדיין. צור את המשימה הראשונה!</p>
                         ) : (
                             <>
-                                <div className="space-y-2">
-                                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <div className="rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 p-4 shadow-sm sm:p-5">
+                                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
                                         משימות צוות
                                         <span className="text-xs text-gray-500">({tasks.filter(t => !t.isVolunteerTask).length})</span>
                                     </h3>
@@ -4613,8 +4675,8 @@ export default function EventDetailsPage() {
                                     </div>
                                 </div>
 
-                                <div className="space-y-2">
-                                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 shadow-sm sm:p-5">
+                                    <h3 className="text-sm font-semibold text-amber-900 flex items-center gap-2 mb-3">
                                         משימות למתנדבים
                                         <span className="text-xs text-gray-500">({tasks.filter(t => t.isVolunteerTask).length})</span>
                                     </h3>
@@ -4668,7 +4730,7 @@ export default function EventDetailsPage() {
                 </div>
 
                 {/* Sidebar - Team, Budget & Files */}
-                <div className="space-y-6">
+                <div className="space-y-6 xl:sticky xl:top-4 self-start">
                     {/* ... existing budget section ... */}
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -5284,6 +5346,14 @@ export default function EventDetailsPage() {
                             פתח מרכז בקרה
                         </button>
                     </div>
+                </div>
+            </div>
+
+            <div className="fixed inset-x-0 bottom-3 z-30 px-3 md:hidden pointer-events-none">
+                <div className="mx-auto flex max-w-md items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/95 p-2 shadow-[0_14px_40px_rgba(74,26,44,0.18)] backdrop-blur pointer-events-auto">
+                    <button onClick={() => { const next = !showNewTask; setShowNewTask(next); if (!next) setSaveNewTaskToLibrary(false); if (next) setNewTaskDateManuallyChanged(false); }} className="flex-1 rounded-xl bg-[var(--patifon-burgundy)] px-3 py-3 text-sm font-bold text-white">משימה</button>
+                    <button onClick={copyInviteLink} className="flex-1 rounded-xl border border-[rgba(74,26,44,0.12)] px-3 py-3 text-sm font-semibold text-[var(--patifon-burgundy)]">שתף</button>
+                    <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`flex-1 rounded-xl px-3 py-3 text-sm font-semibold ${canManageTeam ? 'border border-[rgba(74,26,44,0.12)] text-[var(--patifon-burgundy)]' : 'bg-gray-100 text-gray-400'}`}>בקרה</button>
                 </div>
             </div>
 
