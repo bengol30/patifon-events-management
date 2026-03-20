@@ -1646,6 +1646,21 @@ export default function Dashboard() {
     });
   }
 
+  const unreadFilteredTasksCount = filteredTasks.filter((task) => task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid).length;
+  const urgentTasksCount = myTasks.filter((task) => task.priority === "CRITICAL" || task.priority === "HIGH").length;
+  const stuckTasksCount = myTasks.filter((task) => task.status === "STUCK").length;
+  const upcomingTasksCount = myTasks.filter((task) => task.dueDate && !isNaN(new Date(task.dueDate).getTime()) && new Date(task.dueDate).getTime() <= Date.now() + 7 * 24 * 60 * 60 * 1000).length;
+  const overdueTasksCount = myTasks.filter((task) => task.status !== "DONE" && task.dueDate && !isNaN(new Date(task.dueDate).getTime()) && new Date(task.dueDate).getTime() < Date.now()).length;
+  const inProgressTasksCount = myTasks.filter((task) => task.status === "IN_PROGRESS").length;
+  const tasksWithoutDueDateCount = myTasks.filter((task) => !task.dueDate).length;
+  const nextFocusTask = filteredTasks[0] || myTasks[0] || null;
+  const upcomingEventsCount = events.filter((event) => {
+    const raw = event.startTime as any;
+    const eventTime = raw?.seconds ? raw.seconds * 1000 : raw ? new Date(raw).getTime() : NaN;
+    return !isNaN(eventTime) && eventTime >= Date.now();
+  }).length;
+  const activeProjectsCount = projects.filter((project) => (project.status || "").toLowerCase() !== "done").length;
+
   const currentUid = user?.uid || "";
   const taskNotifications = currentUid
     ? notificationTasks.filter(t => {
@@ -3192,390 +3207,418 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* My Tasks Section */}
-        <div className="overflow-hidden rounded-[28px] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-          <div className="border-b border-[rgba(74,26,44,0.08)] bg-gradient-to-l from-[rgba(255,184,76,0.20)] via-white to-[rgba(74,26,44,0.04)] p-5 sm:p-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="text-right">
-                <div className="flex flex-wrap items-center justify-end gap-2 mb-2">
-                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--patifon-yellow)] text-[var(--patifon-burgundy)] border border-amber-200">
-                    {filteredTasks.length} מוצגות
-                  </span>
-                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-white text-slate-700 border border-slate-200">
-                    {myTasks.length} פתוחות בסך הכול
-                  </span>
+      <div className="space-y-6">
+        <section className="overflow-hidden rounded-[32px] border border-[rgba(74,26,44,0.12)] bg-[radial-gradient(circle_at_top_right,rgba(255,184,76,0.32),transparent_36%),linear-gradient(135deg,rgba(74,26,44,0.96),rgba(104,28,60,0.94))] text-white shadow-[0_24px_70px_rgba(74,26,44,0.22)]">
+          <div className="p-5 sm:p-6 lg:p-8">
+            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+              <div className="max-w-2xl text-right">
+                <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+                  <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">{myTasks.length} משימות פתוחות</span>
+                  <span className="rounded-full border border-amber-200/30 bg-amber-300/15 px-3 py-1 text-xs font-semibold text-amber-100">{upcomingEventsCount} אירועים קרובים</span>
+                  <span className="rounded-full border border-sky-200/30 bg-sky-300/15 px-3 py-1 text-xs font-semibold text-sky-100">{activeProjectsCount} פרויקטים פעילים</span>
                 </div>
-                <div className="flex items-center justify-end gap-2">
-                  <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>המשימות שלי</h2>
-                  <CheckSquare style={{ color: 'var(--patifon-red)' }} />
+                <h2 className="text-3xl font-black tracking-tight sm:text-4xl">מה צריך תשומת לב עכשיו</h2>
+                <p className="mt-2 text-sm leading-6 text-white/75 sm:text-base">המסך הזה מסדר קודם את הדברים שדורשים טיפול, אחר כך את מה שחי כרגע, ורק בסוף את כלי הניהול. כך אפשר להבין תוך שנייה מה בוער ומה הצעד הבא.</p>
+
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-3xl border border-red-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                    <p className="text-xs font-semibold text-white/70">באדום עכשיו</p>
+                    <p className="mt-2 text-3xl font-black text-white">{stuckTasksCount + overdueTasksCount}</p>
+                    <p className="mt-1 text-xs text-white/70">תקועות או באיחור</p>
+                  </div>
+                  <div className="rounded-3xl border border-amber-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                    <p className="text-xs font-semibold text-white/70">לטפל היום</p>
+                    <p className="mt-2 text-3xl font-black text-white">{urgentTasksCount}</p>
+                    <p className="mt-1 text-xs text-white/70">בעדיפות גבוהה</p>
+                  </div>
+                  <div className="rounded-3xl border border-fuchsia-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                    <p className="text-xs font-semibold text-white/70">מחכות לתגובה</p>
+                    <p className="mt-2 text-3xl font-black text-white">{unreadFilteredTasksCount}</p>
+                    <p className="mt-1 text-xs text-white/70">עם הודעות שלא נקראו</p>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                    <p className="text-xs font-semibold text-white/70">בתנועה</p>
+                    <p className="mt-2 text-3xl font-black text-white">{inProgressTasksCount}</p>
+                    <p className="mt-1 text-xs text-white/70">כבר בתהליך</p>
+                  </div>
                 </div>
-                <p className="mt-1 text-sm text-gray-600">כאן רואים מהר מה דורש טיפול, מה דחוף, ואילו פעולות זמינות על כל משימה.</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[340px]">
-                <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">דחופות</p>
-                  <p className="mt-1 text-lg font-bold text-slate-900">{myTasks.filter((task) => task.priority === "CRITICAL" || task.priority === "HIGH").length}</p>
-                </div>
-                <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-red-600">תקועות</p>
-                  <p className="mt-1 text-lg font-bold text-red-700">{myTasks.filter((task) => task.status === "STUCK").length}</p>
-                </div>
-                <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">עם הודעות</p>
-                  <p className="mt-1 text-lg font-bold text-fuchsia-800">{filteredTasks.filter((task) => task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid).length}</p>
-                </div>
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">לשבוע הקרוב</p>
-                  <p className="mt-1 text-lg font-bold text-amber-900">{myTasks.filter((task) => task.dueDate && !isNaN(new Date(task.dueDate).getTime()) && new Date(task.dueDate).getTime() <= Date.now() + 7 * 24 * 60 * 60 * 1000).length}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-5 sm:p-6">
-          {/* Filters */}
-          <div className="flex gap-2 mb-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Filter size={16} className="text-gray-400" />
-              <select
-                value={filterEvent}
-                onChange={(e) => setFilterEvent(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="all">כל האירועים</option>
-                {events.map(event => (
-                  <option key={event.id} value={event.id}>{event.title}</option>
-                ))}
-              </select>
-            </div>
-
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="none">ללא מיון</option>
-              <option value="deadline">📅 לפי דד ליין (קרוב לרחוק)</option>
-              <option value="priority">⚠️ לפי עדיפות (דחוף → רגיל)</option>
-              <option value="status">🔄 לפי סטטוס (תקוע → בתהליך)</option>
-              <option value="eventDate">🎉 לפי תאריך האירוע</option>
-            </select>
-          </div>
-
-          {loadingTasks ? (
-            <div className="text-gray-500 text-center py-8">טוען משימות...</div>
-          ) : filteredTasks.length === 0 ? (
-            <div className="text-gray-500 text-center py-8">
-              {myTasks.length === 0 ? "אין משימות פתוחות כרגע." : "אין משימות התואמות לסינון."}
-            </div>
-          ) : (
-            <div className="max-h-96 overflow-y-auto pr-1">
-              <div className="space-y-3">
-                {filteredTasks.map((task) => {
-                  const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
-                  return (
-                    <TaskCard
-                      key={task.id}
-                      id={task.id}
-                      title={task.title}
-                      description={task.description}
-                      assignee={task.assignee || "לא משויך"}
-                      assignees={task.assignees}
-                      status={task.status}
-                      dueDate={task.dueDate}
-                      priority={task.priority}
-                      currentStatus={task.currentStatus}
-                      nextStep={task.nextStep}
-                      eventId={task.eventId}
-                      eventTitle={task.eventTitle}
-                      scope={task.scope}
-                      onEdit={() => setEditingTask(task)}
-                      onDelete={() => setDeletingTaskId(task.id)}
-                      onStatusChange={async (newStatus) => {
-                        if (newStatus === "DONE") {
-                          handleCompleteTask(task);
-                        } else {
-                          // Update status for other transitions
-                          if (!db) return;
-                          try {
-                            const taskRef = task.scope === "project"
-                              ? doc(db, "projects", task.eventId, "tasks", task.id)
-                              : doc(db, "events", task.eventId, "tasks", task.id);
-                            await updateDoc(taskRef, { status: newStatus });
-                            setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
-                          } catch (err) {
-                            console.error("Error updating status:", err);
-                          }
-                        }
-                      }}
-                      onChat={() => setChatTask(task)}
-                      hasUnreadMessages={hasUnread}
-                      onEditStatus={(t) => setEditingStatusTask({
-                        ...t,
-                        eventId: t.eventId || "",
-                        eventTitle: t.eventTitle || "",
-                        scope: task.scope
-                      } as Task)}
-                      onEditDate={(t) => setEditingDateTask({
-                        ...t,
-                        eventId: t.eventId || "",
-                        eventTitle: t.eventTitle || "",
-                        scope: task.scope
-                      } as Task)}
-                      onManageAssignees={() => {
-                        // מוביל למסך פרטי המשימה עם רמז אירוע כדי לאפשר תיוג גם במובייל
-                        router.push(`/tasks/${task.id}?eventId=${task.eventId}&focus=assignees`);
-                      }}
-                      onAssigneeClick={(assignee) => {
-                        const target = assignee || { name: task.assignee, email: (task as any).assigneeEmail };
-                        openAssigneeWhatsapp(task, target);
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          </div>
-        </div>
-
-        {/* Active Events Section */}
-        <div className="bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-          <div className="flex items-center gap-3 mb-2">
-            <Calendar style={{ color: 'var(--patifon-orange)' }} />
-            <div className="flex flex-col">
-              <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>אירועים פעילים</h2>
-              <span className="text-xs text-gray-600">
-                משימות ללא שיוך (לא הוקצו ולא משימת מתנדב): {unassignedTasksCount}
-              </span>
-            </div>
-          </div>
-          {loadingEvents ? (
-            <div className="text-gray-500 text-center py-8">טוען אירועים...</div>
-          ) : events.length === 0 ? (
-            <div className="text-gray-500 text-center py-8">
-              אין אירועים פעילים.
-            </div>
-          ) : (
-            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-              {events.map((event) => (
-                <div
-                  key={event.id}
-                  className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
-                >
-                  <Link href={`/events/${event.id}`} className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-gray-900 truncate">{event.title}</h3>
-                    <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-gray-600">
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateEventField(event.id, "startTime")}
-                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
-                        title="עדכון תאריך ושעה"
-                      >
-                        <Calendar size={14} className="shrink-0" />
-                        <span className="truncate underline-offset-2">{formatEventDate(event.startTime) || "אין תאריך"}</span>
+              <div className="grid w-full gap-3 sm:grid-cols-2 xl:max-w-md xl:grid-cols-1">
+                <div className="rounded-[28px] border border-white/15 bg-white/10 p-4 text-right backdrop-blur-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <AlertTriangle className="mt-1 shrink-0 text-amber-200" size={20} />
+                    <div>
+                      <p className="text-xs font-semibold text-white/70">פוקוס ראשון</p>
+                      <h3 className="mt-1 text-lg font-bold text-white">{nextFocusTask?.title || "אין משימה דחופה כרגע"}</h3>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm text-white/75">{nextFocusTask ? `${nextFocusTask.eventTitle || "ללא שיוך"} • ${nextFocusTask.status === "STUCK" ? "תקוע" : nextFocusTask.status === "IN_PROGRESS" ? "בתהליך" : "ממתין לביצוע"}` : "אם הכל נקי, זה זמן טוב לעבור על אירועים ופרויקטים פעילים."}</p>
+                  {nextFocusTask && (
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <button onClick={() => router.push(`/tasks/${nextFocusTask.id}?eventId=${nextFocusTask.eventId}`)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-[var(--patifon-burgundy)] transition hover:bg-white/90">
+                        <CheckSquare size={16} />
+                        פתח משימה
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateEventField(event.id, "location")}
-                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
-                        title="עדכון מיקום"
-                      >
-                        <MapPin size={14} className="shrink-0" />
-                        <span className="truncate underline-offset-2">{event.location || "לא צוין מיקום"}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateEventField(event.id, "participantsCount")}
-                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
-                        title="עדכון כמות משתתפים"
-                      >
-                        <Users size={14} className="shrink-0" />
-                        <span className="truncate underline-offset-2">{event.participantsCount || "משתתפים: לא צוין"}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateEventField(event.id, "status")}
-                        className="flex items-center gap-1 min-w-0 text-left hover:text-indigo-700"
-                        title="עדכון סטטוס"
-                      >
-                        <CheckSquare size={14} className="shrink-0" />
-                        <span className="truncate underline-offset-2">{event.status || "ללא סטטוס"}</span>
+                      <button onClick={() => setChatTask(nextFocusTask)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+                        <MessageCircle size={16} />
+                        צ׳אט מהיר
                       </button>
                     </div>
-                  </Link>
-                  {(
-                    (event.createdBy && event.createdBy === user.uid) ||
-                    (event.createdByEmail && user.email && normalizeKey(event.createdByEmail) === normalizeKey(user.email))
-                  ) && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setDeleteEventRemoveTasks(false);
-                          setConfirmingEventId(event.id);
-                        }}
-                        className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
-                        title="מחק אירוע"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Active Projects Section */}
-      <div className="mt-8 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-        <div className="flex items-center justify-between gap-2 mb-4">
-          <div className="flex items-center gap-2">
-            <FolderKanban style={{ color: 'var(--patifon-orange)' }} />
-            <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>פרויקטים פעילים</h2>
-          </div>
-          <Link
-            href="/projects?openForm=1"
-            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 transition"
-            title="פתיחת פרויקט חדש עם אותו טופס של האדמין"
-          >
-            <Plus size={16} />
-            פתיחת פרויקט חדש
-          </Link>
-        </div>
-        {loadingProjects ? (
-          <div className="text-gray-500 text-center py-8">טוען פרויקטים...</div>
-        ) : projects.length === 0 ? (
-          <div className="text-gray-500 text-center py-8">אין פרויקטים פעילים עבורך כרגע.</div>
-        ) : (
-          <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-            {projects.map((project) => (
-              <div
-                key={project.id}
-                className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
-              >
-                <Link href={`/projects/${project.id}`} className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-gray-900 truncate">{project.name || "פרויקט ללא שם"}</h3>
-                    {project.status && (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        {project.status}
-                      </span>
-                    )}
-                  </div>
-                  {project.summary && (
-                    <p className="text-sm text-gray-600 mt-1 truncate" title={project.summary}>
-                      {project.summary}
-                    </p>
                   )}
-                  <div className="mt-2 flex items-center gap-3 text-xs text-gray-600 flex-wrap">
-                    {project.goal && <span className="truncate" title={project.goal}>מטרה: {project.goal}</span>}
-                    {formatProjectDueDate(project.dueDate) && (
-                      <span className="flex items-center gap-1">
-                        <Calendar size={14} className="shrink-0" />
-                        יעד: {formatProjectDueDate(project.dueDate)}
-                      </span>
-                    )}
-                  </div>
-                </Link>
-                {isProjectOwner(project, user) && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      setConfirmingProjectId(project.id);
-                    }}
-                    className="p-2 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 shrink-0"
-                    title="מחק פרויקט"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                </div>
 
-      {/* Team Meeting Notes */}
-      <div className="mt-8 bg-white p-6 rounded-xl vinyl-shadow" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-        <div className="flex items-center gap-2 mb-4">
-          <MessageCircle style={{ color: 'var(--patifon-orange)' }} />
-          <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>נקודות לפגישת הצוות הקרובה</h2>
-        </div>
-        <form onSubmit={handleAddNote} className="flex flex-col gap-3 md:flex-row md:items-center mb-4">
-          <textarea
-            className="flex-1 p-3 border rounded-lg text-sm border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            placeholder="כתבו כאן נקודות, החלטות או שאלות לפגישה..."
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            rows={2}
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition"
-          >
-            הוסף
-          </button>
-        </form>
-        {loadingNotes ? (
-          <div className="text-gray-500 text-sm">טוען נקודות...</div>
-        ) : teamNotes.length === 0 ? (
-          <div className="text-gray-500 text-sm">אין נקודות עדיין. הוסף את הראשונה.</div>
-        ) : (
-          <div className="space-y-3">
-            {teamNotes.map(note => (
-              <div key={note.id} className="p-3 border border-gray-200 rounded-lg bg-gray-50">
-                {editingNoteId === note.id ? (
-                  <div className="space-y-2">
-                    <textarea
-                      className="w-full p-2 border rounded-lg text-sm"
-                      rows={2}
-                      value={editingNoteText}
-                      onChange={(e) => setEditingNoteText(e.target.value)}
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleUpdateNote(note.id, editingNoteText)}
-                        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700"
-                      >
-                        שמור
-                      </button>
-                      <button
-                        onClick={() => { setEditingNoteId(null); setEditingNoteText(""); }}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-700 hover:bg-gray-100"
-                      >
-                        בטל
-                      </button>
+                <div className="rounded-[28px] border border-white/15 bg-white/10 p-4 text-right backdrop-blur-sm">
+                  <p className="text-xs font-semibold text-white/70">מה חסר כדי להתקדם</p>
+                  <div className="mt-3 space-y-3 text-sm text-white/85">
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2">
+                      <span>{unassignedTasksCount} משימות בלי שיוך</span>
+                      <span className="text-xs text-white/60">צריך לשבץ</span>
                     </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2">
+                      <span>{tasksWithoutDueDateCount} משימות בלי דדליין</span>
+                      <span className="text-xs text-white/60">צריך לקבע</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2">
+                      <span>{completionRequests.length} בקשות מתנדבים</span>
+                      <span className="text-xs text-white/60">ממתינות לאישור</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.95fr)]">
+          <div className="space-y-6">
+            <section className="overflow-hidden rounded-[30px] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+              <div className="border-b border-[rgba(74,26,44,0.08)] bg-gradient-to-l from-[rgba(255,184,76,0.18)] via-white to-[rgba(74,26,44,0.04)] p-5 sm:p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="text-right">
+                    <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+                      <span className="rounded-full border border-amber-200 bg-[var(--patifon-yellow)] px-3 py-1 text-xs font-semibold text-[var(--patifon-burgundy)]">{filteredTasks.length} מוצגות</span>
+                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{upcomingTasksCount} לשבוע הקרוב</span>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>איפה פועלים עכשיו</h2>
+                      <CheckSquare style={{ color: 'var(--patifon-red)' }} />
+                    </div>
+                    <p className="mt-1 text-sm text-gray-600">רשימת העבודה הראשית שלך. דחוף למעלה, צ׳אט ופעולות זמינות בכל כרטיס.</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[360px]">
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-right">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-600">תקועות/באיחור</p>
+                      <p className="mt-1 text-lg font-bold text-red-700">{stuckTasksCount + overdueTasksCount}</p>
+                    </div>
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">דחופות</p>
+                      <p className="mt-1 text-lg font-bold text-amber-900">{urgentTasksCount}</p>
+                    </div>
+                    <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">עם הודעות</p>
+                      <p className="mt-1 text-lg font-bold text-fuchsia-800">{unreadFilteredTasksCount}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">ללא תאריך</p>
+                      <p className="mt-1 text-lg font-bold text-slate-900">{tasksWithoutDueDateCount}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 sm:p-6">
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  <div className="flex items-center gap-2">
+                    <Filter size={16} className="text-gray-400" />
+                    <select
+                      value={filterEvent}
+                      onChange={(e) => setFilterEvent(e.target.value)}
+                      className="min-h-[42px] rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="all">כל האירועים</option>
+                      {events.map(event => (
+                        <option key={event.id} value={event.id}>{event.title}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="min-h-[42px] rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="none">ללא מיון</option>
+                    <option value="deadline">📅 לפי דד ליין (קרוב לרחוק)</option>
+                    <option value="priority">⚠️ לפי עדיפות (דחוף → רגיל)</option>
+                    <option value="status">🔄 לפי סטטוס (תקוע → בתהליך)</option>
+                    <option value="eventDate">🎉 לפי תאריך האירוע</option>
+                  </select>
+                </div>
+
+                {loadingTasks ? (
+                  <div className="py-10 text-center text-gray-500">טוען משימות...</div>
+                ) : filteredTasks.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-gray-500">
+                    {myTasks.length === 0 ? "אין משימות פתוחות כרגע." : "אין משימות התואמות לסינון."}
                   </div>
                 ) : (
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.text}</p>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.text); }}
-                        className="text-indigo-700 text-xs hover:underline"
-                      >
-                        ערוך
-                      </button>
-                      <button
-                        onClick={() => handleDeleteNote(note.id)}
-                        className="text-red-600 text-xs hover:underline"
-                      >
-                        מחק
-                      </button>
-                    </div>
+                  <div className="max-h-[900px] space-y-3 overflow-y-auto pr-1">
+                    {filteredTasks.map((task) => {
+                      const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                      return (
+                        <TaskCard
+                          key={task.id}
+                          id={task.id}
+                          title={task.title}
+                          description={task.description}
+                          assignee={task.assignee || "לא משויך"}
+                          assignees={task.assignees}
+                          status={task.status}
+                          dueDate={task.dueDate}
+                          priority={task.priority}
+                          currentStatus={task.currentStatus}
+                          nextStep={task.nextStep}
+                          eventId={task.eventId}
+                          eventTitle={task.eventTitle}
+                          scope={task.scope}
+                          onEdit={() => setEditingTask(task)}
+                          onDelete={() => setDeletingTaskId(task.id)}
+                          onStatusChange={async (newStatus) => {
+                            if (newStatus === "DONE") {
+                              handleCompleteTask(task);
+                            } else {
+                              if (!db) return;
+                              try {
+                                const taskRef = task.scope === "project"
+                                  ? doc(db, "projects", task.eventId, "tasks", task.id)
+                                  : doc(db, "events", task.eventId, "tasks", task.id);
+                                await updateDoc(taskRef, { status: newStatus });
+                                setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+                              } catch (err) {
+                                console.error("Error updating status:", err);
+                              }
+                            }
+                          }}
+                          onChat={() => setChatTask(task)}
+                          hasUnreadMessages={hasUnread}
+                          onEditStatus={(t) => setEditingStatusTask({
+                            ...t,
+                            eventId: t.eventId || "",
+                            eventTitle: t.eventTitle || "",
+                            scope: task.scope
+                          } as Task)}
+                          onEditDate={(t) => setEditingDateTask({
+                            ...t,
+                            eventId: t.eventId || "",
+                            eventTitle: t.eventTitle || "",
+                            scope: task.scope
+                          } as Task)}
+                          onManageAssignees={() => {
+                            router.push(`/tasks/${task.id}?eventId=${task.eventId}&focus=assignees`);
+                          }}
+                          onAssigneeClick={(assignee) => {
+                            const target = assignee || { name: task.assignee, email: (task as any).assigneeEmail };
+                            openAssigneeWhatsapp(task, target);
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
-            ))}
+            </section>
+
+            <section className="bg-white p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <MessageCircle style={{ color: 'var(--patifon-orange)' }} />
+                    <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>נקודות לפגישת הצוות הקרובה</h2>
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600">דברים שצריך להעלות, להחליט או לסגור בפגישה הבאה.</p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">{teamNotes.length} נקודות</span>
+              </div>
+              <form onSubmit={handleAddNote} className="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
+                <textarea
+                  className="flex-1 rounded-2xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="כתבו כאן נקודות, החלטות או שאלות לפגישה..."
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  rows={2}
+                />
+                <button
+                  type="submit"
+                  className="rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                >
+                  הוסף
+                </button>
+              </form>
+              {loadingNotes ? (
+                <div className="text-sm text-gray-500">טוען נקודות...</div>
+              ) : teamNotes.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-gray-500">אין נקודות עדיין. הוסף את הראשונה.</div>
+              ) : (
+                <div className="space-y-3">
+                  {teamNotes.map(note => (
+                    <div key={note.id} className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                      {editingNoteId === note.id ? (
+                        <div className="space-y-2">
+                          <textarea
+                            className="w-full rounded-lg border p-2 text-sm"
+                            rows={2}
+                            value={editingNoteText}
+                            onChange={(e) => setEditingNoteText(e.target.value)}
+                          />
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => handleUpdateNote(note.id, editingNoteText)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-700">שמור</button>
+                            <button onClick={() => { setEditingNoteId(null); setEditingNoteText(""); }} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100">בטל</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="whitespace-pre-wrap text-sm text-gray-800">{note.text}</p>
+                          <div className="shrink-0 flex items-center gap-2">
+                            <button onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.text); }} className="text-xs text-indigo-700 hover:underline">ערוך</button>
+                            <button onClick={() => handleDeleteNote(note.id)} className="text-xs text-red-600 hover:underline">מחק</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
-        )}
+
+          <aside className="space-y-6">
+            <section className="bg-white p-5 sm:p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <Calendar style={{ color: 'var(--patifon-orange)' }} />
+                    <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>מה חי עכשיו</h2>
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600">אירועים פעילים עם הסיגנלים הכי חשובים לפעולה.</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">לא משויכות</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900">{unassignedTasksCount}</p>
+                </div>
+              </div>
+              {loadingEvents ? (
+                <div className="py-8 text-center text-gray-500">טוען אירועים...</div>
+              ) : events.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-gray-500">אין אירועים פעילים.</div>
+              ) : (
+                <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
+                  {events.map((event) => (
+                    <div key={event.id} className="rounded-[26px] border border-slate-200 bg-slate-50/70 p-4 transition hover:bg-white">
+                      <div className="flex items-start gap-3">
+                        {((event.createdBy && event.createdBy === user.uid) || (event.createdByEmail && user.email && normalizeKey(event.createdByEmail) === normalizeKey(user.email))) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setDeleteEventRemoveTasks(false);
+                              setConfirmingEventId(event.id);
+                            }}
+                            className="shrink-0 rounded-full border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                            title="מחק אירוע"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                        <Link href={`/events/${event.id}`} className="min-w-0 flex-1 text-right">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="rounded-full border border-indigo-100 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">{event.status || "ללא סטטוס"}</span>
+                            <h3 className="truncate text-base font-bold text-slate-900">{event.title}</h3>
+                          </div>
+                          <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-2">
+                            <button type="button" onClick={() => handleUpdateEventField(event.id, "startTime")} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 hover:text-indigo-700" title="עדכון תאריך ושעה">
+                              <span className="truncate">{formatEventDate(event.startTime) || "אין תאריך"}</span>
+                              <Calendar size={14} className="shrink-0" />
+                            </button>
+                            <button type="button" onClick={() => handleUpdateEventField(event.id, "location")} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 hover:text-indigo-700" title="עדכון מיקום">
+                              <span className="truncate">{event.location || "לא צוין מיקום"}</span>
+                              <MapPin size={14} className="shrink-0" />
+                            </button>
+                            <button type="button" onClick={() => handleUpdateEventField(event.id, "participantsCount")} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 hover:text-indigo-700" title="עדכון כמות משתתפים">
+                              <span className="truncate">{event.participantsCount || "כמות משתתפים לא צוינה"}</span>
+                              <Users size={14} className="shrink-0" />
+                            </button>
+                            <button type="button" onClick={() => handleUpdateEventField(event.id, "status")} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 hover:text-indigo-700" title="עדכון סטטוס">
+                              <span className="truncate">עדכן מצב אירוע</span>
+                              <CheckSquare size={14} className="shrink-0" />
+                            </button>
+                          </div>
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="bg-white p-5 sm:p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <FolderKanban style={{ color: 'var(--patifon-orange)' }} />
+                    <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>המסלול הבא</h2>
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600">פרויקטים פעילים שצריך להזיז קדימה.</p>
+                </div>
+                <Link href="/projects?openForm=1" className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50" title="פתיחת פרויקט חדש עם אותו טופס של האדמין">
+                  <Plus size={16} />
+                  חדש
+                </Link>
+              </div>
+              {loadingProjects ? (
+                <div className="py-8 text-center text-gray-500">טוען פרויקטים...</div>
+              ) : projects.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-gray-500">אין פרויקטים פעילים עבורך כרגע.</div>
+              ) : (
+                <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                  {projects.map((project) => (
+                    <div key={project.id} className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-4 transition hover:bg-white">
+                      <div className="flex items-start gap-3">
+                        {isProjectOwner(project, user) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setConfirmingProjectId(project.id);
+                            }}
+                            className="shrink-0 rounded-full border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                            title="מחק פרויקט"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                        <Link href={`/projects/${project.id}`} className="min-w-0 flex-1 text-right">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="rounded-full border border-indigo-100 bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-700">{project.status || "פעיל"}</span>
+                            <h3 className="truncate text-base font-bold text-slate-900">{project.name || "פרויקט ללא שם"}</h3>
+                          </div>
+                          {project.summary && <p className="mt-2 text-sm text-gray-600 line-clamp-2" title={project.summary}>{project.summary}</p>}
+                          <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-xs text-gray-600">
+                            {project.goal && <span className="rounded-full bg-white px-2.5 py-1 border border-slate-200">מטרה: {project.goal}</span>}
+                            {formatProjectDueDate(project.dueDate) && <span className="rounded-full bg-white px-2.5 py-1 border border-slate-200">יעד: {formatProjectDueDate(project.dueDate)}</span>}
+                          </div>
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </aside>
+        </div>
       </div>
+
 
       <div className="mt-8 flex justify-center gap-3 flex-wrap">
         <button
