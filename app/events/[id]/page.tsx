@@ -3129,10 +3129,9 @@ export default function EventDetailsPage() {
         ? startDate.toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' })
         : "";
     const summaryCards = [
-        { label: "משימות פתוחות", value: openTasksCount, tone: "bg-white/80 text-[var(--patifon-burgundy)] border-[rgba(74,26,44,0.12)]" },
+        { label: "משימות צוות פתוחות", value: teamTasks.filter(t => t.status !== 'DONE').length, tone: "bg-white/80 text-[var(--patifon-burgundy)] border-[rgba(74,26,44,0.12)]" },
+        { label: "משימות למתנדבים פתוחות", value: volunteerTasks.filter(t => t.status !== 'DONE').length, tone: "bg-amber-50 text-amber-800 border-amber-100" },
         { label: "משימות שהושלמו", value: doneTasksCount, tone: "bg-emerald-50 text-emerald-700 border-emerald-100" },
-        { label: "אנשי צוות", value: event.team?.length || 0, tone: "bg-indigo-50 text-indigo-700 border-indigo-100" },
-        { label: event.needsVolunteers ? "מתנדבים רשומים" : "משימות למתנדבים", value: event.needsVolunteers ? combinedVolunteers.length : volunteerTasks.length, tone: "bg-amber-50 text-amber-800 border-amber-100" },
     ];
     const specialTasks = tasks.filter((task) => {
         const type = (task as any).specialType || "";
@@ -3190,1201 +3189,437 @@ export default function EventDetailsPage() {
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(241,143,58,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf5_0%,_#f7efe6_48%,_#f4e7d7_100%)] px-4 py-4 sm:px-6 sm:py-6 relative">
             <div className="mx-auto max-w-7xl">
-            {/* Confirmation Modal */}
-            {confirmModal.isOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
-                        <div className="flex items-center gap-3 text-red-600 mb-4">
-                            <div className="bg-red-100 p-2 rounded-full">
-                                <AlertTriangle size={24} />
-                            </div>
-                            <h3 className="text-lg font-bold">אישור מחיקה</h3>
-                        </div>
-                        <p className="text-gray-600 mb-6">{confirmModal.title}</p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
-                            >
-                                ביטול
-                            </button>
-                            <button
-                                onClick={executeDelete}
-                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
-                            >
-                                מחק
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Event Edit Modal */}
-            {isEditEventOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold">עריכת פרטי האירוע</h3>
-                            <button onClick={() => setIsEditEventOpen(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <form onSubmit={handleSaveEventDetails} className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
-                                    <input
-                                        type="text"
-                                        value={eventForm.title}
-                                        onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">מיקום</label>
-                                    <input
-                                        type="text"
-                                        value={eventForm.location}
-                                        onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        required
-                                    />
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">תאריך ושעת האירוע</label>
-                                    <input
-                                        type="datetime-local"
-                                        value={eventForm.startTime}
-                                        onChange={(e) => setEventForm({ ...eventForm, startTime: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">משך האירוע (בשעות)</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="0.5"
-                                        value={eventForm.durationHours}
-                                        onChange={(e) => setEventForm({ ...eventForm, durationHours: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        placeholder="לדוגמה: 3.5"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">תדירות חוזרת</label>
-                                    <select
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        value={eventForm.recurrence}
-                                        onChange={(e) => setEventForm({ ...eventForm, recurrence: e.target.value as any })}
-                                    >
-                                        <option value="NONE">חד פעמי</option>
-                                        <option value="WEEKLY">כל שבוע</option>
-                                        <option value="BIWEEKLY">כל שבועיים</option>
-                                        <option value="MONTHLY">כל חודש</option>
-                                    </select>
-                                    {eventForm.recurrence !== "NONE" && (
-                                        <div className="mt-2">
-                                            <label className="block text-xs font-medium text-gray-700 mb-1">תאריך סיום החזרתיות</label>
-                                            <input
-                                                type="date"
-                                                value={eventForm.recurrenceEndDate || ""}
-                                                onChange={(e) => setEventForm({ ...eventForm, recurrenceEndDate: e.target.value })}
-                                                className="w-full p-2 border rounded-lg text-sm"
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">מספר משתתפים</label>
-                                    <input
-                                        type="text"
-                                        value={eventForm.participantsCount}
-                                        onChange={(e) => setEventForm({ ...eventForm, participantsCount: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <PartnersInput
-                                        label="שותפים"
-                                        value={eventForm.partners}
-                                        onChange={(partners) => setEventForm({ ...eventForm, partners })}
-                                        placeholder="הוסף שותף ולחץ אנטר"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">מתנדבים לערב</label>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            id="needsVolunteers"
-                                            type="checkbox"
-                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                            checked={!!eventForm.needsVolunteers}
-                                            onChange={(e) => setEventForm({ ...eventForm, needsVolunteers: e.target.checked })}
-                                        />
-                                        <label htmlFor="needsVolunteers" className="text-gray-800 text-sm">
-                                            צריך מתנדבים לערב הזה?
-                                        </label>
-                                    </div>
-                                    {eventForm.needsVolunteers && (
-                                        <div>
-                                            <label className="block text-xs font-medium text-gray-700 mb-1">כמה מתנדבים?</label>
-                                            <input
-                                                type="number"
-                                                min={0}
-                                                className="w-full p-2 border rounded-lg text-sm"
-                                                value={eventForm.volunteersCount ?? ""}
-                                                onChange={(e) => setEventForm({ ...eventForm, volunteersCount: e.target.value })}
-                                                placeholder="מספר המתנדבים הדרוש"
-                                                required={eventForm.needsVolunteers}
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">מטרה</label>
-                                    <textarea
-                                        rows={2}
-                                        value={eventForm.goal}
-                                        onChange={(e) => setEventForm({ ...eventForm, goal: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">תקציב</label>
-                                    <input
-                                        type="text"
-                                        value={eventForm.budget}
-                                        onChange={(e) => setEventForm({ ...eventForm, budget: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תיאור</label>
-                                <textarea
-                                    rows={3}
-                                    value={eventForm.description}
-                                    onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                />
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">איש קשר - שם</label>
-                                    <input
-                                        type="text"
-                                        value={eventForm.contactName}
-                                        onChange={(e) => setEventForm({ ...eventForm, contactName: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        placeholder="לדוגמה: רוני כהן"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">טלפון</label>
-                                    <input
-                                        type="tel"
-                                        value={eventForm.contactPhone}
-                                        onChange={(e) => setEventForm({ ...eventForm, contactPhone: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        placeholder="050-0000000"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">אימייל</label>
-                                    <input
-                                        type="email"
-                                        value={eventForm.contactEmail}
-                                        onChange={(e) => setEventForm({ ...eventForm, contactEmail: e.target.value })}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        placeholder="contact@patifon.co.il"
-                                    />
-                                </div>
-                            </div>
-                            <div className="pt-2 border-t border-gray-100">
-                                <div className="flex items-center justify-between mb-3">
-                                    <div>
-                                        <p className="text-sm font-semibold text-gray-800">סעיפים נוספים</p>
-                                        <p className="text-xs text-gray-500">הוסף מידע נוסף שרלוונטי לצוות (קווים מנחים, דרישות מיוחדות ועוד)</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleAddCustomSection}
-                                        className="flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-indigo-800"
-                                    >
-                                        <Plus size={16} />
-                                        הוסף סעיף
-                                    </button>
-                                </div>
-                                {eventForm.customSections && eventForm.customSections.length > 0 ? (
-                                    <div className="space-y-3">
-                                        {eventForm.customSections.map((section, index) => (
-                                            <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <p className="text-xs font-semibold text-gray-500">סעיף {index + 1}</p>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRemoveCustomSection(index)}
-                                                        className="text-gray-400 hover:text-red-500"
-                                                        title="הסר סעיף"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </div>
-                                                <input
-                                                    type="text"
-                                                    value={section.title}
-                                                    onChange={(e) => handleUpdateCustomSection(index, "title", e.target.value)}
-                                                    className="w-full p-2 border rounded-lg text-sm mb-2"
-                                                    placeholder="כותרת הסעיף"
-                                                />
-                                                <textarea
-                                                    rows={3}
-                                                    value={section.content}
-                                                    onChange={(e) => handleUpdateCustomSection(index, "content", e.target.value)}
-                                                    className="w-full p-2 border rounded-lg text-sm"
-                                                    placeholder="תוכן או הוראות רלוונטיות..."
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <p className="text-sm text-gray-500">עדיין לא הוספת סעיפים מותאמים.</p>
-                                )}
-                            </div>
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsEditEventOpen(false)}
-                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                                >
-                                    ביטול
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
-                                >
-                                    שמור
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Task Chat Modal */}
-            {chatTask && (
-                <TaskChat
-                    eventId={id}
-                    taskId={chatTask.id}
-                    taskTitle={chatTask.title}
-                    onClose={() => setChatTask(null)}
-                />
-            )}
-
-            {/* Assignee Tagging Modal */}
-            {taggingTask && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold">תיוג אחראים למשימה</h3>
-                            <button onClick={() => { setTaggingTask(null); setTagSelection([]); setTagSearch(""); }} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <p className="text-sm text-gray-600 mb-2">בחרו את אנשי הצוות למשימה "{taggingTask.title}". ניתן לבחור יותר מאחד.</p>
-                        <div className="flex items-center justify-between mb-1">
-                            <label className="text-sm font-medium text-gray-700">תיוג/הקצאה</label>
-                            <span className="text-xs text-gray-500">{tagSelection.length} נבחרו</span>
-                        </div>
-                        <div className="mb-3">
-                            <input
-                                type="text"
-                                value={tagSearch}
-                                onChange={(e) => setTagSearch(e.target.value)}
-                                placeholder="חיפוש לפי שם"
-                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                            />
-                        </div>
-                        <div className="flex flex-wrap gap-2 mb-4">
-                            {event.team
-                                ?.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase()))
-                                .map((member, idx) => {
-                                    const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
-                                    const checked = tagSelection.some(a => getAssigneeKey(a) === memberKey);
-                                    return (
-                                        <button
-                                            key={idx}
-                                            type="button"
-                                            onClick={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "tag")}
-                                            className={`px-3 py-1 rounded-full text-sm border transition ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
-                                        >
-                                            {member.name}
-                                        </button>
-                                    );
-                                })}
-                            {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase())).length === 0)) && (
-                                <span className="text-sm text-gray-500">אין חברי צוות זמינים</span>
-                            )}
-                        </div>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => { setTaggingTask(null); setTagSelection([]); setTagSearch(""); }}
-                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                            >
-                                ביטול
-                            </button>
-                            <button
-                                onClick={handleSaveTagging}
-                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
-                            >
-                                שמור
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Edit Task Modal */}
-            {editingTask && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 animate-in fade-in zoom-in-95 duration-200">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold">עריכת משימה</h3>
-                            <button onClick={() => { setEditingTask(null); setEditTaskSearch(""); setSaveEditTaskToLibrary(false); }} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <form onSubmit={handleUpdateTask} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">כותרת</label>
-                                <input
-                                    type="text"
-                                    required
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    value={editingTask.title}
-                                    onChange={e => setEditingTask({ ...editingTask, title: e.target.value })}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תיאור</label>
-                                <textarea
-                                    rows={3}
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    value={editingTask.description || ""}
-                                    onChange={e => setEditingTask({ ...editingTask, description: e.target.value })}
-                                />
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">כמה פעמים צריך לבצע?</label>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        className="w-full p-2 border rounded-lg text-sm"
-                                        value={editingTask.requiredCompletions ?? 1}
-                                        onChange={(e) => {
-                                            const val = parseInt(e.target.value, 10);
-                                            const req = Number.isFinite(val) && val > 0 ? val : 1;
-                                            setEditingTask(prev => prev ? ({ ...prev, requiredCompletions: req } as Task) : null);
-                                        }}
-                                    />
-                                    <p className="text-xs text-gray-500 mt-1">ברירת מחדל: פעם אחת. ניתן להגדיר מספר חזרות.</p>
-                                    <p className="text-xs text-indigo-600 mt-1">
-                                        נותרו: {Math.max(editingTask.remainingCompletions ?? editingTask.requiredCompletions ?? 1, 0)}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <div className="flex items-center justify-between mb-1">
-                                        <label className="block text-sm font-medium text-gray-700">תיוג/הקצאה</label>
-                                        <span className="text-xs text-gray-500">{editingTask.assignees?.length || 0} נבחרו</span>
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={editTaskSearch}
-                                        onChange={(e) => setEditTaskSearch(e.target.value)}
-                                        placeholder="חיפוש לפי שם"
-                                        className="w-full p-2 border rounded-lg text-xs mb-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                    />
-                                    <div className="flex flex-wrap gap-2">
-                                        {event.team
-                                            ?.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase()))
-                                            .map((member, idx) => {
-                                                const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
-                                                const checked = editingTask.assignees?.some(a => getAssigneeKey(a) === memberKey);
-                                                return (
-                                                    <label
-                                                        key={idx}
-                                                        className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
-                                                        style={{ minWidth: '120px' }}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            className="accent-white w-4 h-4"
-                                                            checked={checked}
-                                                            onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "edit")}
-                                                        />
-                                                        {member.name}
-                                                    </label>
-                                                );
-                                            })}
-                                        {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase())).length === 0)) && (
-                                            <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">מועד המשימה</label>
-                                    <div className="flex flex-wrap gap-3 text-xs">
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="radio"
-                                                className="accent-indigo-600"
-                                                checked={editTaskDueMode === "event_day"}
-                                                onChange={() => syncEditTaskDueDate("event_day", "0", editTaskTime || extractTimeString(getEventStartDate() || new Date()))}
-                                            />
-                                            ביום האירוע
-                                        </label>
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="radio"
-                                                className="accent-indigo-600"
-                                                checked={editTaskDueMode === "offset"}
-                                                onChange={() => syncEditTaskDueDate("offset", editTaskOffsetDays, editTaskTime || extractTimeString(getEventStartDate() || new Date()))}
-                                            />
-                                            ימים ביחס לאירוע
-                                        </label>
-                                    </div>
-                                    {editTaskDueMode === "offset" && (
-                                        <div className="flex items-center gap-2 text-xs">
-                                            <span>ימים מהאירוע:</span>
-                                            <input
-                                                type="text"
-                                                inputMode="numeric"
-                                                className="w-24 p-2 border rounded-lg text-sm"
-                                                value={editTaskOffsetDays}
-                                                onChange={(e) => {
-                                                    const raw = e.target.value;
-                                                    setEditTaskOffsetDays(raw);
-                                                    const parsed = parseOffset(raw);
-                                                    if (parsed === null) return;
-                                                    syncEditTaskDueDate("offset", raw, editTaskTime || extractTimeString(getEventStartDate() || new Date()));
-                                                }}
-                                            />
-                                            <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
-                                        </div>
-                                    )}
-                                    <div className="flex items-center gap-2 text-xs">
-                                        <span>שעה:</span>
-                                        <input
-                                            type="time"
-                                            className="p-2 border rounded-lg text-sm"
-                                            value={editTaskTime}
-                                            onChange={(e) => syncEditTaskDueDate(editTaskDueMode, editTaskOffsetDays, e.target.value || extractTimeString(getEventStartDate() || new Date()))}
-                                        />
-                                    </div>
-                                    <div className="text-xs text-gray-600">
-                                        {editingTask.dueDate
-                                            ? `המשימה מתוזמנת ל-${new Date(editingTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
-                                            : "לא נקבע מועד למשימה"}
-                                        {!getEventStartDate() && (
-                                            <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">עדיפות</label>
-                                <select
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    value={editingTask.priority}
-                                    onChange={e => setEditingTask({ ...editingTask, priority: e.target.value as any })}
-                                >
-                                    <option value="NORMAL">רגיל</option>
-                                    <option value="HIGH">גבוה</option>
-                                    <option value="CRITICAL">דחוף מאוד</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
-                                <textarea
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    rows={2}
-                                    placeholder="תאר את המצב הנוכחי של המשימה..."
-                                    value={editingTask.currentStatus || ""}
-                                    onChange={e => setEditingTask({ ...editingTask, currentStatus: e.target.value })}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
-                                <textarea
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    rows={2}
-                                    placeholder="מה הצעד הבא שצריך לעשות..."
-                                    value={editingTask.nextStep || ""}
-                                    onChange={e => setEditingTask({ ...editingTask, nextStep: e.target.value })}
-                                />
-                            </div>
-                            {event.needsVolunteers && (
-                                <div className="flex flex-col gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="checkbox"
-                                            id="isVolunteerTask"
-                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                            checked={editingTask.isVolunteerTask || false}
-                                            onChange={e => setEditingTask({ ...editingTask, isVolunteerTask: e.target.checked })}
-                                        />
-                                        <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
-                                            <Handshake size={16} className="text-indigo-600" />
-                                            משימה למתנדב
-                                        </label>
-                                        <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
-                                    </div>
-                                    {editingTask.isVolunteerTask && (
-                                        <div className="flex items-center gap-2">
-                                            <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="0.5"
-                                                className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
-                                                value={editingTask.volunteerHours ?? ""}
-                                                onChange={(e) => setEditingTask({ ...editingTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
-                                                placeholder="לדוגמה 2"
-                                            />
-                                            <span className="text-xs text-gray-500">שעות עבודה</span>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50">
-                                <Repeat size={16} className="text-indigo-600" />
-                                <div className="flex flex-col">
-                                    <span className="text-xs font-semibold text-indigo-800">שמור במאגר המשימות החוזרות</span>
-                                    <span className="text-[11px] text-indigo-700">כדי להוסיף לאזור ההגדרות</span>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setSaveEditTaskToLibrary(prev => !prev)}
-                                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${saveEditTaskToLibrary ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200"}`}
-                                >
-                                    {saveEditTaskToLibrary ? "נשמר" : "הוסף"}
-                                </button>
-                            </div>
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => { setEditingTask(null); setSaveEditTaskToLibrary(false); }}
-                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                                >
-                                    ביטול
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
-                                >
-                                    שמור שינויים
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            <div className="mb-4">
-                <Link href="/" className="flex items-center gap-1 text-sm w-fit hover:opacity-70 transition" style={{ color: 'var(--patifon-burgundy)' }}>
-                    <ArrowRight size={16} />
-                    חזרה לדשבורד
-                </Link>
-            </div>
-
-            <header className="mb-6 overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/80 shadow-[0_16px_50px_rgba(74,26,44,0.12)] backdrop-blur-sm">
-                <div className="bg-[linear-gradient(135deg,rgba(74,26,44,0.97),rgba(193,39,45,0.9),rgba(241,143,58,0.85))] px-5 py-6 text-white sm:px-7">
-                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                        <div className="space-y-4 w-full">
-                            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                                <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">דף ניהול אירוע</span>
-                                {event.projectId ? (
-                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">פרויקט: {event.projectName || event.projectId}</span>
-                                ) : (
-                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">ללא פרויקט משויך</span>
-                                )}
-                                {event.status && (
-                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">סטטוס: {event.status}</span>
-                                )}
-                                {overdueTasksCount > 0 && (
-                                    <span className="rounded-full border border-red-200/60 bg-red-500/20 px-3 py-1 text-red-50">{overdueTasksCount} משימות באיחור</span>
-                                )}
-                            </div>
-                            <div className="space-y-2">
-                                <h1 className="text-3xl font-black leading-tight sm:text-4xl">{event.title}</h1>
-                                <p className="max-w-3xl text-sm text-white/85 sm:text-base">
-                                    {event.description || "כל פרטי האירוע, הצוות, המשימות, התוכן והקבצים במקום אחד ברור ונגיש."}
-                                </p>
-                            </div>
-                            <p className="text-sm font-semibold text-white/90">
-                                יוצר האירוע: {creatorName || event.creatorName || event.createdByEmail || event.createdBy || "לא ידוע"}
-                            </p>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/90">
-                                <div className="flex items-center gap-1">
-                                    <MapPin size={16} />
-                                    <span>{event.location}</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <Calendar size={16} />
-                                    <span>{startDateLabel}{startTimeLabel ? ` | ${startTimeLabel}` : ""}</span>
-                                </div>
-                                {event.dates && event.dates.length > 1 && (
-                                    <div className="flex items-center gap-2 flex-wrap text-xs text-indigo-800">
-                                        {event.dates.map((d, idx) => {
-                                            const dt = d?.seconds ? new Date(d.seconds * 1000) : new Date(d);
-                                            const label = !isNaN(dt.getTime()) ? dt.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "";
-                                            return (
-                                                <span key={idx} className="px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-full">
-                                                    {label}
-                                                </span>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                                {event.durationHours && (
-                                    <div className="flex items-center gap-1">
-                                        <Clock size={16} />
-                                        <span>משך משוער: {event.durationHours} שעות</span>
-                                    </div>
-                                )}
-                                {event.participantsCount && (
-                                    <div className="flex items-center gap-1">
-                                        <Users size={16} />
-                                        <span>{event.participantsCount} משתתפים</span>
-                                    </div>
-                                )}
-                                {event.needsVolunteers && (
-                                    <div className="flex items-center gap-1">
-                                        <Users size={16} />
-                                        <span>
-                                            {event.volunteersCount != null
-                                                ? `יעד מתנדבים: ${event.volunteersCount}`
-                                                : "מחפש מתנדבים לאירוע הזה"}
-                                        </span>
-                                    </div>
-                                )}
-                                {partnersLabel && (
-                                    <div className="flex items-center gap-1">
-                                        <Handshake size={16} />
-                                        <span>שותפים: {partnersLabel}</span>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-3">
-                                {event.projectId ? (
-                                    <span className="inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
-                                        פרויקט משויך: {event.projectName || event.projectId}
-                                    </span>
-                                ) : (
-                                    <span className="text-xs text-gray-600">אין פרויקט משויך</span>
-                                )}
-                                {isProjectLinker && projectOptions.length > 0 && (
-                                    <div className="flex items-center gap-2">
-                                        <select
-                                            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                            value={selectedProject}
-                                            onChange={(e) => setSelectedProject(e.target.value)}
-                                        >
-                                            <option value="">בחר פרויקט</option>
-                                            {projectOptions.map((p) => (
-                                                <option key={p.id} value={p.id}>{p.name}</option>
-                                            ))}
-                                        </select>
-                                        <button
-                                            onClick={handleLinkProject}
-                                            disabled={!selectedProject || linkingProject}
-                                            className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition disabled:opacity-60"
-                                        >
-                                            {linkingProject ? "מקשר..." : "שייך לפרויקט"}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
-                        <div className="rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
-                            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                                <div className="space-y-3">
-                                    <div>
-                                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">פוקוס להיום</p>
-                                        <p className="mt-1 text-lg font-black text-white sm:text-xl">{primaryFocusLabel}</p>
-                                    </div>
-                                    <div className="flex flex-wrap gap-2 text-xs text-white/85">
-                                        <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{teamTasks.length} משימות צוות</button>
-                                        <button type="button" onClick={() => event.needsVolunteers ? openDetailsAndScroll(volunteersSectionRef) : scrollToRef(volunteerTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{volunteerProgressLabel}</button>
-                                        <button type="button" onClick={() => openDetailsAndScroll(teamSectionRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{event.team?.length || 0} אנשי צוות</button>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[340px]">
-                                    <button onClick={openTaskComposer} className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-[var(--patifon-burgundy)] shadow-sm transition hover:-translate-y-0.5">משימה חדשה</button>
-                                    <button onClick={handleOpenContentModal} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">תוכן ומדיה</button>
-                                    <button onClick={() => router.push(`/events/${id}/files`)} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">קבצים ומסמכים</button>
-                                    {event.needsVolunteers ? (
-                                        <button
-                                            onClick={() => {
-                                                setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
-                                                setShowVolunteerModal(true);
-                                            }}
-                                            className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
-                                        >
-                                            מתנדבים
-                                        </button>
-                                    ) : (
-                                        <button onClick={copyInviteLink} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">שיתוף צוות</button>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex flex-col gap-3 rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
-                            <div className="space-y-3">
-                                {event.contactPerson?.name ? (
-                                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
-                                                <User size={20} />
-                                            </div>
-                                            <div className="text-sm min-w-0">
-                                                <p className="font-semibold truncate">איש קשר: {event.contactPerson.name}</p>
-                                                <div className="text-gray-600 flex flex-col gap-0.5">
-                                                    {event.contactPerson.phone && <span className="truncate">טלפון: {event.contactPerson.phone}</span>}
-                                                    {event.contactPerson.email && <span className="truncate">אימייל: {event.contactPerson.email}</span>}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        {event.contactPerson.phone && (
-                                            <button
-                                                type="button"
-                                                onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
-                                                className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
-                                                title="שליחת הודעת וואטסאפ"
-                                            >
-                                                <MessageCircle size={18} />
-                                            </button>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div className="rounded-2xl border border-dashed border-white/30 bg-white/10 p-3 text-sm text-white/75">
-                                        לא הוגדר איש קשר לאירוע.
-                                    </div>
-                                )}
-                            </div>
-                            <div className="rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAdvancedActions(!showAdvancedActions)}
-                                    className="flex w-full items-center justify-between rounded-xl px-2 py-1 text-sm font-semibold hover:bg-slate-50"
-                                >
-                                    <div className="text-right">
-                                        <span>פעולות משניות והגדרות</span>
-                                        <p className="mt-1 text-xs font-normal text-slate-500">עריכה, שיתוף, הרשמה, יומן, פוסט, שליטה ופעולות בעלים.</p>
-                                    </div>
-                                    <ChevronDown size={18} className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`} />
-                                </button>
-                                {showAdvancedActions && (
-                                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                        <button onClick={copyInviteLink} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copied ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
-                                            {copied ? <Check size={16} /> : <Share2 size={16} />}
-                                            {copied ? "קישור הועתק" : "שיתוף צוות"}
-                                        </button>
-                                        <button onClick={handleAddEventToCalendar} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                            <Calendar size={16} />
-                                            יומן והזמנות
-                                        </button>
-                                        <button onClick={() => setIsEditEventOpen(true)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                            <Edit2 size={16} />
-                                            עריכת פרטי אירוע
-                                        </button>
-                                        <button onClick={() => router.push(`/events/${id}/registrants`)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                            <Users size={16} />
-                                            נרשמים
-                                        </button>
-                                        <button
-                                            onClick={copyRegisterLink}
-                                            className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copiedRegister ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
-                                        >
-                                            {copiedRegister ? <Check size={16} /> : <List size={16} />}
-                                            {copiedRegister ? "קישור הועתק" : "קישור הרשמה"}
-                                        </button>
-                                        <button onClick={handleOpenPostModal} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                            <Sparkles size={16} />
-                                            מלל לפוסט
-                                        </button>
-                                        <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${canManageTeam ? "border-slate-200 text-slate-700 hover:bg-slate-50" : "border-slate-200 text-slate-400 cursor-not-allowed"}`}>
-                                            <PauseCircle size={16} />
-                                            מרכז בקרה
-                                        </button>
-                                        {isOwner && (
-                                            <button
-                                                onClick={confirmDeleteEvent}
-                                                className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 flex items-center justify-center gap-2"
-                                            >
-                                                <Trash2 size={16} />
-                                                מחק אירוע
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 border-t border-[rgba(74,26,44,0.08)] bg-white/70 px-4 py-4 sm:grid-cols-4 sm:px-6">
-                    {summaryCards.map((card) => (
-                        <button
-                            key={card.label}
-                            type="button"
-                            onClick={() => handleEventSummaryCardClick(card.label)}
-                            className={`rounded-2xl border px-4 py-3 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.tone}`}
-                        >
-                            <p className="text-xs font-semibold opacity-80">{card.label}</p>
-                            <p className="mt-1 text-2xl font-black">{card.value}</p>
-                        </button>
-                    ))}
-                </div>
-            </header>
-
-            <div className="mb-6 rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 px-4 py-4 shadow-sm backdrop-blur-sm sm:px-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="space-y-1">
-                        <p className="text-sm font-semibold text-gray-900">מסך שליטה מהיר</p>
-                        <p className="text-xs text-gray-600">מה שבדרך כלל צריך עכשיו. כל היתר נשאר נגיש בהמשך הדף ובתפריט הפעולות.</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                        <button onClick={openTaskComposer} className="patifon-action-primary text-sm">משימה חדשה</button>
-                        <button onClick={() => setShowSpecialModal(true)} className="patifon-action-secondary text-sm">משימות מיוחדות</button>
-                        <button onClick={() => { setShowSuggestions(true); handleLibraryEditStart(); }} className="patifon-action-secondary text-sm">מאגר משימות</button>
-                        {event.needsVolunteers && <button onClick={copyVolunteerLink} className="patifon-action-secondary text-sm">קישור מתנדבים</button>}
-                    </div>
-                </div>
-            </div>
-
-            {(event.infoBlocks?.length || event.customSections?.length) && (
-                <div className="mb-6 rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 p-5 shadow-sm backdrop-blur-sm sm:p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                        <FileText size={18} className="text-indigo-600" />
-                        מידע נוסף על האירוע
-                    </h3>
-                    {event.infoBlocks && event.infoBlocks.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                            {event.infoBlocks.map((block) => {
-                                const isEditing = editingInfoBlockId === block.id;
-                                return (
-                                    <div
-                                        key={block.id}
-                                        className={`p-4 border border-gray-100 rounded-lg bg-gray-50 relative ${!isEditing ? "cursor-pointer group" : ""}`}
-                                        onClick={() => !isEditing && handleStartInfoBlockEdit(block)}
-                                    >
-                                        {!isEditing ? (
-                                            <>
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <div>
-                                                        <p className="text-xs font-semibold text-gray-500 mb-1">{block.label}</p>
-                                                        <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{block.value}</p>
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDeleteInfoBlock(block.id);
-                                                        }}
-                                                        className="text-gray-400 hover:text-red-500 transition"
-                                                        title="מחק סעיף"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </div>
-                                                <p className="text-[11px] text-indigo-600 mt-2 opacity-0 group-hover:opacity-100 transition">
-                                                    לחצו כדי לערוך את הסעיף
-                                                </p>
-                                            </>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                <div className="flex items-start justify-between">
-                                                    <p className="text-xs font-semibold text-gray-500">עריכת סעיף</p>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleDeleteInfoBlock(block.id)}
-                                                        className="text-gray-400 hover:text-red-500 transition"
-                                                        title="מחק סעיף"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </div>
-                                                <input
-                                                    type="text"
-                                                    value={infoBlockDraft?.label || ""}
-                                                    onChange={(e) => handleInfoBlockDraftChange("label", e.target.value)}
-                                                    className="w-full p-2 border rounded-lg text-sm"
-                                                    placeholder="כותרת הסעיף"
-                                                    autoFocus
-                                                />
-                                                <textarea
-                                                    rows={2}
-                                                    value={infoBlockDraft?.value || ""}
-                                                    onChange={(e) => handleInfoBlockDraftChange("value", e.target.value)}
-                                                    className="w-full p-2 border rounded-lg text-sm"
-                                                    placeholder="תוכן הסעיף"
-                                                />
-                                                <div className="flex justify-end gap-2 pt-1">
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleCancelInfoBlockEdit}
-                                                        className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
-                                                    >
-                                                        ביטול
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleSaveInfoBlock}
-                                                        className="px-3 py-1 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                                                    >
-                                                        שמור
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                    {event.customSections && event.customSections.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {event.customSections.map((section, idx) => (
-                                <div key={idx} className="p-4 border border-gray-100 rounded-lg bg-gray-50">
-                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">{section.title || `סעיף ${idx + 1}`}</h4>
-                                    <p className="text-sm text-gray-600 whitespace-pre-wrap">{section.content}</p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)]">
-                {/* Recurring Tasks Modal */}
-                {showSuggestions && (
+                {/* Confirmation Modal */}
+                {confirmModal.isOpen && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-xl shadow-lg max-w-3xl w-full p-6 animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] overflow-y-auto">
-                            <div className="flex justify-between items-center mb-4">
-                                <div className="flex items-center gap-2">
-                                    <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
-                                        <Repeat size={22} />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-xl font-bold text-gray-900">משימות חוזרות</h3>
-                                        <p className="text-sm text-gray-500">כל המשימות הקבועות מהמאגר</p>
-                                    </div>
+                        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="flex items-center gap-3 text-red-600 mb-4">
+                                <div className="bg-red-100 p-2 rounded-full">
+                                    <AlertTriangle size={24} />
                                 </div>
-                                <button onClick={() => setShowSuggestions(false)} className="text-gray-400 hover:text-gray-600">
-                                    <X size={22} />
+                                <h3 className="text-lg font-bold">אישור מחיקה</h3>
+                            </div>
+                            <p className="text-gray-600 mb-6">{confirmModal.title}</p>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
+                                >
+                                    ביטול
                                 </button>
-                            </div>
-
-                            <div className="mb-4 p-3 border border-indigo-100 rounded-lg bg-indigo-50">
-                                <h4 className="text-sm font-semibold text-indigo-800 mb-2">{libraryForm.id ? "עריכת משימה קבועה" : "הוסף משימה קבועה"}</h4>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                                    <input
-                                        type="text"
-                                        className="w-full border rounded-lg px-3 py-2 text-sm"
-                                        placeholder="שם המשימה"
-                                        value={libraryForm.title}
-                                        onChange={(e) => setLibraryForm(prev => ({ ...prev, title: e.target.value }))}
-                                    />
-                                    <select
-                                        className="w-full border rounded-lg px-3 py-2 text-sm"
-                                        value={libraryForm.priority}
-                                        onChange={(e) => setLibraryForm(prev => ({ ...prev, priority: e.target.value as any }))}
-                                    >
-                                        <option value="NORMAL">רגיל</option>
-                                        <option value="HIGH">גבוה</option>
-                                        <option value="CRITICAL">דחוף</option>
-                                    </select>
-                                </div>
-                                <textarea
-                                    className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-                                    rows={2}
-                                    placeholder="תיאור קצר"
-                                    value={libraryForm.description}
-                                    onChange={(e) => setLibraryForm(prev => ({ ...prev, description: e.target.value }))}
-                                />
-                                <div className="flex gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={handleSaveLibraryTask}
-                                        disabled={savingLibraryTask}
-                                        className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
-                                    >
-                                        {savingLibraryTask ? "שומר..." : libraryForm.id ? "שמור במאגר" : "הוסף למאגר"}
-                                    </button>
-                                    {libraryForm.id && (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleLibraryEditStart()}
-                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100"
-                                        >
-                                            בטל עריכה
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="space-y-3">
-                                {loadingLibraryTasks ? (
-                                    <div className="text-center text-gray-500 py-6">טוען משימות...</div>
-                                ) : libraryTasks.length === 0 ? (
-                                    <div className="text-center text-gray-500 py-6">אין משימות במאגר עדיין.</div>
-                                ) : (
-                                    libraryTasks.map((t) => {
-                                        const priorityLabel = t.priority === "CRITICAL" ? "דחוף" : t.priority === "HIGH" ? "גבוה" : "רגיל";
-                                        const priorityColor = t.priority === "CRITICAL" ? "bg-red-100 text-red-700" : t.priority === "HIGH" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-700";
-                                        return (
-                                            <div key={t.id} className="p-4 border border-gray-100 rounded-lg bg-white flex flex-col gap-2">
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <div>
-                                                        <div className="flex items-center gap-2">
-                                                            <h4 className="font-semibold text-gray-900">{t.title}</h4>
-                                                            <span className={`text-xs px-2 py-0.5 rounded-full ${priorityColor}`}>{priorityLabel}</span>
-                                                        </div>
-                                                        {t.description ? (
-                                                            <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{t.description}</p>
-                                                        ) : null}
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            onClick={() => handleAddLibraryTaskToEvent(t)}
-                                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                                                        >
-                                                            הוסף לאירוע
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleLibraryEditStart(t)}
-                                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
-                                                        >
-                                                            ערוך
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDeleteLibraryTask(t)}
-                                                            disabled={deletingLibraryTaskId === t.id}
-                                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60"
-                                                        >
-                                                            {deletingLibraryTaskId === t.id ? "מוחק..." : "מחק"}
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })
-                                )}
+                                <button
+                                    onClick={executeDelete}
+                                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition shadow-sm"
+                                >
+                                    מחק
+                                </button>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* Main Content - Tasks */}
-                <div className="space-y-6">
-                    <div ref={tasksOverviewRef} className="rounded-[28px] border border-[rgba(74,26,44,0.10)] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)] overflow-hidden">
-                        <div className="bg-gradient-to-l from-[rgba(255,184,76,0.22)] via-white to-[rgba(74,26,44,0.06)] p-4 sm:p-5">
-                            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                                <div className="space-y-3 text-right">
-                                    <div className="flex flex-wrap items-center justify-end gap-2">
-                                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">{openTasksCount} פתוחות עכשיו</span>
-                                        {overdueTasksCount > 0 && (
-                                            <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">{overdueTasksCount} באיחור</span>
-                                        )}
-                                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{doneTasksCount} הושלמו</span>
+                {/* Event Edit Modal */}
+                {isEditEventOpen && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold">עריכת פרטי האירוע</h3>
+                                <button onClick={() => setIsEditEventOpen(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleSaveEventDetails} className="space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">שם האירוע</label>
+                                        <input
+                                            type="text"
+                                            value={eventForm.title}
+                                            onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            required
+                                        />
                                     </div>
                                     <div>
-                                        <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>משימות לביצוע</h2>
-                                        <p className="mt-1 text-sm text-gray-600">חלוקה ברורה יותר בין סיכום, רשימות ופעולות — כדי לעבוד מהר יותר גם במובייל.</p>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                        <button type="button" onClick={() => scrollToRef(tasksOverviewRef)} className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right transition hover:bg-slate-50"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">סה״כ</p><p className="mt-1 text-lg font-bold text-slate-900">{tasks.length}</p></button>
-                                        <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right transition hover:bg-slate-50"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">צוות</p><p className="mt-1 text-lg font-bold text-slate-900">{teamTasks.length}</p></button>
-                                        <button type="button" onClick={() => scrollToRef(volunteerTasksRef)} className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-right transition hover:bg-amber-100"><p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">מתנדבים</p><p className="mt-1 text-lg font-bold text-amber-900">{volunteerTasks.length}</p></button>
-                                        <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-2xl border border-indigo-200 bg-indigo-50/90 px-3 py-2 text-right transition hover:bg-indigo-100"><p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700">לביצוע</p><p className="mt-1 text-lg font-bold text-indigo-900">{openTasksCount}</p></button>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">מיקום</label>
+                                        <input
+                                            type="text"
+                                            value={eventForm.location}
+                                            onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            required
+                                        />
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:w-[420px]">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">תאריך ושעת האירוע</label>
+                                        <input
+                                            type="datetime-local"
+                                            value={eventForm.startTime}
+                                            onChange={(e) => setEventForm({ ...eventForm, startTime: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">משך האירוע (בשעות)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="0.5"
+                                            value={eventForm.durationHours}
+                                            onChange={(e) => setEventForm({ ...eventForm, durationHours: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            placeholder="לדוגמה: 3.5"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">תדירות חוזרת</label>
+                                        <select
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            value={eventForm.recurrence}
+                                            onChange={(e) => setEventForm({ ...eventForm, recurrence: e.target.value as any })}
+                                        >
+                                            <option value="NONE">חד פעמי</option>
+                                            <option value="WEEKLY">כל שבוע</option>
+                                            <option value="BIWEEKLY">כל שבועיים</option>
+                                            <option value="MONTHLY">כל חודש</option>
+                                        </select>
+                                        {eventForm.recurrence !== "NONE" && (
+                                            <div className="mt-2">
+                                                <label className="block text-xs font-medium text-gray-700 mb-1">תאריך סיום החזרתיות</label>
+                                                <input
+                                                    type="date"
+                                                    value={eventForm.recurrenceEndDate || ""}
+                                                    onChange={(e) => setEventForm({ ...eventForm, recurrenceEndDate: e.target.value })}
+                                                    className="w-full p-2 border rounded-lg text-sm"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">מספר משתתפים</label>
+                                        <input
+                                            type="text"
+                                            value={eventForm.participantsCount}
+                                            onChange={(e) => setEventForm({ ...eventForm, participantsCount: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <PartnersInput
+                                            label="שותפים"
+                                            value={eventForm.partners}
+                                            onChange={(partners) => setEventForm({ ...eventForm, partners })}
+                                            placeholder="הוסף שותף ולחץ אנטר"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">מתנדבים לערב</label>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                id="needsVolunteers"
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                checked={!!eventForm.needsVolunteers}
+                                                onChange={(e) => setEventForm({ ...eventForm, needsVolunteers: e.target.checked })}
+                                            />
+                                            <label htmlFor="needsVolunteers" className="text-gray-800 text-sm">
+                                                צריך מתנדבים לערב הזה?
+                                            </label>
+                                        </div>
+                                        {eventForm.needsVolunteers && (
+                                            <div>
+                                                <label className="block text-xs font-medium text-gray-700 mb-1">כמה מתנדבים?</label>
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    className="w-full p-2 border rounded-lg text-sm"
+                                                    value={eventForm.volunteersCount ?? ""}
+                                                    onChange={(e) => setEventForm({ ...eventForm, volunteersCount: e.target.value })}
+                                                    placeholder="מספר המתנדבים הדרוש"
+                                                    required={eventForm.needsVolunteers}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">מטרה</label>
+                                        <textarea
+                                            rows={2}
+                                            value={eventForm.goal}
+                                            onChange={(e) => setEventForm({ ...eventForm, goal: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">תקציב</label>
+                                        <input
+                                            type="text"
+                                            value={eventForm.budget}
+                                            onChange={(e) => setEventForm({ ...eventForm, budget: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תיאור</label>
+                                    <textarea
+                                        rows={3}
+                                        value={eventForm.description}
+                                        onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">איש קשר - שם</label>
+                                        <input
+                                            type="text"
+                                            value={eventForm.contactName}
+                                            onChange={(e) => setEventForm({ ...eventForm, contactName: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            placeholder="לדוגמה: רוני כהן"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">טלפון</label>
+                                        <input
+                                            type="tel"
+                                            value={eventForm.contactPhone}
+                                            onChange={(e) => setEventForm({ ...eventForm, contactPhone: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            placeholder="050-0000000"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">אימייל</label>
+                                        <input
+                                            type="email"
+                                            value={eventForm.contactEmail}
+                                            onChange={(e) => setEventForm({ ...eventForm, contactEmail: e.target.value })}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            placeholder="contact@patifon.co.il"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="pt-2 border-t border-gray-100">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div>
+                                            <p className="text-sm font-semibold text-gray-800">סעיפים נוספים</p>
+                                            <p className="text-xs text-gray-500">הוסף מידע נוסף שרלוונטי לצוות (קווים מנחים, דרישות מיוחדות ועוד)</p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleAddCustomSection}
+                                            className="flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            <Plus size={16} />
+                                            הוסף סעיף
+                                        </button>
+                                    </div>
+                                    {eventForm.customSections && eventForm.customSections.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {eventForm.customSections.map((section, index) => (
+                                                <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <p className="text-xs font-semibold text-gray-500">סעיף {index + 1}</p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveCustomSection(index)}
+                                                            className="text-gray-400 hover:text-red-500"
+                                                            title="הסר סעיף"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </div>
+                                                    <input
+                                                        type="text"
+                                                        value={section.title}
+                                                        onChange={(e) => handleUpdateCustomSection(index, "title", e.target.value)}
+                                                        className="w-full p-2 border rounded-lg text-sm mb-2"
+                                                        placeholder="כותרת הסעיף"
+                                                    />
+                                                    <textarea
+                                                        rows={3}
+                                                        value={section.content}
+                                                        onChange={(e) => handleUpdateCustomSection(index, "content", e.target.value)}
+                                                        className="w-full p-2 border rounded-lg text-sm"
+                                                        placeholder="תוכן או הוראות רלוונטיות..."
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-gray-500">עדיין לא הוספת סעיפים מותאמים.</p>
+                                    )}
+                                </div>
+                                <div className="flex justify-end gap-3 pt-4">
                                     <button
-                                        onClick={() => {
-                                            setShowSuggestions(true);
-                                            handleLibraryEditStart();
-                                        }}
-                                        className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 bg-white px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5"
-                                        style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                        type="button"
+                                        onClick={() => setIsEditEventOpen(false)}
+                                        className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
                                     >
-                                        <Repeat size={16} />
-                                        משימות חוזרות
+                                        ביטול
                                     </button>
                                     <button
-                                        onClick={() => setShowSpecialModal(true)}
-                                        className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 bg-white px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5"
-                                        style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                        type="submit"
+                                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
                                     >
-                                        <Sparkles size={16} />
-                                        משימות מיוחדות
-                                    </button>
-                                    <button
-                                        onClick={openTaskComposer}
-                                        className="patifon-gradient flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:opacity-90"
-                                    >
-                                        <Plus size={18} />
-                                        משימה חדשה
+                                        שמור
                                     </button>
                                 </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Task Chat Modal */}
+                {chatTask && (
+                    <TaskChat
+                        eventId={id}
+                        taskId={chatTask.id}
+                        taskTitle={chatTask.title}
+                        onClose={() => setChatTask(null)}
+                    />
+                )}
+
+                {/* Assignee Tagging Modal */}
+                {taggingTask && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold">תיוג אחראים למשימה</h3>
+                                <button onClick={() => { setTaggingTask(null); setTagSelection([]); setTagSearch(""); }} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-2">בחרו את אנשי הצוות למשימה "{taggingTask.title}". ניתן לבחור יותר מאחד.</p>
+                            <div className="flex items-center justify-between mb-1">
+                                <label className="text-sm font-medium text-gray-700">תיוג/הקצאה</label>
+                                <span className="text-xs text-gray-500">{tagSelection.length} נבחרו</span>
+                            </div>
+                            <div className="mb-3">
+                                <input
+                                    type="text"
+                                    value={tagSearch}
+                                    onChange={(e) => setTagSearch(e.target.value)}
+                                    placeholder="חיפוש לפי שם"
+                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                />
+                            </div>
+                            <div className="flex flex-wrap gap-2 mb-4">
+                                {event.team
+                                    ?.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase()))
+                                    .map((member, idx) => {
+                                        const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
+                                        const checked = tagSelection.some(a => getAssigneeKey(a) === memberKey);
+                                        return (
+                                            <button
+                                                key={idx}
+                                                type="button"
+                                                onClick={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "tag")}
+                                                className={`px-3 py-1 rounded-full text-sm border transition ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                            >
+                                                {member.name}
+                                            </button>
+                                        );
+                                    })}
+                                {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(tagSearch.trim().toLowerCase())).length === 0)) && (
+                                    <span className="text-sm text-gray-500">אין חברי צוות זמינים</span>
+                                )}
+                            </div>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => { setTaggingTask(null); setTagSelection([]); setTagSearch(""); }}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+                                >
+                                    ביטול
+                                </button>
+                                <button
+                                    onClick={handleSaveTagging}
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+                                >
+                                    שמור
+                                </button>
                             </div>
                         </div>
                     </div>
+                )}
 
-                    {showNewTask && (
-                        <div className="rounded-2xl border border-indigo-100 bg-white/95 p-4 shadow-sm animate-in fade-in slide-in-from-top-2 sm:p-5">
-                            <h3 className="font-medium mb-3">הוספת משימה חדשה</h3>
-                            <form onSubmit={handleAddTask} className="space-y-3">
-                                <input
-                                    type="text"
-                                    placeholder="כותרת המשימה"
-                                    required
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    value={newTask.title}
-                                    onChange={e => setNewTask({ ...newTask, title: e.target.value })}
-                                />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <div className="space-y-2">
+                {/* Edit Task Modal */}
+                {editingTask && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold">עריכת משימה</h3>
+                                <button onClick={() => { setEditingTask(null); setEditTaskSearch(""); setSaveEditTaskToLibrary(false); }} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleUpdateTask} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">כותרת</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        value={editingTask.title}
+                                        onChange={e => setEditingTask({ ...editingTask, title: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תיאור</label>
+                                    <textarea
+                                        rows={3}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        value={editingTask.description || ""}
+                                        onChange={e => setEditingTask({ ...editingTask, description: e.target.value })}
+                                    />
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">כמה פעמים צריך לבצע?</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            value={editingTask.requiredCompletions ?? 1}
+                                            onChange={(e) => {
+                                                const val = parseInt(e.target.value, 10);
+                                                const req = Number.isFinite(val) && val > 0 ? val : 1;
+                                                setEditingTask(prev => prev ? ({ ...prev, requiredCompletions: req } as Task) : null);
+                                            }}
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">ברירת מחדל: פעם אחת. ניתן להגדיר מספר חזרות.</p>
+                                        <p className="text-xs text-indigo-600 mt-1">
+                                            נותרו: {Math.max(editingTask.remainingCompletions ?? editingTask.requiredCompletions ?? 1, 0)}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
                                         <div className="flex items-center justify-between mb-1">
-                                            <p className="text-xs font-semibold text-gray-600">תיוג/הקצאה</p>
-                                            <span className="text-xs text-gray-500">{newTask.assignees.length} נבחרו</span>
+                                            <label className="block text-sm font-medium text-gray-700">תיוג/הקצאה</label>
+                                            <span className="text-xs text-gray-500">{editingTask.assignees?.length || 0} נבחרו</span>
                                         </div>
                                         <input
                                             type="text"
-                                            value={newTaskSearch}
-                                            onChange={(e) => setNewTaskSearch(e.target.value)}
+                                            value={editTaskSearch}
+                                            onChange={(e) => setEditTaskSearch(e.target.value)}
                                             placeholder="חיפוש לפי שם"
                                             className="w-full p-2 border rounded-lg text-xs mb-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                                         />
                                         <div className="flex flex-wrap gap-2">
                                             {event.team
-                                                ?.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase()))
+                                                ?.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase()))
                                                 .map((member, idx) => {
                                                     const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
-                                                    const checked = newTask.assignees.some(a => getAssigneeKey(a) === memberKey);
+                                                    const checked = editingTask.assignees?.some(a => getAssigneeKey(a) === memberKey);
                                                     return (
                                                         <label
                                                             key={idx}
@@ -4395,26 +3630,26 @@ export default function EventDetailsPage() {
                                                                 type="checkbox"
                                                                 className="accent-white w-4 h-4"
                                                                 checked={checked}
-                                                                onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "new")}
+                                                                onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "edit")}
                                                             />
                                                             {member.name}
                                                         </label>
                                                     );
                                                 })}
-                                            {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase())).length === 0)) && (
+                                            {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(editTaskSearch.trim().toLowerCase())).length === 0)) && (
                                                 <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
                                             )}
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <p className="text-xs font-semibold text-gray-600">מועד המשימה</p>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">מועד המשימה</label>
                                         <div className="flex flex-wrap gap-3 text-xs">
                                             <label className="flex items-center gap-2 cursor-pointer">
                                                 <input
                                                     type="radio"
                                                     className="accent-indigo-600"
-                                                    checked={newTaskDueMode === "event_day"}
-                                                    onChange={() => syncNewTaskDueDate("event_day", "0", newTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                                    checked={editTaskDueMode === "event_day"}
+                                                    onChange={() => syncEditTaskDueDate("event_day", "0", editTaskTime || extractTimeString(getEventStartDate() || new Date()))}
                                                 />
                                                 ביום האירוע
                                             </label>
@@ -4422,26 +3657,26 @@ export default function EventDetailsPage() {
                                                 <input
                                                     type="radio"
                                                     className="accent-indigo-600"
-                                                    checked={newTaskDueMode === "offset"}
-                                                    onChange={() => syncNewTaskDueDate("offset", newTaskOffsetDays, newTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                                    checked={editTaskDueMode === "offset"}
+                                                    onChange={() => syncEditTaskDueDate("offset", editTaskOffsetDays, editTaskTime || extractTimeString(getEventStartDate() || new Date()))}
                                                 />
                                                 ימים ביחס לאירוע
                                             </label>
                                         </div>
-                                        {newTaskDueMode === "offset" && (
+                                        {editTaskDueMode === "offset" && (
                                             <div className="flex items-center gap-2 text-xs">
                                                 <span>ימים מהאירוע:</span>
                                                 <input
                                                     type="text"
                                                     inputMode="numeric"
                                                     className="w-24 p-2 border rounded-lg text-sm"
-                                                    value={newTaskOffsetDays}
+                                                    value={editTaskOffsetDays}
                                                     onChange={(e) => {
                                                         const raw = e.target.value;
-                                                        setNewTaskOffsetDays(raw);
+                                                        setEditTaskOffsetDays(raw);
                                                         const parsed = parseOffset(raw);
                                                         if (parsed === null) return;
-                                                        syncNewTaskDueDate("offset", raw, newTaskTime || extractTimeString(getEventStartDate() || new Date()));
+                                                        syncEditTaskDueDate("offset", raw, editTaskTime || extractTimeString(getEventStartDate() || new Date()));
                                                     }}
                                                 />
                                                 <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
@@ -4452,14 +3687,14 @@ export default function EventDetailsPage() {
                                             <input
                                                 type="time"
                                                 className="p-2 border rounded-lg text-sm"
-                                                value={newTaskTime}
-                                                onChange={(e) => syncNewTaskDueDate(newTaskDueMode, newTaskOffsetDays, e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+                                                value={editTaskTime}
+                                                onChange={(e) => syncEditTaskDueDate(editTaskDueMode, editTaskOffsetDays, e.target.value || extractTimeString(getEventStartDate() || new Date()))}
                                             />
                                         </div>
                                         <div className="text-xs text-gray-600">
-                                            {newTask.dueDate
-                                                ? `המשימה מתוזמנת ל-${new Date(newTask.dueDate).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}`
-                                                : "טרם נבחר מועד למשימה"}
+                                            {editingTask.dueDate
+                                                ? `המשימה מתוזמנת ל-${new Date(editingTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
+                                                : "לא נקבע מועד למשימה"}
                                             {!getEventStartDate() && (
                                                 <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
                                             )}
@@ -4467,93 +3702,54 @@ export default function EventDetailsPage() {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">תיאור המשימה</label>
-                                    <textarea
-                                        rows={3}
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">עדיפות</label>
+                                    <select
                                         className="w-full p-2 border rounded-lg text-sm"
-                                        placeholder="מה צריך לעשות? ציינו פרטים חשובים, קישורים או בקשות מיוחדות."
-                                        value={newTask.description}
-                                        onChange={e => setNewTask({ ...newTask, description: e.target.value })}
-                                    />
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">כמה פעמים צריך לבצע?</label>
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            className="w-full p-2 border rounded-lg text-sm"
-                                            value={newTask.requiredCompletions ?? 1}
-                                            onChange={(e) => {
-                                                const val = parseInt(e.target.value, 10);
-                                                setNewTask(prev => ({ ...prev, requiredCompletions: Number.isFinite(val) && val > 0 ? val : 1 }));
-                                            }}
-                                        />
-                                        <p className="text-xs text-gray-500 mt-1">ברירת מחדל: פעם אחת. ניתן להגדיר מספר חזרות.</p>
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <p className="text-sm font-medium text-gray-700 mb-1">דחיפות</p>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {[
-                                            { key: "NORMAL", label: "רגיל", color: "border-gray-200 text-gray-700", bg: "bg-gray-50" },
-                                            { key: "HIGH", label: "גבוה", color: "border-amber-300 text-amber-800", bg: "bg-amber-50" },
-                                            { key: "CRITICAL", label: "דחוף", color: "border-red-300 text-red-800", bg: "bg-red-50" },
-                                        ].map(opt => (
-                                            <button
-                                                key={opt.key}
-                                                type="button"
-                                                onClick={() => setNewTask({ ...newTask, priority: opt.key })}
-                                                className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border-2 text-xs font-semibold hover:opacity-90 transition ${newTask.priority === opt.key ? `${opt.bg} ${opt.color}` : "border-gray-200 text-gray-600 bg-white"}`}
-                                            >
-                                                <span>{opt.label}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                                        <Paperclip size={16} />
-                                        צרף קבצים למשימה (אופציונלי)
-                                    </label>
-                                    <input
-                                        id="new-task-files"
-                                        ref={newTaskFileInputRef}
-                                        type="file"
-                                        multiple
-                                        accept="*/*"
-                                        className="sr-only"
-                                        onChange={(e) => {
-                                            const files = e.target.files ? Array.from(e.target.files) : [];
-                                            setNewTaskFiles(files);
-                                        }}
-                                    />
-                                    <label
-                                        htmlFor="new-task-files"
-                                        className="w-full border-2 border-indigo-200 text-indigo-700 py-2 rounded-lg hover:bg-indigo-50 transition text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer"
+                                        value={editingTask.priority}
+                                        onChange={e => setEditingTask({ ...editingTask, priority: e.target.value as any })}
                                     >
-                                        <Paperclip size={16} />
-                                        {newTaskFiles.length ? "בחר/החלף קבצים" : "בחר קבצים להעלאה"}
-                                    </label>
-                                    <p className="text-xs text-gray-500">
-                                        {newTaskFiles.length > 0 ? `${newTaskFiles.length} קבצים יועלו אחרי שמירה` : "ניתן לצרף מסמכים, תמונות או חוזים"}
-                                    </p>
+                                        <option value="NORMAL">רגיל</option>
+                                        <option value="HIGH">גבוה</option>
+                                        <option value="CRITICAL">דחוף מאוד</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
+                                    <textarea
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        rows={2}
+                                        placeholder="תאר את המצב הנוכחי של המשימה..."
+                                        value={editingTask.currentStatus || ""}
+                                        onChange={e => setEditingTask({ ...editingTask, currentStatus: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
+                                    <textarea
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        rows={2}
+                                        placeholder="מה הצעד הבא שצריך לעשות..."
+                                        value={editingTask.nextStep || ""}
+                                        onChange={e => setEditingTask({ ...editingTask, nextStep: e.target.value })}
+                                    />
                                 </div>
                                 {event.needsVolunteers && (
-                                    <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                                        <input
-                                            type="checkbox"
-                                            id="newTaskIsVolunteerTask"
-                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                            checked={newTask.isVolunteerTask || false}
-                                            onChange={e => setNewTask({ ...newTask, isVolunteerTask: e.target.checked })}
-                                        />
-                                        <label htmlFor="newTaskIsVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
-                                            <Handshake size={16} className="text-indigo-600" />
-                                            משימה למתנדב
-                                        </label>
-                                        <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
-                                        {newTask.isVolunteerTask && (
+                                    <div className="flex flex-col gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                id="isVolunteerTask"
+                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                checked={editingTask.isVolunteerTask || false}
+                                                onChange={e => setEditingTask({ ...editingTask, isVolunteerTask: e.target.checked })}
+                                            />
+                                            <label htmlFor="isVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                                <Handshake size={16} className="text-indigo-600" />
+                                                משימה למתנדב
+                                            </label>
+                                            <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                        </div>
+                                        {editingTask.isVolunteerTask && (
                                             <div className="flex items-center gap-2">
                                                 <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
                                                 <input
@@ -4561,8 +3757,8 @@ export default function EventDetailsPage() {
                                                     min="0"
                                                     step="0.5"
                                                     className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
-                                                    value={newTask.volunteerHours ?? ""}
-                                                    onChange={(e) => setNewTask({ ...newTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
+                                                    value={editingTask.volunteerHours ?? ""}
+                                                    onChange={(e) => setEditingTask({ ...editingTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
                                                     placeholder="לדוגמה 2"
                                                 />
                                                 <span className="text-xs text-gray-500">שעות עבודה</span>
@@ -4570,1583 +3766,2360 @@ export default function EventDetailsPage() {
                                         )}
                                     </div>
                                 )}
-                                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-                                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 w-full sm:w-auto">
-                                        <Repeat size={16} className="text-indigo-600" />
-                                        <div className="flex flex-col">
-                                            <span className="text-xs font-semibold text-indigo-800">סמן כמשימה שחוזרת על עצמה</span>
-                                            <span className="text-[11px] text-indigo-700">תתווסף למאגר המשימות החשובות</span>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSaveNewTaskToLibrary(prev => !prev)}
-                                            className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${saveNewTaskToLibrary ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200"}`}
-                                        >
-                                            {saveNewTaskToLibrary ? "נשמר" : "הוסף"}
-                                        </button>
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50">
+                                    <Repeat size={16} className="text-indigo-600" />
+                                    <div className="flex flex-col">
+                                        <span className="text-xs font-semibold text-indigo-800">שמור במאגר המשימות החוזרות</span>
+                                        <span className="text-[11px] text-indigo-700">כדי להוסיף לאזור ההגדרות</span>
                                     </div>
-                                </div>
-                                <div className="flex justify-end gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => { setShowNewTask(false); setSaveNewTaskToLibrary(false); }}
-                                        className="px-3 py-1 text-gray-500 hover:bg-gray-100 rounded-lg text-sm"
+                                        onClick={() => setSaveEditTaskToLibrary(prev => !prev)}
+                                        className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${saveEditTaskToLibrary ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200"}`}
+                                    >
+                                        {saveEditTaskToLibrary ? "נשמר" : "הוסף"}
+                                    </button>
+                                </div>
+                                <div className="flex justify-end gap-3 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setEditingTask(null); setSaveEditTaskToLibrary(false); }}
+                                        className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
                                     >
                                         ביטול
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
+                                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
                                     >
-                                        שמור משימה
+                                        שמור שינויים
                                     </button>
                                 </div>
                             </form>
                         </div>
-                    )}
-
-                    <div className="space-y-5">
-                        {tasks.length === 0 ? (
-                            <div className="rounded-[28px] border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-gray-500 shadow-sm">אין משימות עדיין. צור את המשימה הראשונה כדי להתחיל לעבוד מסודר.</div>
-                        ) : (
-                            <>
-                                <div ref={teamTasksRef} className="rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)] overflow-hidden">
-                                    <div className="border-b border-slate-200 bg-gradient-to-l from-slate-100 to-white px-4 py-4 sm:px-5">
-                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                            <div className="text-right">
-                                                <h3 className="text-lg font-black text-slate-900">משימות צוות</h3>
-                                                <p className="mt-1 text-sm text-slate-600">עבודה שוטפת של הצוות, עם דגש על עדכונים, דד ליינים ופעולות מיידיות.</p>
-                                            </div>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{teamTasks.length} משימות</span>
-                                                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{teamTasks.filter((task) => task.status !== 'DONE').length} פתוחות</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-3 bg-slate-50/60 p-4 sm:p-5">
-                                        {teamTasks.map((task) => {
-                                            const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
-                                            return (
-                                                <TaskCard
-                                                    key={task.id}
-                                                    id={task.id}
-                                                    title={task.title}
-                                                    description={task.description}
-                                                    currentStatus={task.currentStatus}
-                                                    nextStep={task.nextStep}
-                                                    assignee={task.assignee || "לא משויך"}
-                                                    assignees={task.assignees}
-                                                    status={task.status}
-                                                    dueDate={task.dueDate}
-                                                    priority={task.priority}
-                                                    eventId={id}
-                                                    eventTitle={event?.title}
-                                                    scope={task.scope}
-                                                    specialType={(task as any).specialType}
-                                                    requiredCompletions={(task as any).requiredCompletions}
-                                                    remainingCompletions={(task as any).remainingCompletions}
-                                                    onUpdateCompletions={() => handleUpdateCompletions(task)}
-                                                    createdByName={task.createdByName}
-                                                    onEdit={() => { startEditingTask(task); }}
-                                                    onDelete={() => confirmDeleteTask(task.id)}
-                                                    onStatusChange={(newStatus) => handleStatusChange(task, newStatus)}
-                                                    onChat={() => setChatTask(task)}
-                                                    hasUnreadMessages={hasUnread}
-                                                    onEditStatus={() => setEditingStatusTask(task)}
-                                                    onEditDate={() => setEditingDateTask(task)}
-                                                    onManageAssignees={() => {
-                                                        setTaggingTask(task);
-                                                        setTagSelection(task.assignees || []);
-                                                    }}
-                                                    onAssigneeClick={(assignee) => handleAssigneeWhatsapp(task, assignee)}
-                                                />
-                                            );
-                                        })}
-                                        {teamTasks.length === 0 && (
-                                            <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">אין משימות צוות כרגע.</p>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div ref={volunteerTasksRef} className="rounded-[28px] border border-amber-200 bg-white shadow-[0_16px_40px_rgba(245,158,11,0.10)] overflow-hidden">
-                                    <div className="border-b border-amber-200 bg-gradient-to-l from-amber-100/90 to-white px-4 py-4 sm:px-5">
-                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                            <div className="text-right">
-                                                <h3 className="text-lg font-black text-amber-950">משימות למתנדבים</h3>
-                                                <p className="mt-1 text-sm text-amber-900/80">משימות גמישות יותר, עם דגש על הקצאות, כמות ביצועים ושיתוף ברור מול המתנדבים.</p>
-                                            </div>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-900">{volunteerTasks.length} משימות</span>
-                                                <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">{volunteerTasks.filter((task) => task.status !== 'DONE').length} פעילות</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-3 bg-amber-50/70 p-4 sm:p-5">
-                                        {volunteerTasks.map((task) => {
-                                            const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
-                                            return (
-                                                <TaskCard
-                                                    key={task.id}
-                                                    id={task.id}
-                                                    title={task.title}
-                                                    description={task.description}
-                                                    currentStatus={task.currentStatus}
-                                                    nextStep={task.nextStep}
-                                                    assignee={task.assignee || "לא משויך"}
-                                                    assignees={task.assignees}
-                                                    status={task.status}
-                                                    dueDate={task.dueDate}
-                                                    priority={task.priority}
-                                                    eventId={id}
-                                                    eventTitle={event?.title}
-                                                    scope={task.scope}
-                                                    specialType={(task as any).specialType}
-                                                    requiredCompletions={(task as any).requiredCompletions}
-                                                    remainingCompletions={(task as any).remainingCompletions}
-                                                    onUpdateCompletions={() => handleUpdateCompletions(task)}
-                                                    createdByName={task.createdByName}
-                                                    onEdit={() => { startEditingTask(task); }}
-                                                    onDelete={() => confirmDeleteTask(task.id)}
-                                                    onStatusChange={(newStatus) => handleStatusChange(task, newStatus)}
-                                                    onChat={() => setChatTask(task)}
-                                                    hasUnreadMessages={hasUnread}
-                                                    onEditStatus={() => setEditingStatusTask(task)}
-                                                    onEditDate={() => setEditingDateTask(task)}
-                                                    onManageAssignees={() => {
-                                                        setTaggingTask(task);
-                                                        setTagSelection(task.assignees || []);
-                                                    }}
-                                                    onAssigneeClick={(assignee) => handleAssigneeWhatsapp(task, assignee)}
-                                                />
-                                            );
-                                        })}
-                                        {volunteerTasks.length === 0 && (
-                                            <p className="rounded-2xl border border-dashed border-amber-300 bg-white px-4 py-6 text-center text-sm text-amber-800">אין משימות למתנדבים כרגע.</p>
-                                        )}
-                                    </div>
-                                </div>
-                            </>
-                        )}
                     </div>
+                )}
+
+                <div className="mb-4">
+                    <Link href="/" className="flex items-center gap-1 text-sm w-fit hover:opacity-70 transition" style={{ color: 'var(--patifon-burgundy)' }}>
+                        <ArrowRight size={16} />
+                        חזרה לדשבורד
+                    </Link>
                 </div>
 
-                {/* Sidebar - Team, Budget & Files */}
-                <div className="space-y-6 xl:sticky xl:top-4 self-start">
-                    {/* ... existing budget section ... */}
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Team Section */}
-                        <details ref={teamSectionRef} className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
-                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
-                                <div>
-                                    <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
-                                    <p className="text-xs text-gray-500 mt-1">{event.team?.length || 0} אנשי צוות, בקשות הצטרפות והודעות צוות.</p>
-                                </div>
-                                <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
-                                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{event.team?.length || 0}</span>
-                                    <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
-                                </div>
-                            </summary>
-                            <div className="px-6 pb-6">
-                            <div className="flex justify-between items-center mb-4">
-                                <div className="text-sm text-gray-500">ניהול, הוספה, תקשורת ושיוך אנשי צוות.</div>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={copyInviteLink}
-                                        className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
-                                        title="העתק קישור להזמנה"
-                                    >
-                                        <Share2 size={18} />
-                                    </button>
-                                    {canManageTeam && (
-                                        <button
-                                            onClick={() => {
-                                                setShowCollaboratorsPicker(prev => !prev);
-                                                setShowAddTeam(false);
-                                            }}
-                                            className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
-                                            title="הוסף איש צוות"
-                                        >
-                                            <UserPlus size={18} />
-                                        </button>
+                <header className="mb-6 overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/80 shadow-[0_16px_50px_rgba(74,26,44,0.12)] backdrop-blur-sm">
+                    <div className="bg-[linear-gradient(135deg,rgba(74,26,44,0.97),rgba(193,39,45,0.9),rgba(241,143,58,0.85))] px-5 py-6 text-white sm:px-7">
+                        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                            <div className="space-y-4 w-full">
+                                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">דף ניהול אירוע</span>
+                                    {event.projectId ? (
+                                        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">פרויקט: {event.projectName || event.projectId}</span>
+                                    ) : (
+                                        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">ללא פרויקט משויך</span>
+                                    )}
+                                    {event.status && (
+                                        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">סטטוס: {event.status}</span>
+                                    )}
+                                    {overdueTasksCount > 0 && (
+                                        <span className="rounded-full border border-red-200/60 bg-red-500/20 px-3 py-1 text-red-50">{overdueTasksCount} משימות באיחור</span>
                                     )}
                                 </div>
-                            </div>
-
-                            {showAddTeam && canManageTeam && (
-                                <div className="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                    <form onSubmit={handleAddTeamMember} className="space-y-2">
-                                        <input
-                                            type="text"
-                                            placeholder="שם מלא"
-                                            required
-                                            className="w-full p-2 border rounded text-sm"
-                                            value={newMember.name}
-                                            onChange={e => setNewMember({ ...newMember, name: e.target.value })}
-                                        />
-                                        <input
-                                            type="text"
-                                            placeholder="תפקיד"
-                                            required
-                                            className="w-full p-2 border rounded text-sm"
-                                            value={newMember.role}
-                                            onChange={e => setNewMember({ ...newMember, role: e.target.value })}
-                                        />
-                                        <input
-                                            type="email"
-                                            placeholder="אימייל (אופציונלי)"
-                                            className="w-full p-2 border rounded text-sm"
-                                            value={newMember.email}
-                                            onChange={e => setNewMember({ ...newMember, email: e.target.value })}
-                                        />
-                                        <button
-                                            type="submit"
-                                            className="w-full bg-indigo-600 text-white py-1 rounded text-sm hover:bg-indigo-700"
-                                        >
-                                            הוסף
-                                        </button>
-                                    </form>
+                                <div className="space-y-2">
+                                    <h1 className="text-3xl font-black leading-tight sm:text-4xl">{event.title}</h1>
+                                    <p className="max-w-3xl text-sm text-white/85 sm:text-base">
+                                        {event.description || "כל פרטי האירוע, הצוות, המשימות, התוכן והקבצים במקום אחד ברור ונגיש."}
+                                    </p>
                                 </div>
-                            )}
-
-                            {showCollaboratorsPicker && canManageTeam && (
-                                <div className="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm">
-                                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-                                        <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-                                            <button
-                                                className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "past" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
-                                                onClick={() => setCollaboratorsView("past")}
-                                            >
-                                                עבדתי איתם
-                                            </button>
-                                            <button
-                                                className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "all" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
-                                                onClick={() => setCollaboratorsView("all")}
-                                            >
-                                                כל המשתמשים
-                                            </button>
-                                        </div>
-                                        <button
-                                            className="text-xs text-indigo-600 hover:underline"
-                                            onClick={() => {
-                                                setShowAddTeam(true);
-                                                setShowCollaboratorsPicker(false);
-                                            }}
-                                        >
-                                            הוסף ידנית
-                                        </button>
+                                <p className="text-sm font-semibold text-white/90">
+                                    יוצר האירוע: {creatorName || event.creatorName || event.createdByEmail || event.createdBy || "לא ידוע"}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/90">
+                                    <div className="flex items-center gap-1">
+                                        <MapPin size={16} />
+                                        <span>{event.location}</span>
                                     </div>
-                                    <div className="max-h-64 overflow-y-auto p-2 space-y-2">
-                                        {(collaboratorsView === "past" ? collaborators : allUsers)
-                                            .filter(c => !(event?.team || []).some(m =>
-                                                (m.userId && m.userId === c.id) ||
-                                                (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
-                                            ))
-                                            .map(collab => (
-                                                <button
-                                                    key={collab.id}
-                                                    onClick={() => handleAddCollaboratorToTeam(collab)}
-                                                    className="w-full text-left flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition"
-                                                    title="הוסף איש צוות"
-                                                >
-                                                    <div className="flex items-center gap-2 min-w-0">
-                                                        <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-                                                            {(collab.fullName || collab.email || "?").slice(0, 2)}
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-medium text-gray-900 truncate">{collab.fullName || collab.email || "משתמש"}</p>
-                                                            <p className="text-xs text-gray-500 truncate">{collab.role || "חבר צוות"}</p>
-                                                        </div>
-                                                    </div>
-                                                    <span className="px-3 py-1 text-xs rounded-full border border-indigo-200 text-indigo-700 bg-white">
-                                                        הוסף
+                                    <div className="flex items-center gap-1">
+                                        <Calendar size={16} />
+                                        <span>{startDateLabel}{startTimeLabel ? ` | ${startTimeLabel}` : ""}</span>
+                                    </div>
+                                    {event.dates && event.dates.length > 1 && (
+                                        <div className="flex items-center gap-2 flex-wrap text-xs text-indigo-800">
+                                            {event.dates.map((d, idx) => {
+                                                const dt = d?.seconds ? new Date(d.seconds * 1000) : new Date(d);
+                                                const label = !isNaN(dt.getTime()) ? dt.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "";
+                                                return (
+                                                    <span key={idx} className="px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-full">
+                                                        {label}
                                                     </span>
-                                                </button>
-                                            ))}
-                                        {(collaboratorsView === "past" ? collaborators : allUsers).filter(c => !(event?.team || []).some(m =>
-                                            (m.userId && m.userId === c.id) ||
-                                            (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
-                                        )).length === 0 && (
-                                                <p className="text-xs text-gray-500 px-2 py-1">לא נמצאו משתמשים להצגה.</p>
-                                            )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {canManageTeam && joinRequests.filter(r => r.status === "PENDING").length > 0 && (
-                                <div className="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-3">
-                                    <p className="text-sm font-semibold text-amber-800 mb-2">בקשות הצטרפות ממתינות</p>
-                                    <div className="space-y-2">
-                                        {joinRequests.filter(r => r.status === "PENDING").map((req) => (
-                                            <div key={req.id} className="flex items-center justify-between gap-3 p-2 bg-white border border-amber-100 rounded-lg">
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-medium text-gray-900 truncate">{req.requesterName || req.requesterEmail || "משתמש"}</p>
-                                                    <p className="text-xs text-gray-500 truncate">{req.requesterEmail}</p>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => handleApproveJoinRequest(req)}
-                                                        className="px-3 py-1 text-xs rounded-full bg-green-600 text-white hover:bg-green-700"
-                                                    >
-                                                        אשר
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleRejectJoinRequest(req)}
-                                                        className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
-                                                    >
-                                                        דחה
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="space-y-4">
-                                {event.team && event.team.length > 0 ? (
-                                    event.team.map((member, idx) => (
-                                        <div key={idx} className="flex items-center gap-3 justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-                                                    {member.name.substring(0, 2)}
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm font-medium text-gray-900">{member.name}</p>
-                                                    <p className="text-xs text-gray-500">{member.role}</p>
-                                                </div>
-                                            </div>
-                                            {canManageTeam && (
-                                                <div className="flex items-center gap-2">
-                                                    {confirmRemoveIdx === idx ? (
-                                                        <>
-                                                            <button
-                                                                onClick={() => handleRemoveTeamMember(idx)}
-                                                                className="px-2 py-1 text-xs rounded-full bg-red-600 text-white hover:bg-red-700"
-                                                            >
-                                                                הסר
-                                                            </button>
-                                                            <button
-                                                                onClick={() => setConfirmRemoveIdx(null)}
-                                                                className="px-2 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
-                                                            >
-                                                                ביטול
-                                                            </button>
-                                                        </>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => setConfirmRemoveIdx(idx)}
-                                                            className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
-                                                            title="הסר איש צוות"
-                                                        >
-                                                            <Trash2 size={14} />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )}
+                                                );
+                                            })}
                                         </div>
-                                    ))
-                                ) : (
-                                    <p className="text-sm text-gray-500">עדיין אין חברי צוות</p>
-                                )}
-                                {!canManageTeam && (
-                                    <p className="text-xs text-gray-500">רק יוצר האירוע יכול להוסיף שותפים.</p>
-                                )}
-
-                                {teamContacts.length > 0 && canManageTeam && (
-                                    <div className="mt-4 border-t pt-4 space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm font-semibold text-gray-800">שליחת הודעת מערכת לאנשי הצוות</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const next = !showTeamMessage;
-                                                    if (next) {
-                                                        selectAllTeam();
-                                                    }
-                                                    setShowTeamMessage(next);
-                                                }}
-                                                className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                                                title="פתח שליחת הודעה לצוות"
-                                            >
-                                                <MessageCircle size={16} />
-                                            </button>
+                                    )}
+                                    {event.durationHours && (
+                                        <div className="flex items-center gap-1">
+                                            <Clock size={16} />
+                                            <span>משך משוער: {event.durationHours} שעות</span>
                                         </div>
-                                        {showTeamMessage && (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center justify-between text-xs">
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={selectAllTeam}
-                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
-                                                        >
-                                                            בחר הכל
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={clearTeamSelection}
-                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
-                                                        >
-                                                            נקה
-                                                        </button>
-                                                    </div>
-                                                    <span className="text-gray-500">נבחרו {teamSelections.size}</span>
-                                                </div>
-                                                <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
-                                                    {teamContacts.map((member) => {
-                                                        const checked = teamSelections.has(member.key);
-                                                        const phoneDisplay = member.phone ? formatPhoneForDisplay(member.phone) : "";
-                                                        return (
-                                                            <label key={member.key} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
-                                                                <div className="flex items-center gap-2">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        className="accent-indigo-600"
-                                                                        checked={checked}
-                                                                        onChange={() => toggleTeamSelection(member.key)}
-                                                                    />
-                                                                    <div className="flex flex-col">
-                                                                        <span className="font-medium text-gray-800">{member.name || member.email || "איש צוות"}</span>
-                                                                        <span className="text-xs text-gray-500">
-                                                                            {member.role || ""}
-                                                                            {(member.role && (member.email || phoneDisplay)) ? " • " : ""}
-                                                                            {member.email || ""}
-                                                                            {(member.email && phoneDisplay) ? " • " : ""}
-                                                                            {phoneDisplay}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                                <span className="text-[11px] text-gray-500">
-                                                                    {phoneDisplay || "אין טלפון"}
-                                                                </span>
-                                                            </label>
-                                                        );
-                                                    })}
-                                                </div>
-                                                <textarea
-                                                    className="w-full border rounded-lg p-3 text-sm"
-                                                    rows={3}
-                                                    placeholder="כתוב את ההודעה שתרצה לשלוח לכל הצוות שנבחר"
-                                                    onChange={(e) => { teamMessageRef.current = e.target.value; }}
-                                                />
-                                                <div className="flex justify-end">
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleSendTeamBroadcast}
-                                                        disabled={sendingTeamMsg}
-                                                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
-                                                    >
-                                                        {sendingTeamMsg ? "שולח..." : "שלח הודעה לצוות"}
-                                                    </button>
-                                                </div>
-                                                <p className="text-xs text-gray-500">
-                                                    נשלח רק למי שנבחר ובעל מספר מעודכן ב״משתמשי מערכת״.
-                                                </p>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                            </div>
-                        </details>
-
-                        {/* Volunteers Section */}
-                        {event.needsVolunteers && (
-                            <details ref={volunteersSectionRef} className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
-                                    <div className="flex items-center gap-2">
-                                        <Handshake size={20} className="text-indigo-600" />
-                                        <div>
-                                            <h3 className="text-lg font-semibold text-gray-900">מתנדבים</h3>
-                                            <p className="text-xs text-gray-500 mt-1">ניהול רשומים, שליחת הודעות וגישה מהירה לטופס ההתנדבות.</p>
+                                    )}
+                                    {event.participantsCount && (
+                                        <div className="flex items-center gap-1">
+                                            <Users size={16} />
+                                            <span>{event.participantsCount} משתתפים</span>
                                         </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
-                                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">{volunteerProgressLabel}</span>
-                                        <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
-                                    </div>
-                                </summary>
-                                <div className="px-6 pb-6">
-                                <div className="flex items-center justify-between mb-4">
-                                    <div className="text-sm text-gray-500">רשימת מתנדבים פעילים, הודעות ועדכוני גיוס.</div>
-                                    {event.volunteersCount && (
-                                        <span className="text-xs text-gray-500">
-                                            {combinedVolunteers.length} / {event.volunteersCount}
-                                        </span>
+                                    )}
+                                    {event.needsVolunteers && (
+                                        <div className="flex items-center gap-1">
+                                            <Users size={16} />
+                                            <span>
+                                                {event.volunteersCount != null
+                                                    ? `יעד מתנדבים: ${event.volunteersCount}`
+                                                    : "מחפש מתנדבים לאירוע הזה"}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {partnersLabel && (
+                                        <div className="flex items-center gap-1">
+                                            <Handshake size={16} />
+                                            <span>שותפים: {partnersLabel}</span>
+                                        </div>
                                     )}
                                 </div>
-
-                                {loadingVolunteers ? (
-                                    <div className="flex items-center justify-center py-8">
-                                        <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-indigo-500"></div>
-                                    </div>
-                                ) : combinedVolunteers.length > 0 ? (
-                                    <div className="space-y-4">
-                                        {combinedVolunteers.map((volunteer, idx) => (
-                                            <div key={volunteer.id || idx} className="flex items-center gap-3 justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-                                                        {(volunteer.name || volunteer.email || "?").substring(0, 2)}
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-sm font-medium text-gray-900">{volunteer.name || volunteer.email || "מתנדב"}</p>
-                                                        {volunteer.email && volunteer.name && (
-                                                            <p className="text-xs text-gray-500">{volunteer.email}</p>
-                                                        )}
-                                                        {volunteer.phone && (
-                                                            <p className="text-xs text-gray-500">{volunteer.phone}</p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {canManageTeam && volunteers.find(v => v.email === volunteer.email || v.id === volunteer.id) && (
-                                                    <button
-                                                        onClick={() => {
-                                                            if (volunteer.id && confirm("האם אתה בטוח שברצונך להסיר את המתנדב?")) {
-                                                                handleDeleteVolunteer(volunteer.id);
-                                                            }
-                                                        }}
-                                                        className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
-                                                        title="הסר מתנדב"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <p className="text-sm text-gray-500">עדיין אין מתנדבים שנרשמו</p>
-                                )}
-
-                                {combinedVolunteers.length > 0 && (
-                                    <div className="mt-4 border-t pt-4 space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm font-semibold text-gray-800">שליחת הודעת וואטסאפ למתנדבים</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowVolunteerMessage(prev => !prev)}
-                                                className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                                                title="פתח שליחת הודעה"
+                                <div className="flex flex-wrap items-center gap-3">
+                                    {event.projectId ? (
+                                        <span className="inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
+                                            פרויקט משויך: {event.projectName || event.projectId}
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs text-gray-600">אין פרויקט משויך</span>
+                                    )}
+                                    {isProjectLinker && projectOptions.length > 0 && (
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                value={selectedProject}
+                                                onChange={(e) => setSelectedProject(e.target.value)}
                                             >
-                                                <MessageCircle size={16} />
+                                                <option value="">בחר פרויקט</option>
+                                                {projectOptions.map((p) => (
+                                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                onClick={handleLinkProject}
+                                                disabled={!selectedProject || linkingProject}
+                                                className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition disabled:opacity-60"
+                                            >
+                                                {linkingProject ? "מקשר..." : "שייך לפרויקט"}
                                             </button>
                                         </div>
-                                        {showVolunteerMessage && (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center justify-between text-xs">
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={selectAllVolunteers}
-                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
-                                                        >
-                                                            בחר הכל
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={clearVolunteerSelection}
-                                                            className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
-                                                        >
-                                                            נקה
-                                                        </button>
-                                                    </div>
-                                                    <span className="text-gray-500">נבחרו {volunteerSelections.size}</span>
-                                                </div>
-                                                <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
-                                                    {combinedVolunteers.map((vol, idx) => {
-                                                        const key = buildVolunteerKey({ email: vol.email, id: vol.id, name: vol.name });
-                                                        const checked = volunteerSelections.has(key);
-                                                        const phoneDisplay = vol.phone || volunteerPhoneMap.get(key);
-                                                        return (
-                                                            <label key={vol.id || idx} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
-                                                                <div className="flex items-center gap-2">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        className="accent-indigo-600"
-                                                                        checked={checked}
-                                                                        onChange={() => toggleVolunteerSelection(key)}
-                                                                    />
-                                                                    <div className="flex flex-col">
-                                                                        <span className="font-medium text-gray-800">{vol.name || vol.email || "מתנדב"}</span>
-                                                                        <span className="text-xs text-gray-500">
-                                                                            {vol.email || ""}
-                                                                            {(vol.email && (vol.phone || phoneDisplay)) ? " • " : ""}
-                                                                            {(vol.phone || phoneDisplay) ? formatPhoneForDisplay(vol.phone || phoneDisplay) : ""}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                                <span className="text-[11px] text-gray-500">
-                                                                    {phoneDisplay ? formatPhoneForDisplay(phoneDisplay) : "אין טלפון"}
-                                                                </span>
-                                                            </label>
-                                                        );
-                                                    })}
-                                                </div>
-                                                <textarea
-                                                    className="w-full border rounded-lg p-3 text-sm"
-                                                    rows={3}
-                                                    placeholder="כתוב את ההודעה שתרצה לשלוח לכל המתנדבים שנבחרו"
-                                                    defaultValue=""
-                                                    onChange={(e) => {
-                                                        volunteerMessageRef.current = e.target.value;
-                                                    }}
-                                                />
-                                                <div className="flex justify-end">
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleSendVolunteerBroadcast}
-                                                        disabled={sendingVolunteerMsg}
-                                                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
-                                                    >
-                                                        {sendingVolunteerMsg ? "שולח..." : "שלח הודעה לוואטסאפ"}
-                                                    </button>
-                                                </div>
-                                                <p className="text-xs text-gray-500">
-                                                    השליחה מתבצעת לנבחרים בלבד, עם הפרש של 5 שניות בין הודעה להודעה.
-                                                </p>
-                                            </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+                            <div className="rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
+                                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                                    <div className="space-y-3">
+                                        <div>
+                                            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">פוקוס להיום</p>
+                                            <p className="mt-1 text-lg font-black text-white sm:text-xl">{primaryFocusLabel}</p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 text-xs text-white/85">
+                                            <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{teamTasks.length} משימות צוות</button>
+                                            <button type="button" onClick={() => event.needsVolunteers ? openDetailsAndScroll(volunteersSectionRef) : scrollToRef(volunteerTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{volunteerProgressLabel}</button>
+                                            <button type="button" onClick={() => openDetailsAndScroll(teamSectionRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{event.team?.length || 0} אנשי צוות</button>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[340px]">
+                                        <button onClick={openTaskComposer} className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-[var(--patifon-burgundy)] shadow-sm transition hover:-translate-y-0.5">משימה חדשה</button>
+                                        <button onClick={handleOpenContentModal} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">תוכן ומדיה</button>
+                                        <button onClick={() => router.push(`/events/${id}/files`)} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">קבצים ומסמכים</button>
+                                        {event.needsVolunteers ? (
+                                            <button
+                                                onClick={() => {
+                                                    setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
+                                                    setShowVolunteerModal(true);
+                                                }}
+                                                className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
+                                            >
+                                                מתנדבים
+                                            </button>
+                                        ) : (
+                                            <button onClick={copyInviteLink} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">שיתוף צוות</button>
                                         )}
                                     </div>
-                                )}
+                                </div>
                             </div>
-                            </details>
-                        )}
-                    </div>
-
-                    <details className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
-                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
-                            <div>
-                                <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                                    <Paperclip size={18} />
-                                    מסמכים חשובים לאירוע
-                                </h2>
-                                <p className="text-xs text-gray-500 mt-1">קבצים שהועלו, מסמכים חשובים וקישורי גישה להמשך עבודה.</p>
-                            </div>
-                            <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
-                                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{eventFiles.length + importantDocs.length}</span>
-                                <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
-                            </div>
-                        </summary>
-                        <div className="px-6 pb-6">
-                        <div className="flex items-center justify-between mb-4 gap-3">
-                            <p className="text-sm text-gray-600">
-                                כל הקבצים שצורפו לאירוע במקום אחד. לחצו על המאגר לצפייה בכל הקבצים, מי העלה ומתי.
-                            </p>
-                            <div className="flex items-center gap-2 shrink-0">
-                                <button
-                                    onClick={() => setShowEventFileModal(true)}
-                                    className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold border border-indigo-200 px-3 py-1.5 rounded-lg flex items-center gap-2"
-                                >
-                                    <Paperclip size={16} />
-                                    העלה קובץ
-                                </button>
-                                <button
-                                    onClick={() => router.push(`/events/${id}/files`)}
-                                    className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold"
-                                >
-                                    קבצים מצורפים לאירוע
-                                </button>
-                            </div>
-                        </div>
-                        {(eventFiles.length > 0 || importantDocs.length > 0) && (
-                            <div className="space-y-4">
-                                {eventFiles.length > 0 && (
-                                    <div>
-                                        <p className="text-xs font-semibold text-gray-600 mb-2">קבצים שהועלו באירוע</p>
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                            {eventFiles.slice(0, 9).map(file => (
-                                                <div
-                                                    key={file.id}
-                                                    className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:shadow-md transition text-xs text-gray-700"
-                                                >
-                                                    <a
-                                                        href={file.url || "#"}
-                                                        target={file.url ? "_blank" : undefined}
-                                                        rel="noreferrer"
-                                                        className="block"
-                                                    >
-                                                        <div className="h-20 bg-white flex items-center justify-center">
-                                                            {file.url ? (
-                                                                <img src={file.url} alt={file.name} className="w-full h-full object-cover" />
-                                                            ) : (
-                                                                <span className="text-gray-400">תצוגה לא זמינה</span>
-                                                            )}
-                                                        </div>
-                                                        <div className="px-2 py-2 truncate font-semibold">{file.name || "קובץ"}</div>
-                                                        {file.taskTitle && <div className="px-2 text-[10px] text-gray-500 truncate">משימה: {file.taskTitle}</div>}
-                                                    </a>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleShareWhatsApp(file.name || "קובץ", file.url)}
-                                                        className="w-full text-indigo-600 hover:text-indigo-800 border-t border-gray-200 py-1 text-[11px] font-semibold flex items-center justify-center gap-1"
-                                                    >
-                                                        שיתוף בוואטסאפ
-                                                    </button>
+                            <div className="flex flex-col gap-3 rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
+                                <div className="space-y-3">
+                                    {event.contactPerson?.name ? (
+                                        <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
+                                                    <User size={20} />
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                                {importantDocs.length > 0 && (
-                                    <div>
-                                        <p className="text-xs font-semibold text-gray-600 mb-2">מסמכים חשובים</p>
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                            {importantDocs.slice(0, 6).map(doc => (
-                                                <div
-                                                    key={doc.id}
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    onClick={() => router.push(`/settings?tab=documents&docId=${doc.id}`)}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === "Enter" || e.key === " ") {
-                                                            e.preventDefault();
-                                                            router.push(`/settings?tab=documents&docId=${doc.id}`);
-                                                        }
-                                                    }}
-                                                    className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:shadow-md transition text-xs text-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                                    title="פתח למסך העלאה ועדכון פרטי המסמך"
-                                                >
-                                                    <div className="h-20 bg-white flex items-center justify-center">
-                                                        {doc.fileUrl ? (
-                                                            <img
-                                                                src={doc.fileUrl}
-                                                                alt={doc.title}
-                                                                className="w-full h-full object-cover"
-                                                            />
-                                                        ) : (
-                                                            <span className="text-gray-400">תצוגה לא זמינה</span>
-                                                        )}
+                                                <div className="text-sm min-w-0">
+                                                    <p className="font-semibold truncate">איש קשר: {event.contactPerson.name}</p>
+                                                    <div className="text-gray-600 flex flex-col gap-0.5">
+                                                        {event.contactPerson.phone && <span className="truncate">טלפון: {event.contactPerson.phone}</span>}
+                                                        {event.contactPerson.email && <span className="truncate">אימייל: {event.contactPerson.email}</span>}
                                                     </div>
-                                                    <div className="px-2 py-2 truncate font-semibold">{doc.title || doc.fileName || "מסמך"}</div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => { e.stopPropagation(); handleShareWhatsApp(doc.title || doc.fileName || "מסמך", doc.fileUrl); }}
-                                                        className="w-full text-indigo-600 hover:text-indigo-800 border-t border-gray-200 py-1 text-[11px] font-semibold flex items-center justify-center gap-1"
-                                                    >
-                                                        שיתוף בוואטסאפ
-                                                    </button>
                                                 </div>
-                                            ))}
+                                            </div>
+                                            {event.contactPerson.phone && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
+                                                    className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
+                                                    title="שליחת הודעת וואטסאפ"
+                                                >
+                                                    <MessageCircle size={18} />
+                                                </button>
+                                            )}
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    </details>
-                </div>
-            </div>
-
-            <div className="mt-8">
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                        <div className="p-2 rounded-full bg-indigo-50 text-indigo-700">
-                            <PauseCircle size={20} />
-                        </div>
-                        <div className="space-y-1">
-                            <p className="text-sm font-semibold text-gray-900">מרכז בקרה לאירוע</p>
-                            <p className="text-xs text-gray-600">
-                                עצור/הפעל שיתוף משימות עם מתנדבים והגדר מצבי אירוע מיוחדים.
-                            </p>
-                            {event.volunteerTasksPaused && (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                    <PauseCircle size={14} />
-                                    שיתוף המשימות למתנדבים מושהה
-                                </span>
-                            )}
-                            {event.teamTasksPaused && (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                    <PauseCircle size={14} />
-                                    משימות הצוות בהשהיה
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {!canManageTeam && (
-                            <span className="text-[11px] text-gray-500">
-                                רק יוצר האירוע או צוות מורשה יכולים לשנות את מצב האירוע
-                            </span>
-                        )}
-                        <button
-                            type="button"
-                            onClick={() => setShowControlCenter(true)}
-                            disabled={!canManageTeam}
-                            className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 vinyl-shadow transition ${canManageTeam
-                                ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                                : "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                }`}
-                        >
-                            <PauseCircle size={18} />
-                            פתח מרכז בקרה
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div className="fixed inset-x-0 bottom-3 z-30 px-3 md:hidden pointer-events-none">
-                <div className="mx-auto flex max-w-md items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/95 p-2 shadow-[0_14px_40px_rgba(74,26,44,0.18)] backdrop-blur pointer-events-auto">
-                    <button onClick={openTaskComposer} className="flex-1 rounded-xl bg-[var(--patifon-burgundy)] px-3 py-3 text-sm font-bold text-white">משימה</button>
-                    <button onClick={copyInviteLink} className="flex-1 rounded-xl border border-[rgba(74,26,44,0.12)] px-3 py-3 text-sm font-semibold text-[var(--patifon-burgundy)]">שתף</button>
-                    <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`flex-1 rounded-xl px-3 py-3 text-sm font-semibold ${canManageTeam ? 'border border-[rgba(74,26,44,0.12)] text-[var(--patifon-burgundy)]' : 'bg-gray-100 text-gray-400'}`}>בקרה</button>
-                </div>
-            </div>
-
-            {assigneeWhatsappModal && (
-                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
-                        <div className="flex items-start justify-between mb-4">
-                            <div>
-                                <h3 className="text-xl font-bold text-gray-900">שליחת הודעת מערכת בוואטסאפ</h3>
-                                <p className="text-sm text-gray-600">
-                                    אל: {assigneeWhatsappModal.assigneeName || assigneeWhatsappModal.assigneeEmail || "משתמש"} • {assigneeWhatsappModal.taskTitle}
-                                </p>
-                            </div>
-                            <button onClick={closeAssigneeWhatsappModal} className="text-gray-500 hover:text-gray-700">
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <div className="space-y-3">
-                            <div>
-                                <label className="text-sm font-medium text-gray-800 mb-1 block">טלפון יעד</label>
-                                <input
-                                    type="tel"
-                                    value={assigneeWhatsappModal.phone}
-                                    onChange={(e) => setAssigneeWhatsappModal(prev => prev ? { ...prev, phone: e.target.value } : prev)}
-                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
-                                    placeholder="לדוגמה: 0501234567"
-                                />
-                                {assigneeWhatsappModal.loadingPhone && (
-                                    <p className="text-xs text-gray-500 mt-1">מאחזר מספר טלפון מהפרופיל...</p>
-                                )}
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-gray-800 mb-1 block">תוכן הודעה</label>
-                                <textarea
-                                    value={assigneeWhatsappModal.message}
-                                    onChange={(e) => setAssigneeWhatsappModal(prev => prev ? { ...prev, message: e.target.value } : prev)}
-                                    rows={4}
-                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
-                                />
-                            </div>
-                            {assigneeWhatsappModal.error && (
-                                <div className="text-sm text-red-600">{assigneeWhatsappModal.error}</div>
-                            )}
-                            <div className="flex justify-end gap-2">
-                                <button
-                                    onClick={closeAssigneeWhatsappModal}
-                                    className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-                                >
-                                    ביטול
-                                </button>
-                                <button
-                                    onClick={handleSendAssigneeWhatsapp}
-                                    disabled={assigneeWhatsappModal.sending}
-                                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60"
-                                >
-                                    {assigneeWhatsappModal.sending ? "שולח..." : "שלח בוואטסאפ"}
-                                </button>
+                                    ) : (
+                                        <div className="rounded-2xl border border-dashed border-white/30 bg-white/10 p-3 text-sm text-white/75">
+                                            לא הוגדר איש קשר לאירוע.
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAdvancedActions(!showAdvancedActions)}
+                                        className="flex w-full items-center justify-between rounded-xl px-2 py-1 text-sm font-semibold hover:bg-slate-50"
+                                    >
+                                        <div className="text-right">
+                                            <span>פעולות משניות והגדרות</span>
+                                            <p className="mt-1 text-xs font-normal text-slate-500">עריכה, שיתוף, הרשמה, יומן, פוסט, שליטה ופעולות בעלים.</p>
+                                        </div>
+                                        <ChevronDown size={18} className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`} />
+                                    </button>
+                                    {showAdvancedActions && (
+                                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                            <button onClick={copyInviteLink} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copied ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                                                {copied ? <Check size={16} /> : <Share2 size={16} />}
+                                                {copied ? "קישור הועתק" : "שיתוף צוות"}
+                                            </button>
+                                            <button onClick={handleAddEventToCalendar} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                                <Calendar size={16} />
+                                                יומן והזמנות
+                                            </button>
+                                            <button onClick={() => setIsEditEventOpen(true)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                                <Edit2 size={16} />
+                                                עריכת פרטי אירוע
+                                            </button>
+                                            <button onClick={() => router.push(`/events/${id}/registrants`)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                                <Users size={16} />
+                                                נרשמים
+                                            </button>
+                                            <button
+                                                onClick={copyRegisterLink}
+                                                className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copiedRegister ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+                                            >
+                                                {copiedRegister ? <Check size={16} /> : <List size={16} />}
+                                                {copiedRegister ? "קישור הועתק" : "קישור הרשמה"}
+                                            </button>
+                                            <button onClick={handleOpenPostModal} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                                <Sparkles size={16} />
+                                                מלל לפוסט
+                                            </button>
+                                            <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${canManageTeam ? "border-slate-200 text-slate-700 hover:bg-slate-50" : "border-slate-200 text-slate-400 cursor-not-allowed"}`}>
+                                                <PauseCircle size={16} />
+                                                מרכז בקרה
+                                            </button>
+                                            {isOwner && (
+                                                <button
+                                                    onClick={confirmDeleteEvent}
+                                                    className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 flex items-center justify-center gap-2"
+                                                >
+                                                    <Trash2 size={16} />
+                                                    מחק אירוע
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
-
-            {showControlCenter && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 space-y-5">
-                        <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-full bg-indigo-50 text-indigo-700">
-                                    <PauseCircle size={22} />
-                                </div>
-                                <div>
-                                    <h3 className="text-lg font-bold">מרכז בקרה לאירוע</h3>
-                                    <p className="text-sm text-gray-600">הגדר מצבי השהיה והפעלה לאירוע.</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setShowControlCenter(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="space-y-3">
-                            <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
-                                <div>
-                                    <p className="text-sm font-semibold text-gray-900">הפסקת שיתוף המשימות עם מתנדבים</p>
-                                    <p className="text-xs text-gray-600">
-                                        מסתיר מהמתנדבים את המשימות הפתוחות של האירוע באזור האישי שלהם עד לחידוש השיתוף.
-                                    </p>
-                                </div>
-                                <label className="inline-flex items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        checked={volunteerSharePaused}
-                                        onChange={(e) => setVolunteerSharePaused(e.target.checked)}
-                                    />
-                                    <span className="text-sm font-semibold text-gray-800">{volunteerSharePaused ? "מושבת" : "פעיל"}</span>
-                                </label>
-                            </div>
-                            <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
-                                <div>
-                                    <p className="text-sm font-semibold text-gray-900">השהיית משימות צוות</p>
-                                    <p className="text-xs text-gray-600">
-                                        משימות צוות יישארו בדף ניהול האירוע, אך לא יופיעו ברשימת המשימות האישיות של חברי הצוות.
-                                    </p>
-                                </div>
-                                <label className="inline-flex items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        checked={teamSharePaused}
-                                        onChange={(e) => setTeamSharePaused(e.target.checked)}
-                                    />
-                                    <span className="text-sm font-semibold text-gray-800">{teamSharePaused ? "מושבת" : "פעיל"}</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end gap-2 pt-2">
+                    <div className="grid grid-cols-3 gap-2 border-t border-[rgba(74,26,44,0.08)] bg-white/70 px-3 py-4 sm:gap-3 sm:px-6">
+                        {summaryCards.map((card) => (
                             <button
+                                key={card.label}
                                 type="button"
-                                onClick={() => setShowControlCenter(false)}
-                                className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
+                                onClick={() => handleEventSummaryCardClick(card.label)}
+                                className={`rounded-2xl border px-4 py-3 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.tone}`}
                             >
-                                סגור
+                                <p className="text-xs font-semibold opacity-80">{card.label}</p>
+                                <p className="mt-1 text-2xl font-black">{card.value}</p>
                             </button>
-                            <button
-                                type="button"
-                                onClick={handleSaveControlCenter}
-                                disabled={controlSaving || !canManageTeam}
-                                className={`px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2 ${controlSaving ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
-                            >
-                                {controlSaving ? "שומר..." : "שמור הגדרות"}
-                            </button>
-                        </div>
+                        ))}
                     </div>
-                </div>
-            )}
+                </header>
 
-            {/* Event File Upload Modal */}
-            {showEventFileModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold">העלה קובץ לאירוע</h3>
-                            <button onClick={() => { setShowEventFileModal(false); setEventFile(null); setEventFileName(""); }} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <form onSubmit={handleUploadEventFile} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">בחר קובץ</label>
-                                <input
-                                    ref={eventFileInputRef}
-                                    type="file"
-                                    required
-                                    accept="*/*"
-                                    onChange={(e) => {
-                                        const file = e.target.files?.[0] || null;
-                                        setEventFile(file);
-                                        if (file) setEventFileName(file.name);
-                                    }}
-                                    className="hidden"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => eventFileInputRef.current?.click()}
-                                    className="w-full border border-indigo-200 text-indigo-700 py-2 rounded-lg hover:bg-indigo-50 transition text-sm font-semibold flex items-center justify-center gap-2"
-                                >
-                                    <Paperclip size={16} />
-                                    {eventFile ? "בחר מחדש" : "בחר קובץ מהמחשב"}
-                                </button>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {eventFile ? `נבחר: ${eventFile.name}` : "טרם נבחר קובץ"}
-                                </p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">שם הקובץ</label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={eventFileName}
-                                    onChange={(e) => setEventFileName(e.target.value)}
-                                    className="w-full p-2 border rounded-lg text-sm"
-                                    placeholder="לדוגמה: חוזה ספק - 12.6"
-                                />
-                            </div>
-                            <div className="flex justify-end gap-2 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => { setShowEventFileModal(false); setEventFile(null); setEventFileName(""); }}
-                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                                >
-                                    ביטול
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={eventFileUploading}
-                                    className={`px-4 py-2 rounded-lg text-sm font-medium text-white ${eventFileUploading ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
-                                >
-                                    {eventFileUploading ? "מעלה..." : "העלה ושמור"}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
 
-            {/* Volunteer Invitation Modal */}
-            {showVolunteerModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold flex items-center gap-2">
-                                <Handshake size={20} className="text-indigo-600" />
-                                הזמנת מתנדבים לאירוע
-                            </h3>
-                            <button onClick={() => setShowVolunteerModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="space-y-4">
-                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                                <h4 className="font-semibold text-indigo-900 mb-2">איך זה עובד?</h4>
-                                <ul className="text-sm text-indigo-800 space-y-2 list-disc list-inside">
-                                    <li>כעת מתנדבים יוכלו להתנדב לאירוע ולעזור בשמימות</li>
-                                    <li>מתנדבים יוכלו לבחור לעצמם משימות ולתייג את עצמם</li>
-                                    <li>מתנדבים שלא רשומים למערכת יוכלו להירשם דרך קישור מיוחד</li>
-                                    <li>ניתן להגביל את כמות המתנדבים בהתאם לצורך</li>
-                                </ul>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    כמה מתנדבים צריך? (אופציונלי - השאר ריק ללא הגבלה)
-                                </label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    value={volunteerCountInput}
-                                    onChange={(e) => setVolunteerCountInput(e.target.value)}
-                                    className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                    placeholder="מספר המתנדבים הדרוש"
-                                />
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {volunteerCountInput && parseInt(volunteerCountInput, 10) > 0
-                                        ? `הגבלה: ${volunteerCountInput} מתנדבים מקסימום`
-                                        : "ללא הגבלה על כמות המתנדבים"}
-                                </p>
-                            </div>
-                            <div className="pt-4 border-t">
-                                <button
-                                    type="button"
-                                    onClick={updateVolunteerCount}
-                                    className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 mb-3"
-                                >
-                                    עדכן כמות מתנדבים
-                                </button>
-                                <div className="bg-gray-50 rounded-lg p-4">
-                                    <p className="text-sm font-medium text-gray-700 mb-2">קישור הרשמה למתנדבים:</p>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="text"
-                                            readOnly
-                                            value={baseUrl ? `${baseUrl}/events/${id}/volunteers/register` : ""}
-                                            className="flex-1 rounded-lg border-gray-300 border p-2 text-sm bg-white"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={copyVolunteerLink}
-                                            className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${copiedVolunteersLink ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                {(event.infoBlocks?.length || event.customSections?.length) && (
+                    <div className="mb-6 rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 p-5 shadow-sm backdrop-blur-sm sm:p-6">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <FileText size={18} className="text-indigo-600" />
+                            מידע נוסף על האירוע
+                        </h3>
+                        {event.infoBlocks && event.infoBlocks.length > 0 && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                {event.infoBlocks.map((block) => {
+                                    const isEditing = editingInfoBlockId === block.id;
+                                    return (
+                                        <div
+                                            key={block.id}
+                                            className={`p-4 border border-gray-100 rounded-lg bg-gray-50 relative ${!isEditing ? "cursor-pointer group" : ""}`}
+                                            onClick={() => !isEditing && handleStartInfoBlockEdit(block)}
                                         >
-                                            {copiedVolunteersLink ? (
+                                            {!isEditing ? (
                                                 <>
-                                                    <Check size={16} />
-                                                    הועתק!
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                            <p className="text-xs font-semibold text-gray-500 mb-1">{block.label}</p>
+                                                            <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{block.value}</p>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDeleteInfoBlock(block.id);
+                                                            }}
+                                                            className="text-gray-400 hover:text-red-500 transition"
+                                                            title="מחק סעיף"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </div>
+                                                    <p className="text-[11px] text-indigo-600 mt-2 opacity-0 group-hover:opacity-100 transition">
+                                                        לחצו כדי לערוך את הסעיף
+                                                    </p>
                                                 </>
                                             ) : (
-                                                <>
-                                                    <Copy size={16} />
-                                                    העתק קישור
-                                                </>
+                                                <div className="space-y-2">
+                                                    <div className="flex items-start justify-between">
+                                                        <p className="text-xs font-semibold text-gray-500">עריכת סעיף</p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteInfoBlock(block.id)}
+                                                            className="text-gray-400 hover:text-red-500 transition"
+                                                            title="מחק סעיף"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </div>
+                                                    <input
+                                                        type="text"
+                                                        value={infoBlockDraft?.label || ""}
+                                                        onChange={(e) => handleInfoBlockDraftChange("label", e.target.value)}
+                                                        className="w-full p-2 border rounded-lg text-sm"
+                                                        placeholder="כותרת הסעיף"
+                                                        autoFocus
+                                                    />
+                                                    <textarea
+                                                        rows={2}
+                                                        value={infoBlockDraft?.value || ""}
+                                                        onChange={(e) => handleInfoBlockDraftChange("value", e.target.value)}
+                                                        className="w-full p-2 border rounded-lg text-sm"
+                                                        placeholder="תוכן הסעיף"
+                                                    />
+                                                    <div className="flex justify-end gap-2 pt-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleCancelInfoBlockEdit}
+                                                            className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                                                        >
+                                                            ביטול
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleSaveInfoBlock}
+                                                            className="px-3 py-1 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                                        >
+                                                            שמור
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             )}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Status Edit Modal */}
-            {showSpecialModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-xl w-full p-6 space-y-4">
-                        <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                                <Sparkles size={20} className="text-indigo-600" />
-                                <h3 className="text-lg font-bold">משימות מיוחדות</h3>
-                            </div>
-                            <button onClick={() => setShowSpecialModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800 flex flex-col gap-2">
-                                <div>
-                                    <p className="font-semibold text-gray-900 mb-1">שיווק והפצה בקבוצות</p>
-                                    <p>יוצר משימת שיווק עם המלל והפלייר הרשמי, לפרסום ב-5 קבוצות וואטסאפ (30+ אנשים) והעלאת צילומי מסך כהוכחה.</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={handleCreateSpecialMarketingTask}
-                                    disabled={creatingSpecialTask}
-                                    className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
-                                >
-                                    {creatingSpecialTask ? "יוצר..." : "הוסף משימת שיווק"}
-                                </button>
-                            </div>
-                            <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm text-amber-800 flex flex-col gap-2">
-                                <div>
-                                    <p className="font-semibold text-gray-900 mb-1">להעלות סטורי ולתייג</p>
-                                    <p>יוצר משימת סטורי למתנדבים עם הפלייר הרשמי, תיוגי אינסטגרם מהתוכן והמדיה, והנחיה להוסיף מוזיקה ולהעלות צילום מסך.</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={handleCreateSpecialStoryTask}
-                                    disabled={creatingSpecialTask}
-                                    className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-amber-500 hover:bg-amber-600"}`}
-                                >
-                                    {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
-                                </button>
-                            </div>
-                        </div>
-                        <div className="border-t pt-4">
-                            <h4 className="text-sm font-semibold text-gray-800 mb-2">משימות מיוחדות קיימות</h4>
-                            {specialTasks.length === 0 ? (
-                                <p className="text-xs text-gray-500">אין משימות מיוחדות קיימות כרגע.</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {specialTasks.map((task) => (
-                                        <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => router.push(`/tasks/${task.id}?eventId=${id}`)}
-                                                className="min-w-0 flex-1 text-right"
-                                            >
-                                                <p className="text-sm font-semibold text-gray-900 truncate hover:underline">{task.title}</p>
-                                                <p className="text-xs text-gray-500">
-                                                    סטטוס: {task.status === "DONE" ? "בוצע" : task.status === "IN_PROGRESS" ? "בתהליך" : task.status === "STUCK" ? "תקוע" : "פתוח"}
-                                                </p>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => confirmDeleteTask(task.id)}
-                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
-                                            >
-                                                מחק
-                                            </button>
                                         </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex justify-end">
-                            <button
-                                type="button"
-                                onClick={() => setShowSpecialModal(false)}
-                                className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
-                            >
-                                סגור
-                            </button>
-                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {event.customSections && event.customSections.length > 0 && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {event.customSections.map((section, idx) => (
+                                    <div key={idx} className="p-4 border border-gray-100 rounded-lg bg-gray-50">
+                                        <h4 className="text-sm font-semibold text-gray-800 mb-2">{section.title || `סעיף ${idx + 1}`}</h4>
+                                        <p className="text-sm text-gray-600 whitespace-pre-wrap">{section.content}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* Status Edit Modal */}
-            {showContentModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 space-y-4">
-                        <div className="flex justify-between items-center">
-                            <h3 className="text-lg font-bold">תוכן ומדיה לאירוע</h3>
-                            <button onClick={() => setShowContentModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="space-y-3">
-                            <div className="p-3 rounded-lg border border-indigo-100 bg-indigo-50">
-                                <p className="text-sm font-semibold text-indigo-900 mb-1">שיתוף טופס למלל ותמונה רשמית</p>
-                                <p className="text-xs text-indigo-800 mb-2">
-                                    שלח לכל אחד קישור לטופס שמאפשר להזין מלל רשמי, תיוגים ולצרף תמונה. המידע יישמר אוטומטית באירוע.
-                                </p>
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                    <input
-                                        type="text"
-                                        readOnly
-                                        value={baseUrl ? `${baseUrl}/events/${id}/content-form` : ""}
-                                        className="flex-1 rounded-lg border-gray-300 border p-2 text-xs bg-white"
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)]">
+                    {/* Recurring Tasks Modal */}
+                    {showSuggestions && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-xl shadow-lg max-w-3xl w-full p-6 animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] overflow-y-auto">
+                                <div className="flex justify-between items-center mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
+                                            <Repeat size={22} />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-xl font-bold text-gray-900">משימות חוזרות</h3>
+                                            <p className="text-sm text-gray-500">כל המשימות הקבועות מהמאגר</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setShowSuggestions(false)} className="text-gray-400 hover:text-gray-600">
+                                        <X size={22} />
+                                    </button>
+                                </div>
+
+                                <div className="mb-4 p-3 border border-indigo-100 rounded-lg bg-indigo-50">
+                                    <h4 className="text-sm font-semibold text-indigo-800 mb-2">{libraryForm.id ? "עריכת משימה קבועה" : "הוסף משימה קבועה"}</h4>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                                        <input
+                                            type="text"
+                                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                                            placeholder="שם המשימה"
+                                            value={libraryForm.title}
+                                            onChange={(e) => setLibraryForm(prev => ({ ...prev, title: e.target.value }))}
+                                        />
+                                        <select
+                                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                                            value={libraryForm.priority}
+                                            onChange={(e) => setLibraryForm(prev => ({ ...prev, priority: e.target.value as any }))}
+                                        >
+                                            <option value="NORMAL">רגיל</option>
+                                            <option value="HIGH">גבוה</option>
+                                            <option value="CRITICAL">דחוף</option>
+                                        </select>
+                                    </div>
+                                    <textarea
+                                        className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+                                        rows={2}
+                                        placeholder="תיאור קצר"
+                                        value={libraryForm.description}
+                                        onChange={(e) => setLibraryForm(prev => ({ ...prev, description: e.target.value }))}
                                     />
                                     <div className="flex gap-2">
                                         <button
                                             type="button"
-                                            onClick={copyContentFormLink}
-                                            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 ${copiedContentFormLink ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                            onClick={handleSaveLibraryTask}
+                                            disabled={savingLibraryTask}
+                                            className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
                                         >
-                                            <Copy size={14} />
-                                            {copiedContentFormLink ? "הועתק" : "העתק קישור"}
+                                            {savingLibraryTask ? "שומר..." : libraryForm.id ? "שמור במאגר" : "הוסף למאגר"}
                                         </button>
-                                        <a
-                                            href={`/events/${id}/content-form`}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="px-3 py-2 rounded-lg text-xs font-semibold border border-indigo-200 text-indigo-700 hover:bg-indigo-50 flex items-center gap-2"
+                                        {libraryForm.id && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleLibraryEditStart()}
+                                                className="px-3 py-1.5 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100"
+                                            >
+                                                בטל עריכה
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    {loadingLibraryTasks ? (
+                                        <div className="text-center text-gray-500 py-6">טוען משימות...</div>
+                                    ) : libraryTasks.length === 0 ? (
+                                        <div className="text-center text-gray-500 py-6">אין משימות במאגר עדיין.</div>
+                                    ) : (
+                                        libraryTasks.map((t) => {
+                                            const priorityLabel = t.priority === "CRITICAL" ? "דחוף" : t.priority === "HIGH" ? "גבוה" : "רגיל";
+                                            const priorityColor = t.priority === "CRITICAL" ? "bg-red-100 text-red-700" : t.priority === "HIGH" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-700";
+                                            return (
+                                                <div key={t.id} className="p-4 border border-gray-100 rounded-lg bg-white flex flex-col gap-2">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <h4 className="font-semibold text-gray-900">{t.title}</h4>
+                                                                <span className={`text-xs px-2 py-0.5 rounded-full ${priorityColor}`}>{priorityLabel}</span>
+                                                            </div>
+                                                            {t.description ? (
+                                                                <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{t.description}</p>
+                                                            ) : null}
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => handleAddLibraryTaskToEvent(t)}
+                                                                className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                            >
+                                                                הוסף לאירוע
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleLibraryEditStart(t)}
+                                                                className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                            >
+                                                                ערוך
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDeleteLibraryTask(t)}
+                                                                disabled={deletingLibraryTaskId === t.id}
+                                                                className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                                                            >
+                                                                {deletingLibraryTaskId === t.id ? "מוחק..." : "מחק"}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Main Content - Tasks */}
+                    <div className="space-y-6">
+                        <div ref={tasksOverviewRef} className="rounded-[28px] border border-[rgba(74,26,44,0.10)] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)] overflow-hidden">
+                            <div className="bg-gradient-to-l from-[rgba(255,184,76,0.22)] via-white to-[rgba(74,26,44,0.06)] p-4 sm:p-5">
+                                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                    <div className="space-y-3 text-right">
+                                        <div className="flex flex-wrap items-center justify-end gap-2">
+                                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">{openTasksCount} פתוחות עכשיו</span>
+                                            {overdueTasksCount > 0 && (
+                                                <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">{overdueTasksCount} באיחור</span>
+                                            )}
+                                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{doneTasksCount} הושלמו</span>
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>משימות לביצוע</h2>
+                                            <p className="mt-1 text-sm text-gray-600">חלוקה ברורה יותר בין סיכום, רשימות ופעולות — כדי לעבוד מהר יותר גם במובייל.</p>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:w-[420px]">
+                                        <button
+                                            onClick={() => {
+                                                setShowSuggestions(true);
+                                                handleLibraryEditStart();
+                                            }}
+                                            className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 bg-white px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5"
+                                            style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
                                         >
-                                            פתח
-                                        </a>
+                                            <Repeat size={16} />
+                                            משימות חוזרות
+                                        </button>
+                                        <button
+                                            onClick={() => setShowSpecialModal(true)}
+                                            className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 bg-white px-3 py-2 text-sm font-semibold transition hover:-translate-y-0.5"
+                                            style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
+                                        >
+                                            <Sparkles size={16} />
+                                            משימות מיוחדות
+                                        </button>
+                                        <button
+                                            onClick={openTaskComposer}
+                                            className="patifon-gradient flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:opacity-90"
+                                        >
+                                            <Plus size={18} />
+                                            משימה חדשה
+                                        </button>
                                     </div>
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">מלל רשמי לפוסט</label>
-                                <textarea
-                                    rows={5}
-                                    className="w-full border rounded-lg p-3 text-sm"
-                                    value={officialPostText}
-                                    onChange={(e) => setOfficialPostText(e.target.value)}
-                                    placeholder="הקלד את הטקסט הרשמי לפרסום"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="block text-sm font-medium text-gray-700">תיוגים לאינסטגרם (שם משתמש אחד בכל פעם, אנטר להוספה)</label>
-                                <div className="flex items-center gap-2">
+                        </div>
+
+                        {showNewTask && (
+                            <div className="rounded-2xl border border-indigo-100 bg-white/95 p-4 shadow-sm animate-in fade-in slide-in-from-top-2 sm:p-5">
+                                <h3 className="font-medium mb-3">הוספת משימה חדשה</h3>
+                                <form onSubmit={handleAddTask} className="space-y-3">
                                     <input
                                         type="text"
-                                        className="flex-1 border rounded-lg p-2 text-sm"
-                                        value={instaTagInput}
-                                        placeholder="לדוגמה: user_name"
-                                        onChange={(e) => setInstaTagInput(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter") {
-                                                e.preventDefault();
-                                                addInstagramTag(instaTagInput);
-                                            }
-                                        }}
-                                        onBlur={() => addInstagramTag(instaTagInput)}
+                                        placeholder="כותרת המשימה"
+                                        required
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        value={newTask.title}
+                                        onChange={e => setNewTask({ ...newTask, title: e.target.value })}
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={() => addInstagramTag(instaTagInput)}
-                                        className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
-                                        style={{ background: 'var(--patifon-orange)' }}
-                                    >
-                                        הוסף
-                                    </button>
-                                </div>
-                                {officialInstaTagsList.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                        {officialInstaTagsList.map(tag => (
-                                            <span key={tag} className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1 text-xs text-indigo-800">
-                                                @{tag}
-                                                <button type="button" onClick={() => removeInstagramTag(tag)} className="text-indigo-500 hover:text-indigo-700">×</button>
-                                            </span>
-                                        ))}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <p className="text-xs font-semibold text-gray-600">תיוג/הקצאה</p>
+                                                <span className="text-xs text-gray-500">{newTask.assignees.length} נבחרו</span>
+                                            </div>
+                                            <input
+                                                type="text"
+                                                value={newTaskSearch}
+                                                onChange={(e) => setNewTaskSearch(e.target.value)}
+                                                placeholder="חיפוש לפי שם"
+                                                className="w-full p-2 border rounded-lg text-xs mb-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            />
+                                            <div className="flex flex-wrap gap-2">
+                                                {event.team
+                                                    ?.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase()))
+                                                    .map((member, idx) => {
+                                                        const memberKey = getAssigneeKey({ name: member.name, userId: member.userId, email: member.email });
+                                                        const checked = newTask.assignees.some(a => getAssigneeKey(a) === memberKey);
+                                                        return (
+                                                            <label
+                                                                key={idx}
+                                                                className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs border transition cursor-pointer select-none ${checked ? "bg-indigo-600 text-white border-indigo-600" : "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                                                style={{ minWidth: '120px' }}
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="accent-white w-4 h-4"
+                                                                    checked={checked}
+                                                                    onChange={() => handleToggleAssigneeSelection({ name: member.name, userId: member.userId, email: member.email }, "new")}
+                                                                />
+                                                                {member.name}
+                                                            </label>
+                                                        );
+                                                    })}
+                                                {((!event.team || event.team.length === 0) || (event.team && event.team.filter(member => (member.name || "").toLowerCase().includes(newTaskSearch.trim().toLowerCase())).length === 0)) && (
+                                                    <span className="text-xs text-gray-500">אין חברי צוות מוגדרים</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold text-gray-600">מועד המשימה</p>
+                                            <div className="flex flex-wrap gap-3 text-xs">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        className="accent-indigo-600"
+                                                        checked={newTaskDueMode === "event_day"}
+                                                        onChange={() => syncNewTaskDueDate("event_day", "0", newTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                                    />
+                                                    ביום האירוע
+                                                </label>
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        className="accent-indigo-600"
+                                                        checked={newTaskDueMode === "offset"}
+                                                        onChange={() => syncNewTaskDueDate("offset", newTaskOffsetDays, newTaskTime || extractTimeString(getEventStartDate() || new Date()))}
+                                                    />
+                                                    ימים ביחס לאירוע
+                                                </label>
+                                            </div>
+                                            {newTaskDueMode === "offset" && (
+                                                <div className="flex items-center gap-2 text-xs">
+                                                    <span>ימים מהאירוע:</span>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        className="w-24 p-2 border rounded-lg text-sm"
+                                                        value={newTaskOffsetDays}
+                                                        onChange={(e) => {
+                                                            const raw = e.target.value;
+                                                            setNewTaskOffsetDays(raw);
+                                                            const parsed = parseOffset(raw);
+                                                            if (parsed === null) return;
+                                                            syncNewTaskDueDate("offset", raw, newTaskTime || extractTimeString(getEventStartDate() || new Date()));
+                                                        }}
+                                                    />
+                                                    <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                                </div>
+                                            )}
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <span>שעה:</span>
+                                                <input
+                                                    type="time"
+                                                    className="p-2 border rounded-lg text-sm"
+                                                    value={newTaskTime}
+                                                    onChange={(e) => syncNewTaskDueDate(newTaskDueMode, newTaskOffsetDays, e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+                                                />
+                                            </div>
+                                            <div className="text-xs text-gray-600">
+                                                {newTask.dueDate
+                                                    ? `המשימה מתוזמנת ל-${new Date(newTask.dueDate).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}`
+                                                    : "טרם נבחר מועד למשימה"}
+                                                {!getEventStartDate() && (
+                                                    <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
-                                )}
-                            </div>
-                            <div className="space-y-2">
-                                <label className="block text-sm font-medium text-gray-700">פלייר רשמי</label>
-                                {officialFlyerUrl && (
-                                    <div className="flex items-center gap-2 text-sm">
-                                        <a href={officialFlyerUrl} target="_blank" className="text-indigo-600 underline" rel="noreferrer">פתח פלייר נוכחי</a>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">תיאור המשימה</label>
+                                        <textarea
+                                            rows={3}
+                                            className="w-full p-2 border rounded-lg text-sm"
+                                            placeholder="מה צריך לעשות? ציינו פרטים חשובים, קישורים או בקשות מיוחדות."
+                                            value={newTask.description}
+                                            onChange={e => setNewTask({ ...newTask, description: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">כמה פעמים צריך לבצע?</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                className="w-full p-2 border rounded-lg text-sm"
+                                                value={newTask.requiredCompletions ?? 1}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value, 10);
+                                                    setNewTask(prev => ({ ...prev, requiredCompletions: Number.isFinite(val) && val > 0 ? val : 1 }));
+                                                }}
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">ברירת מחדל: פעם אחת. ניתן להגדיר מספר חזרות.</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <p className="text-sm font-medium text-gray-700 mb-1">דחיפות</p>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {[
+                                                { key: "NORMAL", label: "רגיל", color: "border-gray-200 text-gray-700", bg: "bg-gray-50" },
+                                                { key: "HIGH", label: "גבוה", color: "border-amber-300 text-amber-800", bg: "bg-amber-50" },
+                                                { key: "CRITICAL", label: "דחוף", color: "border-red-300 text-red-800", bg: "bg-red-50" },
+                                            ].map(opt => (
+                                                <button
+                                                    key={opt.key}
+                                                    type="button"
+                                                    onClick={() => setNewTask({ ...newTask, priority: opt.key })}
+                                                    className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border-2 text-xs font-semibold hover:opacity-90 transition ${newTask.priority === opt.key ? `${opt.bg} ${opt.color}` : "border-gray-200 text-gray-600 bg-white"}`}
+                                                >
+                                                    <span>{opt.label}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                                            <Paperclip size={16} />
+                                            צרף קבצים למשימה (אופציונלי)
+                                        </label>
+                                        <input
+                                            id="new-task-files"
+                                            ref={newTaskFileInputRef}
+                                            type="file"
+                                            multiple
+                                            accept="*/*"
+                                            className="sr-only"
+                                            onChange={(e) => {
+                                                const files = e.target.files ? Array.from(e.target.files) : [];
+                                                setNewTaskFiles(files);
+                                            }}
+                                        />
+                                        <label
+                                            htmlFor="new-task-files"
+                                            className="w-full border-2 border-indigo-200 text-indigo-700 py-2 rounded-lg hover:bg-indigo-50 transition text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer"
+                                        >
+                                            <Paperclip size={16} />
+                                            {newTaskFiles.length ? "בחר/החלף קבצים" : "בחר קבצים להעלאה"}
+                                        </label>
+                                        <p className="text-xs text-gray-500">
+                                            {newTaskFiles.length > 0 ? `${newTaskFiles.length} קבצים יועלו אחרי שמירה` : "ניתן לצרף מסמכים, תמונות או חוזים"}
+                                        </p>
+                                    </div>
+                                    {event.needsVolunteers && (
+                                        <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                            <input
+                                                type="checkbox"
+                                                id="newTaskIsVolunteerTask"
+                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                checked={newTask.isVolunteerTask || false}
+                                                onChange={e => setNewTask({ ...newTask, isVolunteerTask: e.target.checked })}
+                                            />
+                                            <label htmlFor="newTaskIsVolunteerTask" className="text-sm font-medium text-gray-700 flex items-center gap-2 cursor-pointer">
+                                                <Handshake size={16} className="text-indigo-600" />
+                                                משימה למתנדב
+                                            </label>
+                                            <p className="text-xs text-gray-500">משימות שסומנו כ"משימה למתנדב" יופיעו בדף ההרשמה למתנדבים</p>
+                                            {newTask.isVolunteerTask && (
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-sm font-medium text-gray-700">שעות משוערות</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.5"
+                                                        className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
+                                                        value={newTask.volunteerHours ?? ""}
+                                                        onChange={(e) => setNewTask({ ...newTask, volunteerHours: e.target.value ? parseFloat(e.target.value) : null })}
+                                                        placeholder="לדוגמה 2"
+                                                    />
+                                                    <span className="text-xs text-gray-500">שעות עבודה</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+                                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 w-full sm:w-auto">
+                                            <Repeat size={16} className="text-indigo-600" />
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-semibold text-indigo-800">סמן כמשימה שחוזרת על עצמה</span>
+                                                <span className="text-[11px] text-indigo-700">תתווסף למאגר המשימות החשובות</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSaveNewTaskToLibrary(prev => !prev)}
+                                                className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${saveNewTaskToLibrary ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200"}`}
+                                            >
+                                                {saveNewTaskToLibrary ? "נשמר" : "הוסף"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2">
                                         <button
                                             type="button"
-                                            onClick={async () => {
-                                                if (!db) return;
-                                                const confirmDelete = window.confirm("למחוק את הפלייר הנוכחי?");
-                                                if (!confirmDelete) return;
-                                                try {
-                                                    await updateDoc(doc(db, "events", id), { officialFlyerUrl: "" });
-                                                    setOfficialFlyerUrl("");
-                                                    setEvent(prev => prev ? { ...prev, officialFlyerUrl: "" } : prev);
-                                                } catch (err) {
-                                                    console.error("שגיאה במחיקת הפלייר", err);
-                                                    alert("לא הצלחנו למחוק את הפלייר");
-                                                }
-                                            }}
-                                            className="px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                                            onClick={() => { setShowNewTask(false); setSaveNewTaskToLibrary(false); }}
+                                            className="px-3 py-1 text-gray-500 hover:bg-gray-100 rounded-lg text-sm"
                                         >
-                                            מחק
+                                            ביטול
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
+                                        >
+                                            שמור משימה
                                         </button>
                                     </div>
-                                )}
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <input
-                                        ref={contentFlyerInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => setOfficialFlyerFile(e.target.files?.[0] || null)}
-                                        className="hidden"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => contentFlyerInputRef.current?.click()}
-                                        className="px-3 py-2 rounded-lg text-sm font-semibold border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50"
-                                    >
-                                        בחר פלייר מהמחשב
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleUploadOfficialFlyer}
-                                        disabled={officialFlyerUploading}
-                                        className={`px-3 py-2 rounded-lg text-sm font-semibold text-white ${officialFlyerUploading ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
-                                    >
-                                        {officialFlyerUploading ? "מעלה..." : "העלה פלייר"}
-                                    </button>
-                                </div>
-                                {officialFlyerFile && <p className="text-xs text-gray-600">נבחר: {officialFlyerFile.name}</p>}
-                                <button
-                                    type="button"
-                                    onClick={() => setShowFlyerPicker(prev => !prev)}
-                                    className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
-                                >
-                                    בחר פלייר ממאגר האירוע
-                                </button>
-                                {showFlyerPicker && (
-                                    <div className="mt-3 border border-gray-200 rounded-lg p-3 max-h-64 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                        {eventFiles.length === 0 ? (
-                                            <p className="text-sm text-gray-500">אין קבצים במאגר האירוע.</p>
-                                        ) : (
-                                            eventFiles.map((file) => (
+                                </form>
+                            </div>
+                        )}
+
+                        <div className="space-y-5">
+                            {tasks.length === 0 ? (
+                                <div className="rounded-[28px] border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-gray-500 shadow-sm">אין משימות עדיין. צור את המשימה הראשונה כדי להתחיל לעבוד מסודר.</div>
+                            ) : (
+                                <>
+                                    <div ref={teamTasksRef} className="rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)] overflow-hidden">
+                                        <div className="border-b border-slate-200 bg-gradient-to-l from-slate-100 to-white px-4 py-4 sm:px-5">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="text-right">
+                                                    <h3 className="text-lg font-black text-slate-900">משימות צוות</h3>
+                                                    <p className="mt-1 text-sm text-slate-600">עבודה שוטפת של הצוות, עם דגש על עדכונים, דד ליינים ופעולות מיידיות.</p>
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{teamTasks.length} משימות</span>
+                                                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{teamTasks.filter((task) => task.status !== 'DONE').length} פתוחות</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-3 bg-slate-50/60 p-4 sm:p-5">
+                                            {teamTasks.map((task) => {
+                                                const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                                                return (
+                                                    <TaskCard
+                                                        key={task.id}
+                                                        id={task.id}
+                                                        title={task.title}
+                                                        description={task.description}
+                                                        currentStatus={task.currentStatus}
+                                                        nextStep={task.nextStep}
+                                                        assignee={task.assignee || "לא משויך"}
+                                                        assignees={task.assignees}
+                                                        status={task.status}
+                                                        dueDate={task.dueDate}
+                                                        priority={task.priority}
+                                                        eventId={id}
+                                                        eventTitle={event?.title}
+                                                        scope={task.scope}
+                                                        specialType={(task as any).specialType}
+                                                        requiredCompletions={(task as any).requiredCompletions}
+                                                        remainingCompletions={(task as any).remainingCompletions}
+                                                        onUpdateCompletions={() => handleUpdateCompletions(task)}
+                                                        createdByName={task.createdByName}
+                                                        onEdit={() => { startEditingTask(task); }}
+                                                        onDelete={() => confirmDeleteTask(task.id)}
+                                                        onStatusChange={(newStatus) => handleStatusChange(task, newStatus)}
+                                                        onChat={() => setChatTask(task)}
+                                                        hasUnreadMessages={hasUnread}
+                                                        onEditStatus={() => setEditingStatusTask(task)}
+                                                        onEditDate={() => setEditingDateTask(task)}
+                                                        onManageAssignees={() => {
+                                                            setTaggingTask(task);
+                                                            setTagSelection(task.assignees || []);
+                                                        }}
+                                                        onAssigneeClick={(assignee) => handleAssigneeWhatsapp(task, assignee)}
+                                                    />
+                                                );
+                                            })}
+                                            {teamTasks.length === 0 && (
+                                                <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">אין משימות צוות כרגע.</p>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div ref={volunteerTasksRef} className="rounded-[28px] border border-amber-200 bg-white shadow-[0_16px_40px_rgba(245,158,11,0.10)] overflow-hidden">
+                                        <div className="border-b border-amber-200 bg-gradient-to-l from-amber-100/90 to-white px-4 py-4 sm:px-5">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="text-right">
+                                                    <h3 className="text-lg font-black text-amber-950">משימות למתנדבים</h3>
+                                                    <p className="mt-1 text-sm text-amber-900/80">משימות גמישות יותר, עם דגש על הקצאות, כמות ביצועים ושיתוף ברור מול המתנדבים.</p>
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-900">{volunteerTasks.length} משימות</span>
+                                                    <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">{volunteerTasks.filter((task) => task.status !== 'DONE').length} פעילות</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-3 bg-amber-50/70 p-4 sm:p-5">
+                                            {volunteerTasks.map((task) => {
+                                                const hasUnread = task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid;
+                                                return (
+                                                    <TaskCard
+                                                        key={task.id}
+                                                        id={task.id}
+                                                        title={task.title}
+                                                        description={task.description}
+                                                        currentStatus={task.currentStatus}
+                                                        nextStep={task.nextStep}
+                                                        assignee={task.assignee || "לא משויך"}
+                                                        assignees={task.assignees}
+                                                        status={task.status}
+                                                        dueDate={task.dueDate}
+                                                        priority={task.priority}
+                                                        eventId={id}
+                                                        eventTitle={event?.title}
+                                                        scope={task.scope}
+                                                        specialType={(task as any).specialType}
+                                                        requiredCompletions={(task as any).requiredCompletions}
+                                                        remainingCompletions={(task as any).remainingCompletions}
+                                                        onUpdateCompletions={() => handleUpdateCompletions(task)}
+                                                        createdByName={task.createdByName}
+                                                        onEdit={() => { startEditingTask(task); }}
+                                                        onDelete={() => confirmDeleteTask(task.id)}
+                                                        onStatusChange={(newStatus) => handleStatusChange(task, newStatus)}
+                                                        onChat={() => setChatTask(task)}
+                                                        hasUnreadMessages={hasUnread}
+                                                        onEditStatus={() => setEditingStatusTask(task)}
+                                                        onEditDate={() => setEditingDateTask(task)}
+                                                        onManageAssignees={() => {
+                                                            setTaggingTask(task);
+                                                            setTagSelection(task.assignees || []);
+                                                        }}
+                                                        onAssigneeClick={(assignee) => handleAssigneeWhatsapp(task, assignee)}
+                                                    />
+                                                );
+                                            })}
+                                            {volunteerTasks.length === 0 && (
+                                                <p className="rounded-2xl border border-dashed border-amber-300 bg-white px-4 py-6 text-center text-sm text-amber-800">אין משימות למתנדבים כרגע.</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Sidebar - Team, Budget & Files */}
+                    <div className="space-y-6 xl:sticky xl:top-4 self-start">
+                        {/* ... existing budget section ... */}
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Team Section */}
+                            <details ref={teamSectionRef} className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
+                                        <p className="text-xs text-gray-500 mt-1">{event.team?.length || 0} אנשי צוות, בקשות הצטרפות והודעות צוות.</p>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
+                                        <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{event.team?.length || 0}</span>
+                                        <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
+                                    </div>
+                                </summary>
+                                <div className="px-6 pb-6">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <div className="text-sm text-gray-500">ניהול, הוספה, תקשורת ושיוך אנשי צוות.</div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={copyInviteLink}
+                                                className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
+                                                title="העתק קישור להזמנה"
+                                            >
+                                                <Share2 size={18} />
+                                            </button>
+                                            {canManageTeam && (
                                                 <button
-                                                    key={file.id}
-                                                    type="button"
                                                     onClick={() => {
-                                                        if (file.url) {
-                                                            setOfficialFlyerUrl(file.url);
-                                                            setShowFlyerPicker(false);
-                                                        }
+                                                        setShowCollaboratorsPicker(prev => !prev);
+                                                        setShowAddTeam(false);
                                                     }}
-                                                    className="border border-gray-200 rounded-lg overflow-hidden bg-white hover:shadow-md transition text-left"
+                                                    className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-full transition"
+                                                    title="הוסף איש צוות"
                                                 >
-                                                    <div className="h-20 bg-gray-50 flex items-center justify-center">
-                                                        {file.url ? (
-                                                            <img src={file.url} alt={file.name} className="w-full h-full object-cover" />
-                                                        ) : (
-                                                            <span className="text-xs text-gray-400">אין תצוגה</span>
+                                                    <UserPlus size={18} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {showAddTeam && canManageTeam && (
+                                        <div className="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                            <form onSubmit={handleAddTeamMember} className="space-y-2">
+                                                <input
+                                                    type="text"
+                                                    placeholder="שם מלא"
+                                                    required
+                                                    className="w-full p-2 border rounded text-sm"
+                                                    value={newMember.name}
+                                                    onChange={e => setNewMember({ ...newMember, name: e.target.value })}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    placeholder="תפקיד"
+                                                    required
+                                                    className="w-full p-2 border rounded text-sm"
+                                                    value={newMember.role}
+                                                    onChange={e => setNewMember({ ...newMember, role: e.target.value })}
+                                                />
+                                                <input
+                                                    type="email"
+                                                    placeholder="אימייל (אופציונלי)"
+                                                    className="w-full p-2 border rounded text-sm"
+                                                    value={newMember.email}
+                                                    onChange={e => setNewMember({ ...newMember, email: e.target.value })}
+                                                />
+                                                <button
+                                                    type="submit"
+                                                    className="w-full bg-indigo-600 text-white py-1 rounded text-sm hover:bg-indigo-700"
+                                                >
+                                                    הוסף
+                                                </button>
+                                            </form>
+                                        </div>
+                                    )}
+
+                                    {showCollaboratorsPicker && canManageTeam && (
+                                        <div className="mb-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                                            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+                                                <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                                                    <button
+                                                        className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "past" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                                        onClick={() => setCollaboratorsView("past")}
+                                                    >
+                                                        עבדתי איתם
+                                                    </button>
+                                                    <button
+                                                        className={`px-2 py-1 rounded-full text-xs ${collaboratorsView === "all" ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                                        onClick={() => setCollaboratorsView("all")}
+                                                    >
+                                                        כל המשתמשים
+                                                    </button>
+                                                </div>
+                                                <button
+                                                    className="text-xs text-indigo-600 hover:underline"
+                                                    onClick={() => {
+                                                        setShowAddTeam(true);
+                                                        setShowCollaboratorsPicker(false);
+                                                    }}
+                                                >
+                                                    הוסף ידנית
+                                                </button>
+                                            </div>
+                                            <div className="max-h-64 overflow-y-auto p-2 space-y-2">
+                                                {(collaboratorsView === "past" ? collaborators : allUsers)
+                                                    .filter(c => !(event?.team || []).some(m =>
+                                                        (m.userId && m.userId === c.id) ||
+                                                        (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
+                                                    ))
+                                                    .map(collab => (
+                                                        <button
+                                                            key={collab.id}
+                                                            onClick={() => handleAddCollaboratorToTeam(collab)}
+                                                            className="w-full text-left flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition"
+                                                            title="הוסף איש צוות"
+                                                        >
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                                    {(collab.fullName || collab.email || "?").slice(0, 2)}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <p className="text-sm font-medium text-gray-900 truncate">{collab.fullName || collab.email || "משתמש"}</p>
+                                                                    <p className="text-xs text-gray-500 truncate">{collab.role || "חבר צוות"}</p>
+                                                                </div>
+                                                            </div>
+                                                            <span className="px-3 py-1 text-xs rounded-full border border-indigo-200 text-indigo-700 bg-white">
+                                                                הוסף
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                {(collaboratorsView === "past" ? collaborators : allUsers).filter(c => !(event?.team || []).some(m =>
+                                                    (m.userId && m.userId === c.id) ||
+                                                    (m.email && c.email && m.email.toLowerCase() === c.email.toLowerCase())
+                                                )).length === 0 && (
+                                                        <p className="text-xs text-gray-500 px-2 py-1">לא נמצאו משתמשים להצגה.</p>
+                                                    )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {canManageTeam && joinRequests.filter(r => r.status === "PENDING").length > 0 && (
+                                        <div className="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-3">
+                                            <p className="text-sm font-semibold text-amber-800 mb-2">בקשות הצטרפות ממתינות</p>
+                                            <div className="space-y-2">
+                                                {joinRequests.filter(r => r.status === "PENDING").map((req) => (
+                                                    <div key={req.id} className="flex items-center justify-between gap-3 p-2 bg-white border border-amber-100 rounded-lg">
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-medium text-gray-900 truncate">{req.requesterName || req.requesterEmail || "משתמש"}</p>
+                                                            <p className="text-xs text-gray-500 truncate">{req.requesterEmail}</p>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                onClick={() => handleApproveJoinRequest(req)}
+                                                                className="px-3 py-1 text-xs rounded-full bg-green-600 text-white hover:bg-green-700"
+                                                            >
+                                                                אשר
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleRejectJoinRequest(req)}
+                                                                className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                            >
+                                                                דחה
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-4">
+                                        {event.team && event.team.length > 0 ? (
+                                            event.team.map((member, idx) => (
+                                                <div key={idx} className="flex items-center gap-3 justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                            {member.name.substring(0, 2)}
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm font-medium text-gray-900">{member.name}</p>
+                                                            <p className="text-xs text-gray-500">{member.role}</p>
+                                                        </div>
+                                                    </div>
+                                                    {canManageTeam && (
+                                                        <div className="flex items-center gap-2">
+                                                            {confirmRemoveIdx === idx ? (
+                                                                <>
+                                                                    <button
+                                                                        onClick={() => handleRemoveTeamMember(idx)}
+                                                                        className="px-2 py-1 text-xs rounded-full bg-red-600 text-white hover:bg-red-700"
+                                                                    >
+                                                                        הסר
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => setConfirmRemoveIdx(null)}
+                                                                        className="px-2 py-1 text-xs rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                                    >
+                                                                        ביטול
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => setConfirmRemoveIdx(idx)}
+                                                                    className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
+                                                                    title="הסר איש צוות"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <p className="text-sm text-gray-500">עדיין אין חברי צוות</p>
+                                        )}
+                                        {!canManageTeam && (
+                                            <p className="text-xs text-gray-500">רק יוצר האירוע יכול להוסיף שותפים.</p>
+                                        )}
+
+                                        {teamContacts.length > 0 && canManageTeam && (
+                                            <div className="mt-4 border-t pt-4 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm font-semibold text-gray-800">שליחת הודעת מערכת לאנשי הצוות</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const next = !showTeamMessage;
+                                                            if (next) {
+                                                                selectAllTeam();
+                                                            }
+                                                            setShowTeamMessage(next);
+                                                        }}
+                                                        className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                        title="פתח שליחת הודעה לצוות"
+                                                    >
+                                                        <MessageCircle size={16} />
+                                                    </button>
+                                                </div>
+                                                {showTeamMessage && (
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center justify-between text-xs">
+                                                            <div className="flex gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={selectAllTeam}
+                                                                    className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                                >
+                                                                    בחר הכל
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={clearTeamSelection}
+                                                                    className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                                >
+                                                                    נקה
+                                                                </button>
+                                                            </div>
+                                                            <span className="text-gray-500">נבחרו {teamSelections.size}</span>
+                                                        </div>
+                                                        <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
+                                                            {teamContacts.map((member) => {
+                                                                const checked = teamSelections.has(member.key);
+                                                                const phoneDisplay = member.phone ? formatPhoneForDisplay(member.phone) : "";
+                                                                return (
+                                                                    <label key={member.key} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                className="accent-indigo-600"
+                                                                                checked={checked}
+                                                                                onChange={() => toggleTeamSelection(member.key)}
+                                                                            />
+                                                                            <div className="flex flex-col">
+                                                                                <span className="font-medium text-gray-800">{member.name || member.email || "איש צוות"}</span>
+                                                                                <span className="text-xs text-gray-500">
+                                                                                    {member.role || ""}
+                                                                                    {(member.role && (member.email || phoneDisplay)) ? " • " : ""}
+                                                                                    {member.email || ""}
+                                                                                    {(member.email && phoneDisplay) ? " • " : ""}
+                                                                                    {phoneDisplay}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <span className="text-[11px] text-gray-500">
+                                                                            {phoneDisplay || "אין טלפון"}
+                                                                        </span>
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <textarea
+                                                            className="w-full border rounded-lg p-3 text-sm"
+                                                            rows={3}
+                                                            placeholder="כתוב את ההודעה שתרצה לשלוח לכל הצוות שנבחר"
+                                                            onChange={(e) => { teamMessageRef.current = e.target.value; }}
+                                                        />
+                                                        <div className="flex justify-end">
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleSendTeamBroadcast}
+                                                                disabled={sendingTeamMsg}
+                                                                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                                                            >
+                                                                {sendingTeamMsg ? "שולח..." : "שלח הודעה לצוות"}
+                                                            </button>
+                                                        </div>
+                                                        <p className="text-xs text-gray-500">
+                                                            נשלח רק למי שנבחר ובעל מספר מעודכן ב״משתמשי מערכת״.
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </details>
+
+                            {/* Volunteers Section */}
+                            {event.needsVolunteers && (
+                                <details ref={volunteersSectionRef} className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
+                                        <div className="flex items-center gap-2">
+                                            <Handshake size={20} className="text-indigo-600" />
+                                            <div>
+                                                <h3 className="text-lg font-semibold text-gray-900">מתנדבים</h3>
+                                                <p className="text-xs text-gray-500 mt-1">ניהול רשומים, שליחת הודעות וגישה מהירה לטופס ההתנדבות.</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
+                                            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">{volunteerProgressLabel}</span>
+                                            <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
+                                        </div>
+                                    </summary>
+                                    <div className="px-6 pb-6">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="text-sm text-gray-500">רשימת מתנדבים פעילים, הודעות ועדכוני גיוס.</div>
+                                            {event.volunteersCount && (
+                                                <span className="text-xs text-gray-500">
+                                                    {combinedVolunteers.length} / {event.volunteersCount}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {loadingVolunteers ? (
+                                            <div className="flex items-center justify-center py-8">
+                                                <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-indigo-500"></div>
+                                            </div>
+                                        ) : combinedVolunteers.length > 0 ? (
+                                            <div className="space-y-4">
+                                                {combinedVolunteers.map((volunteer, idx) => (
+                                                    <div key={volunteer.id || idx} className="flex items-center gap-3 justify-between">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+                                                                {(volunteer.name || volunteer.email || "?").substring(0, 2)}
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-medium text-gray-900">{volunteer.name || volunteer.email || "מתנדב"}</p>
+                                                                {volunteer.email && volunteer.name && (
+                                                                    <p className="text-xs text-gray-500">{volunteer.email}</p>
+                                                                )}
+                                                                {volunteer.phone && (
+                                                                    <p className="text-xs text-gray-500">{volunteer.phone}</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {canManageTeam && volunteers.find(v => v.email === volunteer.email || v.id === volunteer.id) && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (volunteer.id && confirm("האם אתה בטוח שברצונך להסיר את המתנדב?")) {
+                                                                        handleDeleteVolunteer(volunteer.id);
+                                                                    }
+                                                                }}
+                                                                className="p-1 rounded-full text-red-600 hover:bg-red-50 border border-red-100"
+                                                                title="הסר מתנדב"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
                                                         )}
                                                     </div>
-                                                    <div className="px-2 py-2 text-xs font-semibold text-gray-800 truncate">{file.name || "קובץ"}</div>
-                                                </button>
-                                            ))
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <p className="text-sm text-gray-500">עדיין אין מתנדבים שנרשמו</p>
+                                        )}
+
+                                        {combinedVolunteers.length > 0 && (
+                                            <div className="mt-4 border-t pt-4 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm font-semibold text-gray-800">שליחת הודעת וואטסאפ למתנדבים</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowVolunteerMessage(prev => !prev)}
+                                                        className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                        title="פתח שליחת הודעה"
+                                                    >
+                                                        <MessageCircle size={16} />
+                                                    </button>
+                                                </div>
+                                                {showVolunteerMessage && (
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center justify-between text-xs">
+                                                            <div className="flex gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={selectAllVolunteers}
+                                                                    className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                                >
+                                                                    בחר הכל
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={clearVolunteerSelection}
+                                                                    className="px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                                                                >
+                                                                    נקה
+                                                                </button>
+                                                            </div>
+                                                            <span className="text-gray-500">נבחרו {volunteerSelections.size}</span>
+                                                        </div>
+                                                        <div className="max-h-40 overflow-auto border border-gray-100 rounded-lg p-2 space-y-1">
+                                                            {combinedVolunteers.map((vol, idx) => {
+                                                                const key = buildVolunteerKey({ email: vol.email, id: vol.id, name: vol.name });
+                                                                const checked = volunteerSelections.has(key);
+                                                                const phoneDisplay = vol.phone || volunteerPhoneMap.get(key);
+                                                                return (
+                                                                    <label key={vol.id || idx} className="flex items-center justify-between gap-2 text-sm px-2 py-1 rounded hover:bg-gray-50">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                className="accent-indigo-600"
+                                                                                checked={checked}
+                                                                                onChange={() => toggleVolunteerSelection(key)}
+                                                                            />
+                                                                            <div className="flex flex-col">
+                                                                                <span className="font-medium text-gray-800">{vol.name || vol.email || "מתנדב"}</span>
+                                                                                <span className="text-xs text-gray-500">
+                                                                                    {vol.email || ""}
+                                                                                    {(vol.email && (vol.phone || phoneDisplay)) ? " • " : ""}
+                                                                                    {(vol.phone || phoneDisplay) ? formatPhoneForDisplay(vol.phone || phoneDisplay) : ""}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <span className="text-[11px] text-gray-500">
+                                                                            {phoneDisplay ? formatPhoneForDisplay(phoneDisplay) : "אין טלפון"}
+                                                                        </span>
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <textarea
+                                                            className="w-full border rounded-lg p-3 text-sm"
+                                                            rows={3}
+                                                            placeholder="כתוב את ההודעה שתרצה לשלוח לכל המתנדבים שנבחרו"
+                                                            defaultValue=""
+                                                            onChange={(e) => {
+                                                                volunteerMessageRef.current = e.target.value;
+                                                            }}
+                                                        />
+                                                        <div className="flex justify-end">
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleSendVolunteerBroadcast}
+                                                                disabled={sendingVolunteerMsg}
+                                                                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                                                            >
+                                                                {sendingVolunteerMsg ? "שולח..." : "שלח הודעה לוואטסאפ"}
+                                                            </button>
+                                                        </div>
+                                                        <p className="text-xs text-gray-500">
+                                                            השליחה מתבצעת לנבחרים בלבד, עם הפרש של 5 שניות בין הודעה להודעה.
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </details>
+                            )}
+                        </div>
+
+                        <details className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                                        <Paperclip size={18} />
+                                        מסמכים חשובים לאירוע
+                                    </h2>
+                                    <p className="text-xs text-gray-500 mt-1">קבצים שהועלו, מסמכים חשובים וקישורי גישה להמשך עבודה.</p>
+                                </div>
+                                <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
+                                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{eventFiles.length + importantDocs.length}</span>
+                                    <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
+                                </div>
+                            </summary>
+                            <div className="px-6 pb-6">
+                                <div className="flex items-center justify-between mb-4 gap-3">
+                                    <p className="text-sm text-gray-600">
+                                        כל הקבצים שצורפו לאירוע במקום אחד. לחצו על המאגר לצפייה בכל הקבצים, מי העלה ומתי.
+                                    </p>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <button
+                                            onClick={() => setShowEventFileModal(true)}
+                                            className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold border border-indigo-200 px-3 py-1.5 rounded-lg flex items-center gap-2"
+                                        >
+                                            <Paperclip size={16} />
+                                            העלה קובץ
+                                        </button>
+                                        <button
+                                            onClick={() => router.push(`/events/${id}/files`)}
+                                            className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold"
+                                        >
+                                            קבצים מצורפים לאירוע
+                                        </button>
+                                    </div>
+                                </div>
+                                {(eventFiles.length > 0 || importantDocs.length > 0) && (
+                                    <div className="space-y-4">
+                                        {eventFiles.length > 0 && (
+                                            <div>
+                                                <p className="text-xs font-semibold text-gray-600 mb-2">קבצים שהועלו באירוע</p>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                    {eventFiles.slice(0, 9).map(file => (
+                                                        <div
+                                                            key={file.id}
+                                                            className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:shadow-md transition text-xs text-gray-700"
+                                                        >
+                                                            <a
+                                                                href={file.url || "#"}
+                                                                target={file.url ? "_blank" : undefined}
+                                                                rel="noreferrer"
+                                                                className="block"
+                                                            >
+                                                                <div className="h-20 bg-white flex items-center justify-center">
+                                                                    {file.url ? (
+                                                                        <img src={file.url} alt={file.name} className="w-full h-full object-cover" />
+                                                                    ) : (
+                                                                        <span className="text-gray-400">תצוגה לא זמינה</span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="px-2 py-2 truncate font-semibold">{file.name || "קובץ"}</div>
+                                                                {file.taskTitle && <div className="px-2 text-[10px] text-gray-500 truncate">משימה: {file.taskTitle}</div>}
+                                                            </a>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleShareWhatsApp(file.name || "קובץ", file.url)}
+                                                                className="w-full text-indigo-600 hover:text-indigo-800 border-t border-gray-200 py-1 text-[11px] font-semibold flex items-center justify-center gap-1"
+                                                            >
+                                                                שיתוף בוואטסאפ
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {importantDocs.length > 0 && (
+                                            <div>
+                                                <p className="text-xs font-semibold text-gray-600 mb-2">מסמכים חשובים</p>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                    {importantDocs.slice(0, 6).map(doc => (
+                                                        <div
+                                                            key={doc.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            onClick={() => router.push(`/settings?tab=documents&docId=${doc.id}`)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === "Enter" || e.key === " ") {
+                                                                    e.preventDefault();
+                                                                    router.push(`/settings?tab=documents&docId=${doc.id}`);
+                                                                }
+                                                            }}
+                                                            className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:shadow-md transition text-xs text-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                            title="פתח למסך העלאה ועדכון פרטי המסמך"
+                                                        >
+                                                            <div className="h-20 bg-white flex items-center justify-center">
+                                                                {doc.fileUrl ? (
+                                                                    <img
+                                                                        src={doc.fileUrl}
+                                                                        alt={doc.title}
+                                                                        className="w-full h-full object-cover"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="text-gray-400">תצוגה לא זמינה</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="px-2 py-2 truncate font-semibold">{doc.title || doc.fileName || "מסמך"}</div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => { e.stopPropagation(); handleShareWhatsApp(doc.title || doc.fileName || "מסמך", doc.fileUrl); }}
+                                                                className="w-full text-indigo-600 hover:text-indigo-800 border-t border-gray-200 py-1 text-[11px] font-semibold flex items-center justify-center gap-1"
+                                                            >
+                                                                שיתוף בוואטסאפ
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
                                 )}
                             </div>
-                        </div>
-                        <div className="flex justify-end gap-2 pt-2">
-                            <button
-                                type="button"
-                                onClick={() => setShowContentModal(false)}
-                                className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
-                            >
-                                ביטול
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleSaveContentAndMedia}
-                                className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
-                                style={{ background: 'var(--patifon-burgundy)' }}
-                            >
-                                שמור
-                            </button>
-                        </div>
+                        </details>
                     </div>
                 </div>
-            )}
 
-            {/* Status Edit Modal */}
-            {showPostModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold">מלל לפוסט אירוע</h3>
-                            <button onClick={() => setShowPostModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="space-y-3">
-                            <label className="text-sm font-medium text-gray-700">קישור פלייר (אם יש)</label>
-                            <input
-                                type="text"
-                                value={flyerLink}
-                                onChange={(e) => setFlyerLink(e.target.value)}
-                                onBlur={() => setPostContent(buildPostContent())}
-                                className="w-full border rounded-lg p-2 text-sm"
-                                placeholder="לינק לפלייר מעוצב"
-                            />
-                            <label className="text-sm font-medium text-gray-700">מלל לפוסט</label>
-                            <textarea
-                                rows={8}
-                                className="w-full border rounded-lg p-3 text-sm"
-                                value={postContent}
-                                onChange={(e) => setPostContent(e.target.value)}
-                            />
-                        </div>
-                        <div className="flex justify-end gap-2 pt-4">
-                            <button
-                                type="button"
-                                onClick={handleCopyPost}
-                                className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"
-                                style={{ border: '1px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                            >
-                                <Copy size={16} />
-                                העתק
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleRefreshPost}
-                                className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 text-gray-700 border border-gray-200"
-                            >
-                                רענן מלל
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Status Edit Modal */}
-            {editingStatusTask && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold">עריכת סטטוס משימה</h3>
-                            <button onClick={() => setEditingStatusTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                        </div>
-                        <form onSubmit={async (e) => {
-                            e.preventDefault();
-                            if (!db || !editingStatusTask) return;
-                            try {
-                                const taskRef = doc(db, "events", id, "tasks", editingStatusTask.id);
-                                await updateDoc(taskRef, {
-                                    currentStatus: editingStatusTask.currentStatus || "",
-                                    nextStep: editingStatusTask.nextStep || "",
-                                    dueDate: editingStatusTask.dueDate,
-                                });
-                                setEditingStatusTask(null);
-                            } catch (err) {
-                                console.error("Error updating status:", err);
-                                alert("שגיאה בעדכון הסטטוס");
-                            }
-                        }} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
-                                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.currentStatus || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, currentStatus: e.target.value })} />
+                <div className="mt-8">
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 rounded-full bg-indigo-50 text-indigo-700">
+                                <PauseCircle size={20} />
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
-                                <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.nextStep || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, nextStep: e.target.value })} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
-                                <input type="date" className="w-full p-2 border rounded-lg text-sm" value={editingStatusTask.dueDate} onChange={e => setEditingStatusTask({ ...editingStatusTask, dueDate: e.target.value })} />
-                            </div>
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button type="button" onClick={() => setEditingStatusTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
-                                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור שינויים</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Date Edit Modal */}
-            {editingDateTask && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold">שינוי תאריך יעד</h3>
-                            <button onClick={() => setEditingDateTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                        </div>
-                        <form onSubmit={async (e) => {
-                            e.preventDefault();
-                            if (!db || !editingDateTask) return;
-                            try {
-                                const taskRef = doc(db, "events", id, "tasks", editingDateTask.id);
-                                const dueVal = computeDueDateFromMode(dateModalMode, parseOffset(dateModalOffset) ?? 0, dateModalTime || extractTimeString(getEventStartDate() || new Date()));
-                                await updateDoc(taskRef, { dueDate: dueVal });
-                                setEditingDateTask(null);
-                            } catch (err) {
-                                console.error("Error updating date:", err);
-                                alert("שגיאה בעדכון התאריך");
-                            }
-                        }} className="space-y-4">
-                            <div className="space-y-2">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">מועד המשימה</label>
-                                <div className="flex flex-wrap gap-3 text-xs">
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            className="accent-indigo-600"
-                                            checked={dateModalMode === "event_day"}
-                                            onChange={() => { setDateModalMode("event_day"); setDateModalOffset("0"); }}
-                                        />
-                                        ביום האירוע
-                                    </label>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            className="accent-indigo-600"
-                                            checked={dateModalMode === "offset"}
-                                            onChange={() => setDateModalMode("offset")}
-                                        />
-                                        ימים ביחס לאירוע
-                                    </label>
-                                </div>
-                                {dateModalMode === "offset" && (
-                                    <div className="flex items-center gap-2 text-xs">
-                                        <span>ימים מהאירוע:</span>
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            className="w-24 p-2 border rounded-lg text-sm"
-                                            value={dateModalOffset}
-                                            onChange={(e) => setDateModalOffset(e.target.value)}
-                                        />
-                                        <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
-                                    </div>
+                            <div className="space-y-1">
+                                <p className="text-sm font-semibold text-gray-900">מרכז בקרה לאירוע</p>
+                                <p className="text-xs text-gray-600">
+                                    עצור/הפעל שיתוף משימות עם מתנדבים והגדר מצבי אירוע מיוחדים.
+                                </p>
+                                {event.volunteerTasksPaused && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                        <PauseCircle size={14} />
+                                        שיתוף המשימות למתנדבים מושהה
+                                    </span>
                                 )}
-                                <div className="flex items-center gap-2 text-xs">
-                                    <span>שעה:</span>
+                                {event.teamTasksPaused && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                        <PauseCircle size={14} />
+                                        משימות הצוות בהשהיה
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {!canManageTeam && (
+                                <span className="text-[11px] text-gray-500">
+                                    רק יוצר האירוע או צוות מורשה יכולים לשנות את מצב האירוע
+                                </span>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setShowControlCenter(true)}
+                                disabled={!canManageTeam}
+                                className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 vinyl-shadow transition ${canManageTeam
+                                    ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                                    : "bg-gray-200 text-gray-500 cursor-not-allowed"
+                                    }`}
+                            >
+                                <PauseCircle size={18} />
+                                פתח מרכז בקרה
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+
+
+                {assigneeWhatsappModal && (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+                            <div className="flex items-start justify-between mb-4">
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-900">שליחת הודעת מערכת בוואטסאפ</h3>
+                                    <p className="text-sm text-gray-600">
+                                        אל: {assigneeWhatsappModal.assigneeName || assigneeWhatsappModal.assigneeEmail || "משתמש"} • {assigneeWhatsappModal.taskTitle}
+                                    </p>
+                                </div>
+                                <button onClick={closeAssigneeWhatsappModal} className="text-gray-500 hover:text-gray-700">
+                                    <X size={18} />
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-sm font-medium text-gray-800 mb-1 block">טלפון יעד</label>
                                     <input
-                                        type="time"
-                                        className="p-2 border rounded-lg text-sm"
-                                        value={dateModalTime}
-                                        onChange={(e) => setDateModalTime(e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+                                        type="tel"
+                                        value={assigneeWhatsappModal.phone}
+                                        onChange={(e) => setAssigneeWhatsappModal(prev => prev ? { ...prev, phone: e.target.value } : prev)}
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                                        placeholder="לדוגמה: 0501234567"
+                                    />
+                                    {assigneeWhatsappModal.loadingPhone && (
+                                        <p className="text-xs text-gray-500 mt-1">מאחזר מספר טלפון מהפרופיל...</p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-800 mb-1 block">תוכן הודעה</label>
+                                    <textarea
+                                        value={assigneeWhatsappModal.message}
+                                        onChange={(e) => setAssigneeWhatsappModal(prev => prev ? { ...prev, message: e.target.value } : prev)}
+                                        rows={4}
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
                                     />
                                 </div>
-                                <div className="text-xs text-gray-600">
-                                    {editingDateTask.dueDate
-                                        ? `המשימה מתוזמנת ל-${new Date(editingDateTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
-                                        : "לא נקבע מועד למשימה"}
-                                    {!getEventStartDate() && (
-                                        <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
+                                {assigneeWhatsappModal.error && (
+                                    <div className="text-sm text-red-600">{assigneeWhatsappModal.error}</div>
+                                )}
+                                <div className="flex justify-end gap-2">
+                                    <button
+                                        onClick={closeAssigneeWhatsappModal}
+                                        className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                                    >
+                                        ביטול
+                                    </button>
+                                    <button
+                                        onClick={handleSendAssigneeWhatsapp}
+                                        disabled={assigneeWhatsappModal.sending}
+                                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60"
+                                    >
+                                        {assigneeWhatsappModal.sending ? "שולח..." : "שלח בוואטסאפ"}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {showControlCenter && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 space-y-5">
+                            <div className="flex items-start justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-full bg-indigo-50 text-indigo-700">
+                                        <PauseCircle size={22} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-bold">מרכז בקרה לאירוע</h3>
+                                        <p className="text-sm text-gray-600">הגדר מצבי השהיה והפעלה לאירוע.</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setShowControlCenter(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-gray-900">הפסקת שיתוף המשימות עם מתנדבים</p>
+                                        <p className="text-xs text-gray-600">
+                                            מסתיר מהמתנדבים את המשימות הפתוחות של האירוע באזור האישי שלהם עד לחידוש השיתוף.
+                                        </p>
+                                    </div>
+                                    <label className="inline-flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={volunteerSharePaused}
+                                            onChange={(e) => setVolunteerSharePaused(e.target.checked)}
+                                        />
+                                        <span className="text-sm font-semibold text-gray-800">{volunteerSharePaused ? "מושבת" : "פעיל"}</span>
+                                    </label>
+                                </div>
+                                <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-gray-900">השהיית משימות צוות</p>
+                                        <p className="text-xs text-gray-600">
+                                            משימות צוות יישארו בדף ניהול האירוע, אך לא יופיעו ברשימת המשימות האישיות של חברי הצוות.
+                                        </p>
+                                    </div>
+                                    <label className="inline-flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={teamSharePaused}
+                                            onChange={(e) => setTeamSharePaused(e.target.checked)}
+                                        />
+                                        <span className="text-sm font-semibold text-gray-800">{teamSharePaused ? "מושבת" : "פעיל"}</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-2 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowControlCenter(false)}
+                                    className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
+                                >
+                                    סגור
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleSaveControlCenter}
+                                    disabled={controlSaving || !canManageTeam}
+                                    className={`px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2 ${controlSaving ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                                >
+                                    {controlSaving ? "שומר..." : "שמור הגדרות"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Event File Upload Modal */}
+                {showEventFileModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold">העלה קובץ לאירוע</h3>
+                                <button onClick={() => { setShowEventFileModal(false); setEventFile(null); setEventFileName(""); }} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleUploadEventFile} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">בחר קובץ</label>
+                                    <input
+                                        ref={eventFileInputRef}
+                                        type="file"
+                                        required
+                                        accept="*/*"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0] || null;
+                                            setEventFile(file);
+                                            if (file) setEventFileName(file.name);
+                                        }}
+                                        className="hidden"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => eventFileInputRef.current?.click()}
+                                        className="w-full border border-indigo-200 text-indigo-700 py-2 rounded-lg hover:bg-indigo-50 transition text-sm font-semibold flex items-center justify-center gap-2"
+                                    >
+                                        <Paperclip size={16} />
+                                        {eventFile ? "בחר מחדש" : "בחר קובץ מהמחשב"}
+                                    </button>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {eventFile ? `נבחר: ${eventFile.name}` : "טרם נבחר קובץ"}
+                                    </p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">שם הקובץ</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        value={eventFileName}
+                                        onChange={(e) => setEventFileName(e.target.value)}
+                                        className="w-full p-2 border rounded-lg text-sm"
+                                        placeholder="לדוגמה: חוזה ספק - 12.6"
+                                    />
+                                </div>
+                                <div className="flex justify-end gap-2 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowEventFileModal(false); setEventFile(null); setEventFileName(""); }}
+                                        className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+                                    >
+                                        ביטול
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={eventFileUploading}
+                                        className={`px-4 py-2 rounded-lg text-sm font-medium text-white ${eventFileUploading ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                                    >
+                                        {eventFileUploading ? "מעלה..." : "העלה ושמור"}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Volunteer Invitation Modal */}
+                {showVolunteerModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold flex items-center gap-2">
+                                    <Handshake size={20} className="text-indigo-600" />
+                                    הזמנת מתנדבים לאירוע
+                                </h3>
+                                <button onClick={() => setShowVolunteerModal(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="space-y-4">
+                                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                                    <h4 className="font-semibold text-indigo-900 mb-2">איך זה עובד?</h4>
+                                    <ul className="text-sm text-indigo-800 space-y-2 list-disc list-inside">
+                                        <li>כעת מתנדבים יוכלו להתנדב לאירוע ולעזור בשמימות</li>
+                                        <li>מתנדבים יוכלו לבחור לעצמם משימות ולתייג את עצמם</li>
+                                        <li>מתנדבים שלא רשומים למערכת יוכלו להירשם דרך קישור מיוחד</li>
+                                        <li>ניתן להגביל את כמות המתנדבים בהתאם לצורך</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        כמה מתנדבים צריך? (אופציונלי - השאר ריק ללא הגבלה)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={volunteerCountInput}
+                                        onChange={(e) => setVolunteerCountInput(e.target.value)}
+                                        className="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                        placeholder="מספר המתנדבים הדרוש"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {volunteerCountInput && parseInt(volunteerCountInput, 10) > 0
+                                            ? `הגבלה: ${volunteerCountInput} מתנדבים מקסימום`
+                                            : "ללא הגבלה על כמות המתנדבים"}
+                                    </p>
+                                </div>
+                                <div className="pt-4 border-t">
+                                    <button
+                                        type="button"
+                                        onClick={updateVolunteerCount}
+                                        className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 mb-3"
+                                    >
+                                        עדכן כמות מתנדבים
+                                    </button>
+                                    <div className="bg-gray-50 rounded-lg p-4">
+                                        <p className="text-sm font-medium text-gray-700 mb-2">קישור הרשמה למתנדבים:</p>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="text"
+                                                readOnly
+                                                value={baseUrl ? `${baseUrl}/events/${id}/volunteers/register` : ""}
+                                                className="flex-1 rounded-lg border-gray-300 border p-2 text-sm bg-white"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={copyVolunteerLink}
+                                                className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${copiedVolunteersLink ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                            >
+                                                {copiedVolunteersLink ? (
+                                                    <>
+                                                        <Check size={16} />
+                                                        הועתק!
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Copy size={16} />
+                                                        העתק קישור
+                                                    </>
+                                                )}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Status Edit Modal */}
+                {showSpecialModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-xl w-full p-6 space-y-4">
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles size={20} className="text-indigo-600" />
+                                    <h3 className="text-lg font-bold">משימות מיוחדות</h3>
+                                </div>
+                                <button onClick={() => setShowSpecialModal(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800 flex flex-col gap-2">
+                                    <div>
+                                        <p className="font-semibold text-gray-900 mb-1">שיווק והפצה בקבוצות</p>
+                                        <p>יוצר משימת שיווק עם המלל והפלייר הרשמי, לפרסום ב-5 קבוצות וואטסאפ (30+ אנשים) והעלאת צילומי מסך כהוכחה.</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleCreateSpecialMarketingTask}
+                                        disabled={creatingSpecialTask}
+                                        className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                                    >
+                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת שיווק"}
+                                    </button>
+                                </div>
+                                <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm text-amber-800 flex flex-col gap-2">
+                                    <div>
+                                        <p className="font-semibold text-gray-900 mb-1">להעלות סטורי ולתייג</p>
+                                        <p>יוצר משימת סטורי למתנדבים עם הפלייר הרשמי, תיוגי אינסטגרם מהתוכן והמדיה, והנחיה להוסיף מוזיקה ולהעלות צילום מסך.</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleCreateSpecialStoryTask}
+                                        disabled={creatingSpecialTask}
+                                        className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-amber-500 hover:bg-amber-600"}`}
+                                    >
+                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="border-t pt-4">
+                                <h4 className="text-sm font-semibold text-gray-800 mb-2">משימות מיוחדות קיימות</h4>
+                                {specialTasks.length === 0 ? (
+                                    <p className="text-xs text-gray-500">אין משימות מיוחדות קיימות כרגע.</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {specialTasks.map((task) => (
+                                            <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => router.push(`/tasks/${task.id}?eventId=${id}`)}
+                                                    className="min-w-0 flex-1 text-right"
+                                                >
+                                                    <p className="text-sm font-semibold text-gray-900 truncate hover:underline">{task.title}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        סטטוס: {task.status === "DONE" ? "בוצע" : task.status === "IN_PROGRESS" ? "בתהליך" : task.status === "STUCK" ? "תקוע" : "פתוח"}
+                                                    </p>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => confirmDeleteTask(task.id)}
+                                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
+                                                >
+                                                    מחק
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowSpecialModal(false)}
+                                    className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
+                                >
+                                    סגור
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Status Edit Modal */}
+                {showContentModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 space-y-4">
+                            <div className="flex justify-between items-center">
+                                <h3 className="text-lg font-bold">תוכן ומדיה לאירוע</h3>
+                                <button onClick={() => setShowContentModal(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="p-3 rounded-lg border border-indigo-100 bg-indigo-50">
+                                    <p className="text-sm font-semibold text-indigo-900 mb-1">שיתוף טופס למלל ותמונה רשמית</p>
+                                    <p className="text-xs text-indigo-800 mb-2">
+                                        שלח לכל אחד קישור לטופס שמאפשר להזין מלל רשמי, תיוגים ולצרף תמונה. המידע יישמר אוטומטית באירוע.
+                                    </p>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                        <input
+                                            type="text"
+                                            readOnly
+                                            value={baseUrl ? `${baseUrl}/events/${id}/content-form` : ""}
+                                            className="flex-1 rounded-lg border-gray-300 border p-2 text-xs bg-white"
+                                        />
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={copyContentFormLink}
+                                                className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 ${copiedContentFormLink ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+                                            >
+                                                <Copy size={14} />
+                                                {copiedContentFormLink ? "הועתק" : "העתק קישור"}
+                                            </button>
+                                            <a
+                                                href={`/events/${id}/content-form`}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="px-3 py-2 rounded-lg text-xs font-semibold border border-indigo-200 text-indigo-700 hover:bg-indigo-50 flex items-center gap-2"
+                                            >
+                                                פתח
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מלל רשמי לפוסט</label>
+                                    <textarea
+                                        rows={5}
+                                        className="w-full border rounded-lg p-3 text-sm"
+                                        value={officialPostText}
+                                        onChange={(e) => setOfficialPostText(e.target.value)}
+                                        placeholder="הקלד את הטקסט הרשמי לפרסום"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-gray-700">תיוגים לאינסטגרם (שם משתמש אחד בכל פעם, אנטר להוספה)</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            className="flex-1 border rounded-lg p-2 text-sm"
+                                            value={instaTagInput}
+                                            placeholder="לדוגמה: user_name"
+                                            onChange={(e) => setInstaTagInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") {
+                                                    e.preventDefault();
+                                                    addInstagramTag(instaTagInput);
+                                                }
+                                            }}
+                                            onBlur={() => addInstagramTag(instaTagInput)}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => addInstagramTag(instaTagInput)}
+                                            className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                                            style={{ background: 'var(--patifon-orange)' }}
+                                        >
+                                            הוסף
+                                        </button>
+                                    </div>
+                                    {officialInstaTagsList.length > 0 && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {officialInstaTagsList.map(tag => (
+                                                <span key={tag} className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1 text-xs text-indigo-800">
+                                                    @{tag}
+                                                    <button type="button" onClick={() => removeInstagramTag(tag)} className="text-indigo-500 hover:text-indigo-700">×</button>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-gray-700">פלייר רשמי</label>
+                                    {officialFlyerUrl && (
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <a href={officialFlyerUrl} target="_blank" className="text-indigo-600 underline" rel="noreferrer">פתח פלייר נוכחי</a>
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    if (!db) return;
+                                                    const confirmDelete = window.confirm("למחוק את הפלייר הנוכחי?");
+                                                    if (!confirmDelete) return;
+                                                    try {
+                                                        await updateDoc(doc(db, "events", id), { officialFlyerUrl: "" });
+                                                        setOfficialFlyerUrl("");
+                                                        setEvent(prev => prev ? { ...prev, officialFlyerUrl: "" } : prev);
+                                                    } catch (err) {
+                                                        console.error("שגיאה במחיקת הפלייר", err);
+                                                        alert("לא הצלחנו למחוק את הפלייר");
+                                                    }
+                                                }}
+                                                className="px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                                            >
+                                                מחק
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <input
+                                            ref={contentFlyerInputRef}
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(e) => setOfficialFlyerFile(e.target.files?.[0] || null)}
+                                            className="hidden"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => contentFlyerInputRef.current?.click()}
+                                            className="px-3 py-2 rounded-lg text-sm font-semibold border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                                        >
+                                            בחר פלייר מהמחשב
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleUploadOfficialFlyer}
+                                            disabled={officialFlyerUploading}
+                                            className={`px-3 py-2 rounded-lg text-sm font-semibold text-white ${officialFlyerUploading ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                                        >
+                                            {officialFlyerUploading ? "מעלה..." : "העלה פלייר"}
+                                        </button>
+                                    </div>
+                                    {officialFlyerFile && <p className="text-xs text-gray-600">נבחר: {officialFlyerFile.name}</p>}
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowFlyerPicker(prev => !prev)}
+                                        className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                    >
+                                        בחר פלייר ממאגר האירוע
+                                    </button>
+                                    {showFlyerPicker && (
+                                        <div className="mt-3 border border-gray-200 rounded-lg p-3 max-h-64 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                            {eventFiles.length === 0 ? (
+                                                <p className="text-sm text-gray-500">אין קבצים במאגר האירוע.</p>
+                                            ) : (
+                                                eventFiles.map((file) => (
+                                                    <button
+                                                        key={file.id}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (file.url) {
+                                                                setOfficialFlyerUrl(file.url);
+                                                                setShowFlyerPicker(false);
+                                                            }
+                                                        }}
+                                                        className="border border-gray-200 rounded-lg overflow-hidden bg-white hover:shadow-md transition text-left"
+                                                    >
+                                                        <div className="h-20 bg-gray-50 flex items-center justify-center">
+                                                            {file.url ? (
+                                                                <img src={file.url} alt={file.name} className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <span className="text-xs text-gray-400">אין תצוגה</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="px-2 py-2 text-xs font-semibold text-gray-800 truncate">{file.name || "קובץ"}</div>
+                                                    </button>
+                                                ))
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             </div>
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button type="button" onClick={() => setEditingDateTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
-                                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור</button>
+                            <div className="flex justify-end gap-2 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowContentModal(false)}
+                                    className="px-3 py-2 rounded-lg text-sm font-semibold text-gray-700 border border-gray-200"
+                                >
+                                    ביטול
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleSaveContentAndMedia}
+                                    className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                                    style={{ background: 'var(--patifon-burgundy)' }}
+                                >
+                                    שמור
+                                </button>
                             </div>
-                        </form>
+                        </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )}
+
+                {/* Status Edit Modal */}
+                {showPostModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold">מלל לפוסט אירוע</h3>
+                                <button onClick={() => setShowPostModal(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="space-y-3">
+                                <label className="text-sm font-medium text-gray-700">קישור פלייר (אם יש)</label>
+                                <input
+                                    type="text"
+                                    value={flyerLink}
+                                    onChange={(e) => setFlyerLink(e.target.value)}
+                                    onBlur={() => setPostContent(buildPostContent())}
+                                    className="w-full border rounded-lg p-2 text-sm"
+                                    placeholder="לינק לפלייר מעוצב"
+                                />
+                                <label className="text-sm font-medium text-gray-700">מלל לפוסט</label>
+                                <textarea
+                                    rows={8}
+                                    className="w-full border rounded-lg p-3 text-sm"
+                                    value={postContent}
+                                    onChange={(e) => setPostContent(e.target.value)}
+                                />
+                            </div>
+                            <div className="flex justify-end gap-2 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={handleCopyPost}
+                                    className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"
+                                    style={{ border: '1px solid var(--patifon-orange)', color: 'var(--patifon-orange)' }}
+                                >
+                                    <Copy size={16} />
+                                    העתק
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleRefreshPost}
+                                    className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 text-gray-700 border border-gray-200"
+                                >
+                                    רענן מלל
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Status Edit Modal */}
+                {editingStatusTask && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold">עריכת סטטוס משימה</h3>
+                                <button onClick={() => setEditingStatusTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                            </div>
+                            <form onSubmit={async (e) => {
+                                e.preventDefault();
+                                if (!db || !editingStatusTask) return;
+                                try {
+                                    const taskRef = doc(db, "events", id, "tasks", editingStatusTask.id);
+                                    await updateDoc(taskRef, {
+                                        currentStatus: editingStatusTask.currentStatus || "",
+                                        nextStep: editingStatusTask.nextStep || "",
+                                        dueDate: editingStatusTask.dueDate,
+                                    });
+                                    setEditingStatusTask(null);
+                                } catch (err) {
+                                    console.error("Error updating status:", err);
+                                    alert("שגיאה בעדכון הסטטוס");
+                                }
+                            }} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
+                                    <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.currentStatus || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, currentStatus: e.target.value })} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">הצעד הבא</label>
+                                    <textarea className="w-full p-2 border rounded-lg text-sm" rows={2} value={editingStatusTask.nextStep || ""} onChange={e => setEditingStatusTask({ ...editingStatusTask, nextStep: e.target.value })} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                                    <input type="date" className="w-full p-2 border rounded-lg text-sm" value={editingStatusTask.dueDate} onChange={e => setEditingStatusTask({ ...editingStatusTask, dueDate: e.target.value })} />
+                                </div>
+                                <div className="flex justify-end gap-3 pt-4">
+                                    <button type="button" onClick={() => setEditingStatusTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                                    <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור שינויים</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Date Edit Modal */}
+                {editingDateTask && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold">שינוי תאריך יעד</h3>
+                                <button onClick={() => setEditingDateTask(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                            </div>
+                            <form onSubmit={async (e) => {
+                                e.preventDefault();
+                                if (!db || !editingDateTask) return;
+                                try {
+                                    const taskRef = doc(db, "events", id, "tasks", editingDateTask.id);
+                                    const dueVal = computeDueDateFromMode(dateModalMode, parseOffset(dateModalOffset) ?? 0, dateModalTime || extractTimeString(getEventStartDate() || new Date()));
+                                    await updateDoc(taskRef, { dueDate: dueVal });
+                                    setEditingDateTask(null);
+                                } catch (err) {
+                                    console.error("Error updating date:", err);
+                                    alert("שגיאה בעדכון התאריך");
+                                }
+                            }} className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">מועד המשימה</label>
+                                    <div className="flex flex-wrap gap-3 text-xs">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                className="accent-indigo-600"
+                                                checked={dateModalMode === "event_day"}
+                                                onChange={() => { setDateModalMode("event_day"); setDateModalOffset("0"); }}
+                                            />
+                                            ביום האירוע
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                className="accent-indigo-600"
+                                                checked={dateModalMode === "offset"}
+                                                onChange={() => setDateModalMode("offset")}
+                                            />
+                                            ימים ביחס לאירוע
+                                        </label>
+                                    </div>
+                                    {dateModalMode === "offset" && (
+                                        <div className="flex items-center gap-2 text-xs">
+                                            <span>ימים מהאירוע:</span>
+                                            <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                className="w-24 p-2 border rounded-lg text-sm"
+                                                value={dateModalOffset}
+                                                onChange={(e) => setDateModalOffset(e.target.value)}
+                                            />
+                                            <span className="text-gray-500">(שלילי = לפני, חיובי = אחרי)</span>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-2 text-xs">
+                                        <span>שעה:</span>
+                                        <input
+                                            type="time"
+                                            className="p-2 border rounded-lg text-sm"
+                                            value={dateModalTime}
+                                            onChange={(e) => setDateModalTime(e.target.value || extractTimeString(getEventStartDate() || new Date()))}
+                                        />
+                                    </div>
+                                    <div className="text-xs text-gray-600">
+                                        {editingDateTask.dueDate
+                                            ? `המשימה מתוזמנת ל-${new Date(editingDateTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
+                                            : "לא נקבע מועד למשימה"}
+                                        {!getEventStartDate() && (
+                                            <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex justify-end gap-3 pt-4">
+                                    <button type="button" onClick={() => setEditingDateTask(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                                    <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">שמור</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

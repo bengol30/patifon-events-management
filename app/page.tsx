@@ -288,11 +288,6 @@ export default function Dashboard() {
   const [deleteEventRemoveTasks, setDeleteEventRemoveTasks] = useState(false);
   const [unreadEditRequests, setUnreadEditRequests] = useState(0);
   const [unassignedTasksCount, setUnassignedTasksCount] = useState(0);
-  const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
-  const [loadingNotes, setLoadingNotes] = useState(true);
-  const [newNote, setNewNote] = useState("");
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [editingNoteText, setEditingNoteText] = useState("");
   const [assigneeWhatsappModal, setAssigneeWhatsappModal] = useState<{
     taskId: string;
     taskTitle: string;
@@ -865,38 +860,7 @@ export default function Dashboard() {
     loadUnread();
   }, [db, isAdmin]);
 
-  // Team notes (per user)
-  useEffect(() => {
-    const loadNotes = async () => {
-      if (!db || !user) {
-        setLoadingNotes(false);
-        return;
-      }
-      try {
-        setLoadingNotes(true);
-        // Avoids composite index requirement: filter by owner then sort locally.
-        const snap = await getDocs(
-          query(collection(db, "team_meeting_notes"), where("createdBy", "==", user.uid))
-        );
-        const notes: TeamNote[] = [];
-        snap.forEach(n => {
-          const data = n.data() as any;
-          notes.push({ id: n.id, text: data.text || "", createdAt: data.createdAt, updatedAt: data.updatedAt });
-        });
-        notes.sort((a, b) => {
-          const aTs = a.createdAt?.seconds || 0;
-          const bTs = b.createdAt?.seconds || 0;
-          return bTs - aTs;
-        });
-        setTeamNotes(notes);
-      } catch (err) {
-        console.error("Failed loading team notes", err);
-      } finally {
-        setLoadingNotes(false);
-      }
-    };
-    loadNotes();
-  }, [db, user]);
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -2639,49 +2603,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleAddNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!db || !user) return;
-    const text = newNote.trim();
-    if (!text) return;
-    try {
-      const docRef = await addDoc(collection(db, "team_meeting_notes"), {
-        text,
-        createdBy: user.uid,
-        createdByEmail: user.email || "",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      setTeamNotes(prev => [{ id: docRef.id, text, createdAt: { seconds: Math.floor(Date.now() / 1000) } }, ...prev]);
-      setNewNote("");
-    } catch (err) {
-      console.error("Failed to add note", err);
-    }
-  };
 
-  const handleDeleteNote = async (id: string) => {
-    if (!db) return;
-    try {
-      await deleteDoc(doc(db, "team_meeting_notes", id));
-      setTeamNotes(prev => prev.filter(n => n.id !== id));
-    } catch (err) {
-      console.error("Failed to delete note", err);
-    }
-  };
-
-  const handleUpdateNote = async (id: string, text: string) => {
-    if (!db) return;
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    try {
-      await updateDoc(doc(db, "team_meeting_notes", id), { text: trimmed, updatedAt: serverTimestamp() });
-      setTeamNotes(prev => prev.map(n => n.id === id ? { ...n, text: trimmed } : n));
-      setEditingNoteId(null);
-      setEditingNoteText("");
-    } catch (err) {
-      console.error("Failed to update note", err);
-    }
-  };
 
   const handleApproveCompletion = async (req: any, approve: boolean, opts?: { suppressErrorLog?: boolean }) => {
     if (!db) {
@@ -3220,88 +3142,6 @@ export default function Dashboard() {
       )}
 
       <div className="space-y-6">
-        <section className="overflow-hidden rounded-[32px] border border-[rgba(74,26,44,0.12)] bg-[radial-gradient(circle_at_top_right,rgba(255,184,76,0.32),transparent_36%),linear-gradient(135deg,rgba(74,26,44,0.96),rgba(104,28,60,0.94))] text-white shadow-[0_24px_70px_rgba(74,26,44,0.22)]">
-          <div className="p-5 sm:p-6 lg:p-8">
-            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-              <div className="max-w-2xl text-right">
-                <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-                  <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">{myTasks.length} משימות פתוחות</span>
-                  <span className="rounded-full border border-amber-200/30 bg-amber-300/15 px-3 py-1 text-xs font-semibold text-amber-100">{upcomingEventsCount} אירועים קרובים</span>
-                  <span className="rounded-full border border-sky-200/30 bg-sky-300/15 px-3 py-1 text-xs font-semibold text-sky-100">{activeProjectsCount} פרויקטים פעילים</span>
-                </div>
-                <h2 className="text-3xl font-black tracking-tight sm:text-4xl">מה צריך תשומת לב עכשיו</h2>
-                <p className="mt-2 text-sm leading-6 text-white/75 sm:text-base">המסך הזה מסדר קודם את הדברים שדורשים טיפול, אחר כך את מה שחי כרגע, ורק בסוף את כלי הניהול. כך אפשר להבין תוך שנייה מה בוער ומה הצעד הבא.</p>
-
-                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <button type="button" onClick={() => focusTaskList("status")} className="rounded-3xl border border-red-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
-                    <p className="text-xs font-semibold text-white/70">באדום עכשיו</p>
-                    <p className="mt-2 text-3xl font-black text-white">{stuckTasksCount + overdueTasksCount}</p>
-                    <p className="mt-1 text-xs text-white/70">תקועות או באיחור</p>
-                  </button>
-                  <button type="button" onClick={() => focusTaskList("priority")} className="rounded-3xl border border-amber-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
-                    <p className="text-xs font-semibold text-white/70">לטפל היום</p>
-                    <p className="mt-2 text-3xl font-black text-white">{urgentTasksCount}</p>
-                    <p className="mt-1 text-xs text-white/70">בעדיפות גבוהה</p>
-                  </button>
-                  <button type="button" onClick={() => focusTaskList("none")}
-                    className="rounded-3xl border border-fuchsia-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
-                    <p className="text-xs font-semibold text-white/70">מחכות לתגובה</p>
-                    <p className="mt-2 text-3xl font-black text-white">{unreadFilteredTasksCount}</p>
-                    <p className="mt-1 text-xs text-white/70">עם הודעות שלא נקראו</p>
-                  </button>
-                  <button type="button" onClick={() => focusTaskList("status")} className="rounded-3xl border border-slate-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
-                    <p className="text-xs font-semibold text-white/70">בתנועה</p>
-                    <p className="mt-2 text-3xl font-black text-white">{inProgressTasksCount}</p>
-                    <p className="mt-1 text-xs text-white/70">כבר בתהליך</p>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid w-full gap-3 sm:grid-cols-2 xl:max-w-md xl:grid-cols-1">
-                <div className="rounded-[28px] border border-white/15 bg-white/10 p-4 text-right backdrop-blur-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <AlertTriangle className="mt-1 shrink-0 text-amber-200" size={20} />
-                    <div>
-                      <p className="text-xs font-semibold text-white/70">פוקוס ראשון</p>
-                      <h3 className="mt-1 text-lg font-bold text-white">{nextFocusTask?.title || "אין משימה דחופה כרגע"}</h3>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-sm text-white/75">{nextFocusTask ? `${nextFocusTask.eventTitle || "ללא שיוך"} • ${nextFocusTask.status === "STUCK" ? "תקוע" : nextFocusTask.status === "IN_PROGRESS" ? "בתהליך" : "ממתין לביצוע"}` : "אם הכל נקי, זה זמן טוב לעבור על אירועים ופרויקטים פעילים."}</p>
-                  {nextFocusTask && (
-                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                      <button onClick={() => router.push(`/tasks/${nextFocusTask.id}?eventId=${nextFocusTask.eventId}`)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-[var(--patifon-burgundy)] transition hover:bg-white/90">
-                        <CheckSquare size={16} />
-                        פתח משימה
-                      </button>
-                      <button onClick={() => setChatTask(nextFocusTask)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
-                        <MessageCircle size={16} />
-                        צ׳אט מהיר
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-[28px] border border-white/15 bg-white/10 p-4 text-right backdrop-blur-sm">
-                  <p className="text-xs font-semibold text-white/70">מה חסר כדי להתקדם</p>
-                  <div className="mt-3 space-y-3 text-sm text-white/85">
-                    <button type="button" onClick={() => focusTaskList("none")} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2 text-right transition hover:bg-black/20">
-                      <span>{unassignedTasksCount} משימות בלי שיוך</span>
-                      <span className="text-xs text-white/60">צריך לשבץ</span>
-                    </button>
-                    <button type="button" onClick={() => focusTaskList("deadline")} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2 text-right transition hover:bg-black/20">
-                      <span>{tasksWithoutDueDateCount} משימות בלי דדליין</span>
-                      <span className="text-xs text-white/60">צריך לקבע</span>
-                    </button>
-                    <button type="button" onClick={() => setActivePanel("volunteers")} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2 text-right transition hover:bg-black/20">
-                      <span>{completionRequests.length} בקשות מתנדבים</span>
-                      <span className="text-xs text-white/60">ממתינות לאישור</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.95fr)]">
           <div className="space-y-6">
@@ -3329,9 +3169,9 @@ export default function Dashboard() {
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">דחופות</p>
                       <p className="mt-1 text-lg font-bold text-amber-900">{urgentTasksCount}</p>
                     </button>
-                    <button type="button" onClick={() => focusTaskList("none")} className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right transition hover:bg-fuchsia-100">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">עם הודעות</p>
-                      <p className="mt-1 text-lg font-bold text-fuchsia-800">{unreadFilteredTasksCount}</p>
+                    <button type="button" onClick={() => document.getElementById('active-events')?.scrollIntoView({ behavior: 'smooth' })} className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right transition hover:bg-fuchsia-100">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">אירועים פעילים</p>
+                      <p className="mt-1 text-lg font-bold text-fuchsia-800">{events.length}</p>
                     </button>
                     <button type="button" onClick={() => focusTaskList("deadline")} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right transition hover:bg-slate-100">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">ללא תאריך</p>
@@ -3443,71 +3283,11 @@ export default function Dashboard() {
               </div>
             </section>
 
-            <section className="bg-white p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <MessageCircle style={{ color: 'var(--patifon-orange)' }} />
-                    <h2 className="text-xl font-semibold" style={{ color: 'var(--patifon-burgundy)' }}>נקודות לפגישת הצוות הקרובה</h2>
-                  </div>
-                  <p className="mt-1 text-sm text-gray-600">דברים שצריך להעלות, להחליט או לסגור בפגישה הבאה.</p>
-                </div>
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">{teamNotes.length} נקודות</span>
-              </div>
-              <form onSubmit={handleAddNote} className="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
-                <textarea
-                  className="flex-1 rounded-2xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="כתבו כאן נקודות, החלטות או שאלות לפגישה..."
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  rows={2}
-                />
-                <button
-                  type="submit"
-                  className="rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700"
-                >
-                  הוסף
-                </button>
-              </form>
-              {loadingNotes ? (
-                <div className="text-sm text-gray-500">טוען נקודות...</div>
-              ) : teamNotes.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-gray-500">אין נקודות עדיין. הוסף את הראשונה.</div>
-              ) : (
-                <div className="space-y-3">
-                  {teamNotes.map(note => (
-                    <div key={note.id} className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
-                      {editingNoteId === note.id ? (
-                        <div className="space-y-2">
-                          <textarea
-                            className="w-full rounded-lg border p-2 text-sm"
-                            rows={2}
-                            value={editingNoteText}
-                            onChange={(e) => setEditingNoteText(e.target.value)}
-                          />
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => handleUpdateNote(note.id, editingNoteText)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-700">שמור</button>
-                            <button onClick={() => { setEditingNoteId(null); setEditingNoteText(""); }} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100">בטל</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="whitespace-pre-wrap text-sm text-gray-800">{note.text}</p>
-                          <div className="shrink-0 flex items-center gap-2">
-                            <button onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.text); }} className="text-xs text-indigo-700 hover:underline">ערוך</button>
-                            <button onClick={() => handleDeleteNote(note.id)} className="text-xs text-red-600 hover:underline">מחק</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
+
           </div>
 
           <aside className="space-y-6">
-            <section className="bg-white p-5 sm:p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+            <section id="active-events" className="bg-white p-5 sm:p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="text-right">
                   <div className="flex items-center justify-end gap-2">
