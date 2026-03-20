@@ -3138,6 +3138,16 @@ export default function EventDetailsPage() {
             || task.title.includes("להעלות סטורי")
         );
     });
+    const primaryFocusLabel = overdueTasksCount > 0
+        ? `יש ${overdueTasksCount} משימות באיחור שדורשות טיפול מיידי.`
+        : openTasksCount > 0
+            ? `יש ${openTasksCount} משימות פתוחות לקידום היום.`
+            : "כל המשימות סגורות כרגע — אפשר להתקדם לשיתופים, תוכן וסגירות.";
+    const volunteerProgressLabel = event.needsVolunteers
+        ? (event.volunteersCount
+            ? `${combinedVolunteers.length} / ${event.volunteersCount} מתנדבים`
+            : `${combinedVolunteers.length} מתנדבים רשומים`)
+        : `${volunteerTasks.length} משימות למתנדבים`;
 
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(241,143,58,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf5_0%,_#f7efe6_48%,_#f4e7d7_100%)] px-4 py-4 sm:px-6 sm:py-6 relative">
@@ -3870,52 +3880,52 @@ export default function EventDetailsPage() {
                             </div>
                         </div>
                     </div>
-                    <div className="flex flex-col md:flex-row md:items-start gap-4 shrink-0">
-                        <div className="flex md:flex-col gap-2 md:gap-3">
-                            <button
-                                onClick={copyInviteLink}
-                                className={`w-11 h-11 rounded-full transition vinyl-shadow text-white flex items-center justify-center ${copied ? "bg-green-600 hover:bg-green-700" : "patifon-gradient hover:opacity-90"}`}
-                                title={copied ? "הקישור הועתק!" : "שיתוף דף ניהול האירוע"}
-                            >
-                                {copied ? <Check size={20} /> : <Share2 size={20} />}
-                            </button>
-                            <button
-                                onClick={handleAddEventToCalendar}
-                                className="w-11 h-11 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition flex items-center justify-center"
-                                title="הוסף ליומן והזמן את הצוות"
-                            >
-                                <Calendar size={18} />
-                            </button>
-                            <button
-                                onClick={() => setIsEditEventOpen(true)}
-                                className="w-11 h-11 rounded-full border border-indigo-100 text-indigo-700 hover:bg-indigo-50 transition flex items-center justify-center"
-                                title="ערוך פרטי אירוע"
-                            >
-                                <Edit2 size={18} />
-                            </button>
-                            {isOwner && (
-                                <button
-                                    onClick={confirmDeleteEvent}
-                                    className="w-11 h-11 rounded-full transition hover:bg-red-100 flex items-center justify-center"
-                                    style={{ color: 'var(--patifon-red)', background: '#fee', border: '1px solid var(--patifon-red)' }}
-                                    title="מחק אירוע"
-                                >
-                                    <Trash2 size={18} />
-                                </button>
-                            )}
+                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+                        <div className="rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                                <div className="space-y-3">
+                                    <div>
+                                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">פוקוס להיום</p>
+                                        <p className="mt-1 text-lg font-black text-white sm:text-xl">{primaryFocusLabel}</p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 text-xs text-white/85">
+                                        <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">{teamTasks.length} משימות צוות</span>
+                                        <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">{volunteerProgressLabel}</span>
+                                        <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">{event.team?.length || 0} אנשי צוות</span>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[340px]">
+                                    <button onClick={() => { const next = !showNewTask; setShowNewTask(next); if (!next) setSaveNewTaskToLibrary(false); if (next) setNewTaskDateManuallyChanged(false); }} className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-[var(--patifon-burgundy)] shadow-sm transition hover:-translate-y-0.5">משימה חדשה</button>
+                                    <button onClick={handleOpenContentModal} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">תוכן ומדיה</button>
+                                    <button onClick={() => router.push(`/events/${id}/files`)} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">קבצים ומסמכים</button>
+                                    {event.needsVolunteers ? (
+                                        <button
+                                            onClick={() => {
+                                                setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
+                                                setShowVolunteerModal(true);
+                                            }}
+                                            className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
+                                        >
+                                            מתנדבים
+                                        </button>
+                                    ) : (
+                                        <button onClick={copyInviteLink} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">שיתוף צוות</button>
+                                    )}
+                                </div>
+                            </div>
                         </div>
-                        <div className="flex flex-col gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100 md:w-auto md:self-start md:items-start">
-                            <div className="space-y-3 w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
+                        <div className="flex flex-col gap-3 rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
+                            <div className="space-y-3">
                                 {event.contactPerson?.name ? (
-                                    <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full">
+                                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
                                         <div className="flex items-center gap-3 min-w-0">
                                             <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
                                                 <User size={20} />
                                             </div>
                                             <div className="text-sm min-w-0">
-                                                <p className="font-semibold text-gray-900 truncate">איש קשר: {event.contactPerson.name}</p>
+                                                <p className="font-semibold truncate">איש קשר: {event.contactPerson.name}</p>
                                                 <div className="text-gray-600 flex flex-col gap-0.5">
-                                                    {event.contactPerson.phone && <span className="flex items-center gap-1 truncate">טלפון: {event.contactPerson.phone}</span>}
+                                                    {event.contactPerson.phone && <span className="truncate">טלפון: {event.contactPerson.phone}</span>}
                                                     {event.contactPerson.email && <span className="truncate">אימייל: {event.contactPerson.email}</span>}
                                                 </div>
                                             </div>
@@ -3932,93 +3942,65 @@ export default function EventDetailsPage() {
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="p-3 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 bg-white">
+                                    <div className="rounded-2xl border border-dashed border-white/30 bg-white/10 p-3 text-sm text-white/75">
                                         לא הוגדר איש קשר לאירוע.
                                     </div>
                                 )}
                             </div>
-                            <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm w-full md:w-auto md:min-w-[14rem] md:max-w-[18rem]">
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowAdvancedActions(!showAdvancedActions)}
-                                        className="flex-1 flex items-center justify-between text-sm font-semibold text-gray-800 px-2 py-1 rounded-md hover:bg-gray-50"
-                                    >
-                                        <span>פעולות מתקדמות</span>
-                                        <ChevronDown
-                                            size={18}
-                                            className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`}
-                                        />
-                                    </button>
-                                    <button
-                                        onClick={() => router.push(`/events/${id}/files`)}
-                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                        style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                                        title="מעבר למאגר הקבצים של האירוע"
-                                    >
-                                        <Paperclip size={14} />
-                                        קבצים מצורפים
-                                    </button>
-                                    <button
-                                        onClick={handleOpenContentModal}
-                                        className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                        style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                                        title="תוכן ומדיה - פלייר, מלל ותיוגים"
-                                    >
-                                        <Sparkles size={14} />
-                                        תוכן ומדיה
-                                    </button>
-                                    {event.needsVolunteers && (
-                                        <button
-                                            onClick={() => {
-                                                setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
-                                                setShowVolunteerModal(true);
-                                            }}
-                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                            style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                                            title="הזמנת מתנדבים לאירוע"
-                                        >
-                                            <Handshake size={14} />
-                                            הזמנת מתנדבים
-                                        </button>
-                                    )}
-                                </div>
+                            <div className="rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAdvancedActions(!showAdvancedActions)}
+                                    className="flex w-full items-center justify-between rounded-xl px-2 py-1 text-sm font-semibold hover:bg-slate-50"
+                                >
+                                    <div className="text-right">
+                                        <span>פעולות משניות והגדרות</span>
+                                        <p className="mt-1 text-xs font-normal text-slate-500">עריכה, שיתוף, הרשמה, יומן, פוסט, שליטה ופעולות בעלים.</p>
+                                    </div>
+                                    <ChevronDown size={18} className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`} />
+                                </button>
                                 {showAdvancedActions && (
-                                    <div className="flex flex-wrap items-center gap-2 mt-3">
-                                        <button
-                                            onClick={() => router.push(`/events/${id}/registrants`)}
-                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold text-white text-center flex items-center gap-1"
-                                            style={{ background: 'var(--patifon-burgundy)' }}
-                                        >
+                                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                        <button onClick={copyInviteLink} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copied ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                                            {copied ? <Check size={16} /> : <Share2 size={16} />}
+                                            {copied ? "קישור הועתק" : "שיתוף צוות"}
+                                        </button>
+                                        <button onClick={handleAddEventToCalendar} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                            <Calendar size={16} />
+                                            יומן והזמנות
+                                        </button>
+                                        <button onClick={() => setIsEditEventOpen(true)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                            <Edit2 size={16} />
+                                            עריכת פרטי אירוע
+                                        </button>
+                                        <button onClick={() => router.push(`/events/${id}/registrants`)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
                                             <Users size={16} />
                                             נרשמים
                                         </button>
                                         <button
                                             onClick={copyRegisterLink}
-                                            className={`px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center justify-center gap-1 border-2 ${copiedRegister ? "bg-green-600 text-white border-green-600" : ""}`}
-                                            style={!copiedRegister ? { borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' } : undefined}
-                                            title="העתק קישור לטופס רישום"
+                                            className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copiedRegister ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
                                         >
-                                            {copiedRegister ? <Check size={14} /> : <List size={14} />}
-                                            {copiedRegister ? "קישור הועתק" : "העתק קישור הרשמה"}
+                                            {copiedRegister ? <Check size={16} /> : <List size={16} />}
+                                            {copiedRegister ? "קישור הועתק" : "קישור הרשמה"}
                                         </button>
-                                        <button
-                                            onClick={handleOpenPostModal}
-                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                            style={{ borderColor: 'var(--patifon-orange)', color: 'var(--patifon-orange)' }}
-                                        >
-                                            <Sparkles size={14} />
+                                        <button onClick={handleOpenPostModal} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                            <Sparkles size={16} />
                                             מלל לפוסט
                                         </button>
-                                        <button
-                                            onClick={() => router.push(`/events/${id}/files`)}
-                                            className="px-3 py-1.5 rounded-md text-xs md:text-sm font-semibold flex items-center gap-1 border-2"
-                                            style={{ borderColor: 'var(--patifon-burgundy)', color: 'var(--patifon-burgundy)' }}
-                                            title="מעבר למאגר הקבצים של האירוע"
-                                        >
-                                            <Paperclip size={14} />
-                                            קבצים מצורפים לאירוע
+                                        <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${canManageTeam ? "border-slate-200 text-slate-700 hover:bg-slate-50" : "border-slate-200 text-slate-400 cursor-not-allowed"}`}>
+                                            <PauseCircle size={16} />
+                                            מרכז בקרה
                                         </button>
+                                        {isOwner && (
+                                            <button
+                                                onClick={confirmDeleteEvent}
+                                                className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 flex items-center justify-center gap-2"
+                                            >
+                                                <Trash2 size={16} />
+                                                מחק אירוע
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -4035,18 +4017,17 @@ export default function EventDetailsPage() {
                 </div>
             </header>
 
-            <div className="mb-6 rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/70 px-4 py-4 shadow-sm backdrop-blur-sm sm:px-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <p className="text-sm font-semibold text-gray-900">גישה מהירה</p>
-                        <p className="text-xs text-gray-600">הפעולות הכי שימושיות מבלי לחפש בתוך הדף.</p>
+            <div className="mb-6 rounded-2xl border border-[rgba(74,26,44,0.08)] bg-white/85 px-4 py-4 shadow-sm backdrop-blur-sm sm:px-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="space-y-1">
+                        <p className="text-sm font-semibold text-gray-900">מסך שליטה מהיר</p>
+                        <p className="text-xs text-gray-600">מה שבדרך כלל צריך עכשיו. כל היתר נשאר נגיש בהמשך הדף ובתפריט הפעולות.</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <button onClick={() => { const next = !showNewTask; setShowNewTask(next); if (!next) setSaveNewTaskToLibrary(false); if (next) setNewTaskDateManuallyChanged(false); }} className="patifon-action-primary text-sm">משימה חדשה</button>
-                        <button onClick={copyInviteLink} className="patifon-action-secondary text-sm">שיתוף צוות</button>
-                        <button onClick={copyRegisterLink} className="patifon-action-secondary text-sm">קישור הרשמה</button>
+                        <button onClick={() => setShowSpecialModal(true)} className="patifon-action-secondary text-sm">משימות מיוחדות</button>
+                        <button onClick={() => { setShowSuggestions(true); handleLibraryEditStart(); }} className="patifon-action-secondary text-sm">מאגר משימות</button>
                         {event.needsVolunteers && <button onClick={copyVolunteerLink} className="patifon-action-secondary text-sm">קישור מתנדבים</button>}
-                        <button onClick={handleOpenContentModal} className="patifon-action-secondary text-sm">תוכן ומדיה</button>
                     </div>
                 </div>
             </div>
@@ -4717,9 +4698,20 @@ export default function EventDetailsPage() {
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Team Section */}
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <details className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
+                                    <p className="text-xs text-gray-500 mt-1">{event.team?.length || 0} אנשי צוות, בקשות הצטרפות והודעות צוות.</p>
+                                </div>
+                                <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
+                                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{event.team?.length || 0}</span>
+                                    <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
+                                </div>
+                            </summary>
+                            <div className="px-6 pb-6">
                             <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
+                                <div className="text-sm text-gray-500">ניהול, הוספה, תקשורת ושיוך אנשי צוות.</div>
                                 <div className="flex gap-2">
                                     <button
                                         onClick={copyInviteLink}
@@ -5018,16 +5010,28 @@ export default function EventDetailsPage() {
                                     </div>
                                 )}
                             </div>
-                        </div>
+                            </div>
+                        </details>
 
                         {/* Volunteers Section */}
                         {event.needsVolunteers && (
-                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                            <details className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
+                                    <div className="flex items-center gap-2">
                                         <Handshake size={20} className="text-indigo-600" />
-                                        מתנדבים
-                                    </h3>
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-gray-900">מתנדבים</h3>
+                                            <p className="text-xs text-gray-500 mt-1">ניהול רשומים, שליחת הודעות וגישה מהירה לטופס ההתנדבות.</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
+                                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">{volunteerProgressLabel}</span>
+                                        <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
+                                    </div>
+                                </summary>
+                                <div className="px-6 pb-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="text-sm text-gray-500">רשימת מתנדבים פעילים, הודעות ועדכוני גיוס.</div>
                                     {event.volunteersCount && (
                                         <span className="text-xs text-gray-500">
                                             {combinedVolunteers.length} / {event.volunteersCount}
@@ -5168,16 +5172,30 @@ export default function EventDetailsPage() {
                                     </div>
                                 )}
                             </div>
+                            </details>
                         )}
                     </div>
 
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                                <Paperclip size={18} />
-                                מסמכים חשובים לאירוע
-                            </h2>
-                            <div className="flex items-center gap-2">
+                    <details className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
+                            <div>
+                                <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                                    <Paperclip size={18} />
+                                    מסמכים חשובים לאירוע
+                                </h2>
+                                <p className="text-xs text-gray-500 mt-1">קבצים שהועלו, מסמכים חשובים וקישורי גישה להמשך עבודה.</p>
+                            </div>
+                            <div className="flex items-center gap-2 text-gray-400 group-open:text-gray-600">
+                                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{eventFiles.length + importantDocs.length}</span>
+                                <ChevronDown size={18} className="transition-transform group-open:rotate-180" />
+                            </div>
+                        </summary>
+                        <div className="px-6 pb-6">
+                        <div className="flex items-center justify-between mb-4 gap-3">
+                            <p className="text-sm text-gray-600">
+                                כל הקבצים שצורפו לאירוע במקום אחד. לחצו על המאגר לצפייה בכל הקבצים, מי העלה ומתי.
+                            </p>
+                            <div className="flex items-center gap-2 shrink-0">
                                 <button
                                     onClick={() => setShowEventFileModal(true)}
                                     className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold border border-indigo-200 px-3 py-1.5 rounded-lg flex items-center gap-2"
@@ -5193,9 +5211,6 @@ export default function EventDetailsPage() {
                                 </button>
                             </div>
                         </div>
-                        <p className="text-sm text-gray-600 mb-3">
-                            כל הקבצים שצורפו לאירוע במקום אחד. לחצו על המאגר לצפייה בכל הקבצים, מי העלה ומתי.
-                        </p>
                         {(eventFiles.length > 0 || importantDocs.length > 0) && (
                             <div className="space-y-4">
                                 {eventFiles.length > 0 && (
@@ -5281,6 +5296,7 @@ export default function EventDetailsPage() {
                             </div>
                         )}
                     </div>
+                    </details>
                 </div>
             </div>
 
