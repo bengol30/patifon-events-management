@@ -238,6 +238,11 @@ export default function EventDetailsPage() {
     const [newTaskDateManuallyChanged, setNewTaskDateManuallyChanged] = useState(false);
     const [loadingAiDateSuggestion, setLoadingAiDateSuggestion] = useState(false);
     const newTaskFileInputRef = useRef<HTMLInputElement | null>(null);
+    const tasksOverviewRef = useRef<HTMLDivElement | null>(null);
+    const teamTasksRef = useRef<HTMLDivElement | null>(null);
+    const volunteerTasksRef = useRef<HTMLDivElement | null>(null);
+    const teamSectionRef = useRef<HTMLDetailsElement | null>(null);
+    const volunteersSectionRef = useRef<HTMLDetailsElement | null>(null);
     const [newTaskFiles, setNewTaskFiles] = useState<File[]>([]);
     const normalizeTaskKey = (title: string) =>
         (title || "")
@@ -3149,6 +3154,39 @@ export default function EventDetailsPage() {
             : `${combinedVolunteers.length} מתנדבים רשומים`)
         : `${volunteerTasks.length} משימות למתנדבים`;
 
+    const scrollToRef = (ref: { current: HTMLElement | null }) => {
+        ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+
+    const openDetailsAndScroll = (ref: { current: HTMLDetailsElement | null }) => {
+        if (ref.current) ref.current.open = true;
+        requestAnimationFrame(() => scrollToRef(ref));
+    };
+
+    const openTaskComposer = () => {
+        const next = !showNewTask;
+        setShowNewTask(next);
+        if (!next) setSaveNewTaskToLibrary(false);
+        if (next) setNewTaskDateManuallyChanged(false);
+        if (next) requestAnimationFrame(() => scrollToRef(tasksOverviewRef));
+    };
+
+    const handleEventSummaryCardClick = (label: string) => {
+        if (label === "משימות פתוחות" || label === "משימות שהושלמו") {
+            scrollToRef(tasksOverviewRef);
+            return;
+        }
+        if (label === "אנשי צוות") {
+            openDetailsAndScroll(teamSectionRef);
+            return;
+        }
+        if (event.needsVolunteers) {
+            openDetailsAndScroll(volunteersSectionRef);
+            return;
+        }
+        scrollToRef(volunteerTasksRef);
+    };
+
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(241,143,58,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf5_0%,_#f7efe6_48%,_#f4e7d7_100%)] px-4 py-4 sm:px-6 sm:py-6 relative">
             <div className="mx-auto max-w-7xl">
@@ -3889,13 +3927,13 @@ export default function EventDetailsPage() {
                                         <p className="mt-1 text-lg font-black text-white sm:text-xl">{primaryFocusLabel}</p>
                                     </div>
                                     <div className="flex flex-wrap gap-2 text-xs text-white/85">
-                                        <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">{teamTasks.length} משימות צוות</span>
-                                        <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">{volunteerProgressLabel}</span>
-                                        <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">{event.team?.length || 0} אנשי צוות</span>
+                                        <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{teamTasks.length} משימות צוות</button>
+                                        <button type="button" onClick={() => event.needsVolunteers ? openDetailsAndScroll(volunteersSectionRef) : scrollToRef(volunteerTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{volunteerProgressLabel}</button>
+                                        <button type="button" onClick={() => openDetailsAndScroll(teamSectionRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{event.team?.length || 0} אנשי צוות</button>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[340px]">
-                                    <button onClick={() => { const next = !showNewTask; setShowNewTask(next); if (!next) setSaveNewTaskToLibrary(false); if (next) setNewTaskDateManuallyChanged(false); }} className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-[var(--patifon-burgundy)] shadow-sm transition hover:-translate-y-0.5">משימה חדשה</button>
+                                    <button onClick={openTaskComposer} className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-[var(--patifon-burgundy)] shadow-sm transition hover:-translate-y-0.5">משימה חדשה</button>
                                     <button onClick={handleOpenContentModal} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">תוכן ומדיה</button>
                                     <button onClick={() => router.push(`/events/${id}/files`)} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">קבצים ומסמכים</button>
                                     {event.needsVolunteers ? (
@@ -4009,10 +4047,15 @@ export default function EventDetailsPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3 border-t border-[rgba(74,26,44,0.08)] bg-white/70 px-4 py-4 sm:grid-cols-4 sm:px-6">
                     {summaryCards.map((card) => (
-                        <div key={card.label} className={`rounded-2xl border px-4 py-3 shadow-sm ${card.tone}`}>
+                        <button
+                            key={card.label}
+                            type="button"
+                            onClick={() => handleEventSummaryCardClick(card.label)}
+                            className={`rounded-2xl border px-4 py-3 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.tone}`}
+                        >
                             <p className="text-xs font-semibold opacity-80">{card.label}</p>
                             <p className="mt-1 text-2xl font-black">{card.value}</p>
-                        </div>
+                        </button>
                     ))}
                 </div>
             </header>
@@ -4024,7 +4067,7 @@ export default function EventDetailsPage() {
                         <p className="text-xs text-gray-600">מה שבדרך כלל צריך עכשיו. כל היתר נשאר נגיש בהמשך הדף ובתפריט הפעולות.</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <button onClick={() => { const next = !showNewTask; setShowNewTask(next); if (!next) setSaveNewTaskToLibrary(false); if (next) setNewTaskDateManuallyChanged(false); }} className="patifon-action-primary text-sm">משימה חדשה</button>
+                        <button onClick={openTaskComposer} className="patifon-action-primary text-sm">משימה חדשה</button>
                         <button onClick={() => setShowSpecialModal(true)} className="patifon-action-secondary text-sm">משימות מיוחדות</button>
                         <button onClick={() => { setShowSuggestions(true); handleLibraryEditStart(); }} className="patifon-action-secondary text-sm">מאגר משימות</button>
                         {event.needsVolunteers && <button onClick={copyVolunteerLink} className="patifon-action-secondary text-sm">קישור מתנדבים</button>}
@@ -4257,7 +4300,7 @@ export default function EventDetailsPage() {
 
                 {/* Main Content - Tasks */}
                 <div className="space-y-6">
-                    <div className="rounded-[28px] border border-[rgba(74,26,44,0.10)] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)] overflow-hidden">
+                    <div ref={tasksOverviewRef} className="rounded-[28px] border border-[rgba(74,26,44,0.10)] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)] overflow-hidden">
                         <div className="bg-gradient-to-l from-[rgba(255,184,76,0.22)] via-white to-[rgba(74,26,44,0.06)] p-4 sm:p-5">
                             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                                 <div className="space-y-3 text-right">
@@ -4273,10 +4316,10 @@ export default function EventDetailsPage() {
                                         <p className="mt-1 text-sm text-gray-600">חלוקה ברורה יותר בין סיכום, רשימות ופעולות — כדי לעבוד מהר יותר גם במובייל.</p>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                        <div className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">סה״כ</p><p className="mt-1 text-lg font-bold text-slate-900">{tasks.length}</p></div>
-                                        <div className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">צוות</p><p className="mt-1 text-lg font-bold text-slate-900">{teamTasks.length}</p></div>
-                                        <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">מתנדבים</p><p className="mt-1 text-lg font-bold text-amber-900">{volunteerTasks.length}</p></div>
-                                        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/90 px-3 py-2 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700">לביצוע</p><p className="mt-1 text-lg font-bold text-indigo-900">{openTasksCount}</p></div>
+                                        <button type="button" onClick={() => scrollToRef(tasksOverviewRef)} className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right transition hover:bg-slate-50"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">סה״כ</p><p className="mt-1 text-lg font-bold text-slate-900">{tasks.length}</p></button>
+                                        <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right transition hover:bg-slate-50"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">צוות</p><p className="mt-1 text-lg font-bold text-slate-900">{teamTasks.length}</p></button>
+                                        <button type="button" onClick={() => scrollToRef(volunteerTasksRef)} className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-right transition hover:bg-amber-100"><p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">מתנדבים</p><p className="mt-1 text-lg font-bold text-amber-900">{volunteerTasks.length}</p></button>
+                                        <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-2xl border border-indigo-200 bg-indigo-50/90 px-3 py-2 text-right transition hover:bg-indigo-100"><p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700">לביצוע</p><p className="mt-1 text-lg font-bold text-indigo-900">{openTasksCount}</p></button>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:w-[420px]">
@@ -4300,12 +4343,7 @@ export default function EventDetailsPage() {
                                         משימות מיוחדות
                                     </button>
                                     <button
-                                        onClick={() => {
-                                            const next = !showNewTask;
-                                            setShowNewTask(next);
-                                            if (!next) setSaveNewTaskToLibrary(false);
-                                            if (next) setNewTaskDateManuallyChanged(false);
-                                        }}
+                                        onClick={openTaskComposer}
                                         className="patifon-gradient flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:opacity-90"
                                     >
                                         <Plus size={18} />
@@ -4572,7 +4610,7 @@ export default function EventDetailsPage() {
                             <div className="rounded-[28px] border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-gray-500 shadow-sm">אין משימות עדיין. צור את המשימה הראשונה כדי להתחיל לעבוד מסודר.</div>
                         ) : (
                             <>
-                                <div className="rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)] overflow-hidden">
+                                <div ref={teamTasksRef} className="rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)] overflow-hidden">
                                     <div className="border-b border-slate-200 bg-gradient-to-l from-slate-100 to-white px-4 py-4 sm:px-5">
                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                             <div className="text-right">
@@ -4630,7 +4668,7 @@ export default function EventDetailsPage() {
                                     </div>
                                 </div>
 
-                                <div className="rounded-[28px] border border-amber-200 bg-white shadow-[0_16px_40px_rgba(245,158,11,0.10)] overflow-hidden">
+                                <div ref={volunteerTasksRef} className="rounded-[28px] border border-amber-200 bg-white shadow-[0_16px_40px_rgba(245,158,11,0.10)] overflow-hidden">
                                     <div className="border-b border-amber-200 bg-gradient-to-l from-amber-100/90 to-white px-4 py-4 sm:px-5">
                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                             <div className="text-right">
@@ -4698,7 +4736,7 @@ export default function EventDetailsPage() {
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Team Section */}
-                        <details className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
+                        <details ref={teamSectionRef} className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" open>
                             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
                                 <div>
                                     <h2 className="text-lg font-semibold text-gray-800">צוות האירוע</h2>
@@ -5015,7 +5053,7 @@ export default function EventDetailsPage() {
 
                         {/* Volunteers Section */}
                         {event.needsVolunteers && (
-                            <details className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                            <details ref={volunteersSectionRef} className="group bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-6">
                                     <div className="flex items-center gap-2">
                                         <Handshake size={20} className="text-indigo-600" />
@@ -5349,7 +5387,7 @@ export default function EventDetailsPage() {
 
             <div className="fixed inset-x-0 bottom-3 z-30 px-3 md:hidden pointer-events-none">
                 <div className="mx-auto flex max-w-md items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/95 p-2 shadow-[0_14px_40px_rgba(74,26,44,0.18)] backdrop-blur pointer-events-auto">
-                    <button onClick={() => { const next = !showNewTask; setShowNewTask(next); if (!next) setSaveNewTaskToLibrary(false); if (next) setNewTaskDateManuallyChanged(false); }} className="flex-1 rounded-xl bg-[var(--patifon-burgundy)] px-3 py-3 text-sm font-bold text-white">משימה</button>
+                    <button onClick={openTaskComposer} className="flex-1 rounded-xl bg-[var(--patifon-burgundy)] px-3 py-3 text-sm font-bold text-white">משימה</button>
                     <button onClick={copyInviteLink} className="flex-1 rounded-xl border border-[rgba(74,26,44,0.12)] px-3 py-3 text-sm font-semibold text-[var(--patifon-burgundy)]">שתף</button>
                     <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`flex-1 rounded-xl px-3 py-3 text-sm font-semibold ${canManageTeam ? 'border border-[rgba(74,26,44,0.12)] text-[var(--patifon-burgundy)]' : 'bg-gray-100 text-gray-400'}`}>בקרה</button>
                 </div>
@@ -5695,12 +5733,16 @@ export default function EventDetailsPage() {
                                 <div className="space-y-2">
                                     {specialTasks.map((task) => (
                                         <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-semibold text-gray-900 truncate">{task.title}</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => router.push(`/tasks/${task.id}?eventId=${id}`)}
+                                                className="min-w-0 flex-1 text-right"
+                                            >
+                                                <p className="text-sm font-semibold text-gray-900 truncate hover:underline">{task.title}</p>
                                                 <p className="text-xs text-gray-500">
                                                     סטטוס: {task.status === "DONE" ? "בוצע" : task.status === "IN_PROGRESS" ? "בתהליך" : task.status === "STUCK" ? "תקוע" : "פתוח"}
                                                 </p>
-                                            </div>
+                                            </button>
                                             <button
                                                 type="button"
                                                 onClick={() => confirmDeleteTask(task.id)}

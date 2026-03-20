@@ -339,6 +339,18 @@ export default function Dashboard() {
   // Filter State
   const [filterEvent, setFilterEvent] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("none");
+  const tasksSectionRef = useRef<HTMLElement | null>(null);
+
+  const scrollToTasksSection = () => {
+    tasksSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const focusTaskList = (nextSort: string, nextFilter: string = "all") => {
+    setFilterEvent(nextFilter);
+    setSortBy(nextSort);
+    setActivePanel("stats");
+    requestAnimationFrame(() => scrollToTasksSection());
+  };
 
   // Edit/Delete State
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -3221,26 +3233,27 @@ export default function Dashboard() {
                 <p className="mt-2 text-sm leading-6 text-white/75 sm:text-base">המסך הזה מסדר קודם את הדברים שדורשים טיפול, אחר כך את מה שחי כרגע, ורק בסוף את כלי הניהול. כך אפשר להבין תוך שנייה מה בוער ומה הצעד הבא.</p>
 
                 <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div className="rounded-3xl border border-red-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                  <button type="button" onClick={() => focusTaskList("status")} className="rounded-3xl border border-red-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
                     <p className="text-xs font-semibold text-white/70">באדום עכשיו</p>
                     <p className="mt-2 text-3xl font-black text-white">{stuckTasksCount + overdueTasksCount}</p>
                     <p className="mt-1 text-xs text-white/70">תקועות או באיחור</p>
-                  </div>
-                  <div className="rounded-3xl border border-amber-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                  </button>
+                  <button type="button" onClick={() => focusTaskList("priority")} className="rounded-3xl border border-amber-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
                     <p className="text-xs font-semibold text-white/70">לטפל היום</p>
                     <p className="mt-2 text-3xl font-black text-white">{urgentTasksCount}</p>
                     <p className="mt-1 text-xs text-white/70">בעדיפות גבוהה</p>
-                  </div>
-                  <div className="rounded-3xl border border-fuchsia-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                  </button>
+                  <button type="button" onClick={() => focusTaskList("none")}
+                    className="rounded-3xl border border-fuchsia-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
                     <p className="text-xs font-semibold text-white/70">מחכות לתגובה</p>
                     <p className="mt-2 text-3xl font-black text-white">{unreadFilteredTasksCount}</p>
                     <p className="mt-1 text-xs text-white/70">עם הודעות שלא נקראו</p>
-                  </div>
-                  <div className="rounded-3xl border border-slate-200/25 bg-white/10 p-4 text-right backdrop-blur-sm">
+                  </button>
+                  <button type="button" onClick={() => focusTaskList("status")} className="rounded-3xl border border-slate-200/25 bg-white/10 p-4 text-right backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40">
                     <p className="text-xs font-semibold text-white/70">בתנועה</p>
                     <p className="mt-2 text-3xl font-black text-white">{inProgressTasksCount}</p>
                     <p className="mt-1 text-xs text-white/70">כבר בתהליך</p>
-                  </div>
+                  </button>
                 </div>
               </div>
 
@@ -3271,18 +3284,18 @@ export default function Dashboard() {
                 <div className="rounded-[28px] border border-white/15 bg-white/10 p-4 text-right backdrop-blur-sm">
                   <p className="text-xs font-semibold text-white/70">מה חסר כדי להתקדם</p>
                   <div className="mt-3 space-y-3 text-sm text-white/85">
-                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2">
+                    <button type="button" onClick={() => focusTaskList("none")} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2 text-right transition hover:bg-black/20">
                       <span>{unassignedTasksCount} משימות בלי שיוך</span>
                       <span className="text-xs text-white/60">צריך לשבץ</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2">
+                    </button>
+                    <button type="button" onClick={() => focusTaskList("deadline")} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2 text-right transition hover:bg-black/20">
                       <span>{tasksWithoutDueDateCount} משימות בלי דדליין</span>
                       <span className="text-xs text-white/60">צריך לקבע</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2">
+                    </button>
+                    <button type="button" onClick={() => setActivePanel("volunteers")} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-black/10 px-3 py-2 text-right transition hover:bg-black/20">
                       <span>{completionRequests.length} בקשות מתנדבים</span>
                       <span className="text-xs text-white/60">ממתינות לאישור</span>
-                    </div>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -3292,7 +3305,7 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.95fr)]">
           <div className="space-y-6">
-            <section className="overflow-hidden rounded-[30px] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+            <section ref={tasksSectionRef} className="overflow-hidden rounded-[30px] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
               <div className="border-b border-[rgba(74,26,44,0.08)] bg-gradient-to-l from-[rgba(255,184,76,0.18)] via-white to-[rgba(74,26,44,0.04)] p-5 sm:p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="text-right">
@@ -3308,22 +3321,22 @@ export default function Dashboard() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[360px]">
-                    <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-right">
+                    <button type="button" onClick={() => focusTaskList("status")} className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-right transition hover:bg-red-100">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-red-600">תקועות/באיחור</p>
                       <p className="mt-1 text-lg font-bold text-red-700">{stuckTasksCount + overdueTasksCount}</p>
-                    </div>
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right">
+                    </button>
+                    <button type="button" onClick={() => focusTaskList("priority")} className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right transition hover:bg-amber-100">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">דחופות</p>
                       <p className="mt-1 text-lg font-bold text-amber-900">{urgentTasksCount}</p>
-                    </div>
-                    <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right">
+                    </button>
+                    <button type="button" onClick={() => focusTaskList("none")} className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right transition hover:bg-fuchsia-100">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">עם הודעות</p>
                       <p className="mt-1 text-lg font-bold text-fuchsia-800">{unreadFilteredTasksCount}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+                    </button>
+                    <button type="button" onClick={() => focusTaskList("deadline")} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right transition hover:bg-slate-100">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">ללא תאריך</p>
                       <p className="mt-1 text-lg font-bold text-slate-900">{tasksWithoutDueDateCount}</p>
-                    </div>
+                    </button>
                   </div>
                 </div>
               </div>
