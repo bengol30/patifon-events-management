@@ -1199,6 +1199,18 @@ export default function VolunteerEventsPage() {
         }
     };
 
+    const pendingMyTasksCount = myTasks.filter(({ task }) => task.status !== "DONE").length;
+    const pendingApprovalCount = myTasks.filter(({ task }) => task.pendingApproval).length;
+    const nextStepText = !isAuthed
+        ? "התחבר/י עם פרטי ההרשמה שלך כדי לראות משימות אישיות ולבחור משימות חדשות."
+        : pendingApprovalCount > 0
+            ? `יש לך ${pendingApprovalCount} משימות שממתינות לאישור.`
+            : pendingMyTasksCount > 0
+                ? `יש לך ${pendingMyTasksCount} משימות פתוחות. כדאי להתמקד קודם בהן.`
+                : totalAvailableVolunteerTasks > 0
+                    ? "הכול פנוי להתחלה — בחר/י משימה אחת ותתקדם/י שלב-שלב."
+                    : "כרגע אין משימות חדשות פנויות, אבל אפשר לעקוב כאן אחרי עדכונים או לדווח שעות ידנית.";
+
     const shouldBlockForTasks = isAuthed && !tasksReady;
 
     if (loading || autoAuthInProgress || shouldBlockForTasks) {
@@ -1224,81 +1236,133 @@ export default function VolunteerEventsPage() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#fff7ed] via-white to-[#f5f3ff] p-6">
             <div className="max-w-6xl mx-auto">
-                <div className="bg-white rounded-2xl shadow-xl border border-orange-100 p-6 md:p-8 mb-6">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-3 bg-indigo-100 rounded-full">
-                            <Handshake className="text-indigo-600" size={24} />
-                        </div>
-                        <div className="flex flex-col gap-1 flex-1">
-                            <h1 className="text-3xl font-bold text-gray-900">אירועים ומשימות פתוחות למתנדבים</h1>
-                            <p className="text-gray-600">אחרי הרשמה תוכלו לבחור ולשריין משימות, ולעקוב אחרי מה שבחרתם באזור האישי.</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
-                            {isAuthed && (
-                                <div className="text-right text-xs text-indigo-800">
-                                    <div className="font-semibold">{sessionIdentity.name}</div>
-                                    <div className="text-indigo-700">{sessionIdentity.email}</div>
+                <div className="bg-white rounded-3xl shadow-xl border border-orange-100 p-6 md:p-8 mb-6 overflow-hidden">
+                    <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr] lg:items-start">
+                        <div>
+                            <div className="flex items-start gap-3 mb-4">
+                                <div className="p-3 bg-indigo-100 rounded-full shrink-0">
+                                    <Handshake className="text-indigo-600" size={24} />
                                 </div>
+                                <div className="flex flex-col gap-2 flex-1">
+                                    <div className="inline-flex w-fit items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">פורטל מתנדבים</div>
+                                    <h1 className="text-3xl font-bold text-gray-900 leading-tight">אזור מתנדבים ברור, ממוקד ונוח גם מהנייד</h1>
+                                    <p className="text-gray-600 max-w-2xl">כאן מתחברים, רואים מי מחובר כרגע, בוחרים משימות זמינות, עוקבים אחרי ההתקדמות האישית ומבינים מה הצעד הבא בלי להתבלבל.</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
+                                    <div className="text-xs font-semibold text-indigo-700">משימות זמינות</div>
+                                    <div className="text-2xl font-bold text-indigo-950 mt-1">{totalAvailableVolunteerTasks}</div>
+                                    <div className="text-xs text-indigo-800 mt-1">פתוחות לבחירה עכשיו</div>
+                                </div>
+                                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                                    <div className="text-xs font-semibold text-amber-700">המשימות שלי</div>
+                                    <div className="text-2xl font-bold text-amber-950 mt-1">{pendingMyTasksCount}</div>
+                                    <div className="text-xs text-amber-800 mt-1">פעילות כרגע</div>
+                                </div>
+                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                                    <div className="text-xs font-semibold text-emerald-700">שעות שאושרו</div>
+                                    <div className="text-2xl font-bold text-emerald-950 mt-1">{totalCompletedHours}</div>
+                                    <div className="text-xs text-emerald-800 mt-1">סה"כ שעות</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5 h-full">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-sm font-semibold text-gray-900">המצב שלך עכשיו</p>
+                                    <p className="text-sm text-gray-600 mt-1">{nextStepText}</p>
+                                </div>
+                                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isAuthed ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-700"}`}>
+                                    {isAuthed ? "מחובר/ת" : "לא מחובר/ת"}
+                                </span>
+                            </div>
+                            <div className="mt-4 rounded-2xl border border-white bg-white p-4">
+                                {isAuthed ? (
+                                    <div className="space-y-1 text-sm text-gray-700">
+                                        <div className="text-base font-bold text-gray-900">{sessionIdentity.name}</div>
+                                        <div>{sessionIdentity.email}</div>
+                                        {sessionIdentity.phone ? <div className="text-gray-500">{sessionIdentity.phone}</div> : null}
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-gray-500">עדיין לא התחברת. התחברות תפתח לך את רשימת המשימות האישית ואת סטטוס ההתקדמות שלך.</div>
+                                )}
+                            </div>
+                            <div className="mt-4 space-y-2 text-sm text-gray-600">
+                                <div className="rounded-xl bg-white px-3 py-2">1. נרשמים או מתחברים</div>
+                                <div className="rounded-xl bg-white px-3 py-2">2. בוחרים משימה פנויה ושומרים אותה</div>
+                                <div className="rounded-xl bg-white px-3 py-2">3. מסיימים ושולחים לאישור</div>
+                            </div>
+                            {isAuthed && (
+                                <button
+                                    onClick={handleVolunteerLogout}
+                                    className="mt-4 w-full px-3 py-2.5 text-sm rounded-xl border border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-semibold"
+                                >
+                                    התנתק
+                                </button>
                             )}
-                            <button
-                                onClick={handleVolunteerLogout}
-                                className="px-3 py-2 text-sm rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-semibold"
-                            >
-                                התנתק
-                            </button>
                         </div>
                     </div>
 
                     {!isAuthed && (
-                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 mt-5">
                             <h2 className="font-semibold text-indigo-900 mb-2">איך זה עובד?</h2>
-                            <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
-                                <li>נרשמים פעם אחת לאירוע (דרך טופס ההרשמה)</li>
-                                <li>מתחברים כאן עם אימייל+סיסמה שבחרתם, בוחרים משימות למתנדבים ומשריינים אותן</li>
-                                <li>כל משימה כוללת תיאור ותאריך יעד (דד ליין)</li>
-                                <li>ניתן לבחור מספר משימות ולעדכן סטטוס באזור האישי</li>
+                            <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside leading-6">
+                                <li>נרשמים פעם אחת לאירוע או פותחים חשבון מתנדב כללי</li>
+                                <li>מתחברים כאן עם אימייל + סיסמה, ואז רואים את כל המשימות האישיות במקום אחד</li>
+                                <li>בוחרים משימות פנויות, מסיימים, ושולחים לאישור כדי לצבור שעות</li>
                             </ul>
                         </div>
                     )}
                 </div>
 
                 {!isAuthed ? (
-                    <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 md:p-8">
-                        <h3 className="text-xl font-bold text-gray-900 mb-4">התחברות לאזור האישי</h3>
-                        <p className="text-sm text-gray-600 mb-4">הזן אימייל וסיסמה שבחרת בהרשמת מתנדב כדי לראות ולנהל את המשימות שלך.</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">אימייל</label>
-                                <input
-                                    type="email"
-                                    value={authEmail}
-                                    onChange={(e) => setAuthEmail(e.target.value)}
-                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    placeholder="you@example.com"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">סיסמה</label>
-                                <input
-                                    type="password"
-                                    value={authPassword}
-                                    onChange={(e) => setAuthPassword(e.target.value)}
-                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    placeholder="******"
-                                />
-                            </div>
+                    <div className="bg-white rounded-3xl shadow-xl border border-gray-200 p-6 md:p-8">
+                        <div className="flex flex-col gap-2 mb-5">
+                            <h3 className="text-2xl font-bold text-gray-900">התחברות לאזור האישי</h3>
+                            <p className="text-sm text-gray-600">הזן/י את האימייל והסיסמה שבחרת בהרשמת מתנדב כדי לראות את המשימות שלך, את סטטוס האישורים ואת ההתקדמות האישית.</p>
                         </div>
-                        {authError && <p className="text-sm text-red-600 mt-2">{authError}</p>}
-                        <div className="flex items-center gap-3 mt-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-5 items-end">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">אימייל</label>
+                                    <input
+                                        type="email"
+                                        value={authEmail}
+                                        onChange={(e) => setAuthEmail(e.target.value)}
+                                        className="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        placeholder="you@example.com"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">סיסמה</label>
+                                    <input
+                                        type="password"
+                                        value={authPassword}
+                                        onChange={(e) => setAuthPassword(e.target.value)}
+                                        className="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        placeholder="******"
+                                    />
+                                </div>
+                            </div>
                             <button
                                 onClick={() => handleAuth()}
                                 disabled={authing}
-                                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm font-semibold disabled:opacity-70"
+                                className="px-5 py-3 rounded-2xl bg-indigo-600 text-white hover:bg-indigo-700 text-sm font-semibold disabled:opacity-70 w-full lg:w-auto"
                             >
                                 {authing ? "מתחבר..." : "כניסה לאזור האישי"}
                             </button>
                         </div>
-                        <p className="text-xs text-gray-500 mt-3">אם לא נרשמת לאירוע עדיין, יש להשלים הרשמה באירוע הרלוונטי ואז להתחבר כאן.</p>
+                        {authError && <p className="text-sm text-red-600 mt-3">{authError}</p>}
+                        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
+                            <p className="text-sm text-indigo-900">עדיין אין לך חשבון? אפשר לפתוח חשבון מתנדב כללי ואז להיכנס ישר לפורטל.</p>
+                            <Link href="/volunteers/register" className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
+                                פתיחת חשבון מתנדב
+                            </Link>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-3">אם נרשמת כבר לאירוע רלוונטי, משתמשים כאן בדיוק באותם פרטים.</p>
                     </div>
                 ) : matchedEventIds.size === 0 ? (
                     <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-12 text-center">
@@ -1375,9 +1439,9 @@ export default function VolunteerEventsPage() {
                                 <div className="flex items-center justify-between mb-3 gap-3">
                                     <div>
                                         <h3 className="text-lg font-bold text-gray-900">המשימות שלי</h3>
-                                        <p className="text-sm text-gray-600">משימות שסימנת או הוקצתה אליך באירועים שלך.</p>
+                                        <p className="text-sm text-gray-600">משימות שסימנת או הוקצו אליך, עם מיקוד ברור במה פתוח, מה הושלם ומה מחכה לאישור.</p>
                                         <p className="text-xs text-gray-600 mt-1">
-                                            קודם בחר משימות שתרצה לבצע. אחרי שסיימת, סמן שהמשימה בוצעה כדי לשלוח לאישור ולצבור שעות התנדבות.
+                                            קודם בוחרים משימה. אחר כך מבצעים. בסיום מסמנים כהושלם כדי לשלוח לאישור ולצבור שעות.
                                         </p>
                                     </div>
                                     <button
@@ -1389,6 +1453,20 @@ export default function VolunteerEventsPage() {
                                     >
                                         {showPendingOnly ? "הצג הכל" : "הצג רק משימות פתוחות"}
                                     </button>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                                    <div className="rounded-xl border border-white bg-white px-4 py-3">
+                                        <div className="text-xs font-semibold text-gray-500">פתוחות כרגע</div>
+                                        <div className="text-xl font-bold text-gray-900 mt-1">{pendingMyTasksCount}</div>
+                                    </div>
+                                    <div className="rounded-xl border border-white bg-white px-4 py-3">
+                                        <div className="text-xs font-semibold text-gray-500">ממתינות לאישור</div>
+                                        <div className="text-xl font-bold text-amber-700 mt-1">{pendingApprovalCount}</div>
+                                    </div>
+                                    <div className="rounded-xl border border-white bg-white px-4 py-3">
+                                        <div className="text-xs font-semibold text-gray-500">אושרו</div>
+                                        <div className="text-xl font-bold text-emerald-700 mt-1">{completedTasks.length}</div>
+                                    </div>
                                 </div>
                                 {showPendingOnly && visibleMyTasks.length === 0 && (
                                     <p className="text-sm text-gray-500 mb-3">אין משימות פתוחות כרגע.</p>

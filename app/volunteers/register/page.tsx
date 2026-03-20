@@ -52,7 +52,6 @@ export default function GeneralVolunteerRegister() {
     setError("");
 
     try {
-      // prevent duplicate email
       const dupSnap = await getDocs(query(collection(db, "general_volunteers"), where("email", "==", form.email.trim())));
       if (!dupSnap.empty) {
         setError("אימייל זה כבר רשום כמתנדב כללי.");
@@ -89,180 +88,136 @@ export default function GeneralVolunteerRegister() {
     }
   };
 
+  const renderInput = (
+    label: string,
+    key: keyof typeof form,
+    options?: { type?: string; placeholder?: string; required?: boolean; minLength?: number }
+  ) => (
+    <div>
+      <label className="mb-1.5 block text-sm font-semibold text-gray-800">{label}{options?.required ? " *" : ""}</label>
+      <input
+        type={options?.type || "text"}
+        required={options?.required}
+        minLength={options?.minLength}
+        value={form[key]}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        placeholder={options?.placeholder}
+        disabled={submitting}
+      />
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#fff7ed] via-white to-[#f5f3ff] p-6">
-      <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl border border-orange-100 p-6 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-indigo-50 rounded-full">
-              <Handshake className="text-indigo-600" size={24} />
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#ffffff_50%,_#eef2ff_100%)] px-4 py-5 md:px-6 md:py-8">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+        <section className="grid gap-6 overflow-hidden rounded-[28px] border border-orange-100 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.08)] lg:grid-cols-[1fr_0.85fr]">
+          <div className="p-5 md:p-8">
+            <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">
+              <Handshake size={16} />
+              פתיחת חשבון מתנדב
             </div>
-            <div>
-              <p className="text-sm text-indigo-700 font-semibold">הרשמת מתנדב כללי</p>
-              <h1 className="text-2xl font-bold text-gray-900">פתיחת חשבון מתנדב</h1>
-              <p className="text-gray-600 text-sm mt-1">
-                אחרי ההרשמה תוכל/י לבחור משימות למתנדבים, לשריין אותן ולסמן ביצוע. משימות שסומנו כמבוצעות יישלחו לאישור יוצר המשימה.
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/volunteers/events"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-semibold transition self-start md:self-auto"
-          >
-            לאזור האישי של המתנדב
-            <ExternalLink size={16} />
-          </Link>
-        </div>
-
-        {submitted ? (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
-            <CheckCircle className="mx-auto mb-3 text-green-600" size={48} />
-            <h2 className="text-xl font-bold text-green-900 mb-2">נרשמת בהצלחה!</h2>
-            <p className="text-green-700 mb-4">מנתב אותך לאזור האישי כדי לבחור משימות.</p>
-            <Link
-              href="/volunteers/events"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold"
-            >
-              מעבר לאזור האישי
-            </Link>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">שם פרטי *</label>
-                <input
-                  type="text"
-                  required
-                  value={form.firstName}
-                  onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="לדוגמה: רוני"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">שם משפחה *</label>
-                <input
-                  type="text"
-                  required
-                  value={form.lastName}
-                  onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="לדוגמה: כהן"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">תעודת זהות *</label>
-                <input
-                  type="text"
-                  required
-                  value={form.idNumber}
-                  onChange={(e) => setForm({ ...form, idNumber: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="לדוגמה: 123456789"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">נייד *</label>
-                <input
-                  type="tel"
-                  required
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="050-0000000"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">מייל *</label>
-                <input
-                  type="email"
-                  required
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="you@example.com"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">חוג</label>
-                <input
-                  type="text"
-                  value={form.program}
-                  onChange={(e) => setForm({ ...form, program: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="לדוגמה: הנדסת תוכנה"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">שנת לימודים</label>
-                <input
-                  type="text"
-                  value={form.year}
-                  onChange={(e) => setForm({ ...form, year: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="לדוגמה: שנה ב'"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">סיסמה *</label>
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="לפחות 6 תווים"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">אימות סיסמה *</label>
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={form.confirmPassword}
-                  onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm"
-                  placeholder="הקלד שוב לאימות"
-                  disabled={submitting}
-                />
-              </div>
-            </div>
-
-            {error && <p className="text-sm text-red-600">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-indigo-600 text-white py-3 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
-                  שולח...
-                </>
-              ) : (
-                <>
-                  <Send size={16} />
-                  שלח הרשמה ועבור לאזור האישי
-                </>
-              )}
-            </button>
-            <p className="text-xs text-gray-500 text-center mt-1">
-              פרטי ההרשמה נשמרים לצורך הפעלה במערכת המשימות למתנדבים.
+            <h1 className="mt-4 text-3xl font-bold tracking-tight text-gray-900">הרשמה פשוטה, ואז ישר לאזור האישי</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-600 md:text-base">
+              ממלאים פרטים פעם אחת, בוחרים סיסמה, והמערכת מעבירה אותך אוטומטית למסך המשימות.
+              מרגע זה אפשר לבחור משימות, לשלוח ביצוע לאישור ולעקוב אחרי שעות שהתעדכנו.
             </p>
-          </form>
-        )}
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+                <div className="font-semibold">1. פתיחת חשבון</div>
+                <div className="mt-1 text-indigo-800">שומרים פרטים בסיסיים וסיסמה.</div>
+              </div>
+              <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900">
+                <div className="font-semibold">2. כניסה אוטומטית</div>
+                <div className="mt-1 text-amber-800">החשבון נשמר מקומית ומוכן לעבודה.</div>
+              </div>
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900">
+                <div className="font-semibold">3. בחירת משימות</div>
+                <div className="mt-1 text-emerald-800">עוברים ישר למשימות הפתוחות.</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 bg-gray-50 p-5 lg:border-r lg:border-t-0 md:p-8">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">כבר יש לך חשבון?</p>
+                <p className="mt-1 text-sm text-gray-600">אפשר לחזור מיד לפורטל ולהתחבר.</p>
+              </div>
+              <Link
+                href="/volunteers/events"
+                className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+              >
+                לפורטל המתנדבים
+                <ExternalLink size={16} />
+              </Link>
+            </div>
+
+            <div className="mt-5 space-y-3 text-sm text-gray-600">
+              <div className="rounded-2xl bg-white p-4">האימייל והסיסמה שתגדיר/י כאן ישמשו גם להתחברות עתידית.</div>
+              <div className="rounded-2xl bg-white p-4">אפשר לעדכן משימות, לצבור שעות ולבקש אישור ביצוע מתוך האזור האישי.</div>
+              <div className="rounded-2xl bg-white p-4">ההרשמה הזו מיועדת לחשבון מתנדב כללי שאינו תלוי רק באירוע אחד.</div>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm md:p-8">
+          {submitted ? (
+            <div className="rounded-[24px] border border-green-200 bg-green-50 p-8 text-center">
+              <CheckCircle className="mx-auto mb-3 text-green-600" size={52} />
+              <h2 className="text-2xl font-bold text-green-900">נרשמת בהצלחה</h2>
+              <p className="mt-2 text-green-700">מעביר אותך עכשיו לפורטל המתנדבים כדי לבחור את המשימה הראשונה שלך.</p>
+              <Link
+                href="/volunteers/events"
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+              >
+                מעבר לאזור האישי
+              </Link>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {renderInput("שם פרטי", "firstName", { required: true, placeholder: "לדוגמה: רוני" })}
+                {renderInput("שם משפחה", "lastName", { required: true, placeholder: "לדוגמה: כהן" })}
+                {renderInput("תעודת זהות", "idNumber", { required: true, placeholder: "123456789" })}
+                {renderInput("נייד", "phone", { type: "tel", required: true, placeholder: "050-0000000" })}
+                {renderInput("מייל", "email", { type: "email", required: true, placeholder: "you@example.com" })}
+                {renderInput("חוג", "program", { placeholder: "לדוגמה: הנדסת תוכנה" })}
+                {renderInput("שנת לימודים", "year", { placeholder: "לדוגמה: שנה ב'" })}
+                {renderInput("סיסמה", "password", { type: "password", required: true, minLength: 6, placeholder: "לפחות 6 תווים" })}
+                <div className="md:col-span-2">
+                  {renderInput("אימות סיסמה", "confirmPassword", { type: "password", required: true, minLength: 6, placeholder: "הקלד/י שוב לאימות" })}
+                </div>
+              </div>
+
+              {error && <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p>}
+
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+                אחרי השליחה החשבון שלך יישמר, ותועבר/י אוטומטית לפורטל המתנדבים עם התחברות מוכנה.
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submitting ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-t-2 border-white"></div>
+                    שולח...
+                  </>
+                ) : (
+                  <>
+                    <Send size={16} />
+                    יצירת חשבון ומעבר לפורטל
+                  </>
+                )}
+              </button>
+              <p className="text-center text-xs text-gray-500">פרטי ההרשמה נשמרים לצורך הפעלת אזור המשימות למתנדבים.</p>
+            </form>
+          )}
+        </section>
       </div>
     </div>
   );

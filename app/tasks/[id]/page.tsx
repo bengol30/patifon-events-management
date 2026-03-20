@@ -1287,29 +1287,39 @@ export default function TaskDetailPage() {
                     {/* Sidebar Details */}
                     <div className="space-y-6">
                         {isVolunteerView ? (
-                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                                <h3 className="font-semibold text-gray-900 mb-4">פרטים נוספים</h3>
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                                            נוצר ע"י
-                                        </label>
-                                        <div className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800 flex items-center justify-between gap-2">
-                                            <span>{eventCreatorName || task.createdByName || "לא צויין"}</span>
-                                            {whatsappLink ? (
-                                                <a
-                                                    href={whatsappLink}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
-                                                    title="שליחת הודעת וואטסאפ ליוצר המשימה"
-                                                >
-                                                    <MessageCircle size={14} />
-                                                    וואטסאפ
-                                                </a>
-                                            ) : (
-                                                <span className="text-xs text-gray-400">אין מספר וואטסאפ שמור</span>
-                                            )}
+                            <div className="space-y-6">
+                                <div className="bg-indigo-50 p-6 rounded-xl shadow-sm border border-indigo-100">
+                                    <h3 className="font-semibold text-indigo-950 mb-2">מה עושים מכאן?</h3>
+                                    <div className="space-y-2 text-sm text-indigo-900">
+                                        <p>1. עוברים על פרטי המשימה ומוודאים שהכול ברור.</p>
+                                        <p>2. אם צריך הבהרה — אפשר לפנות ישירות לאיש הקשר בוואטסאפ.</p>
+                                        <p>3. בסיום חוזרים לפורטל המתנדבים ומסמנים שהמשימה הושלמה.</p>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                    <h3 className="font-semibold text-gray-900 mb-4">איש קשר למשימה</h3>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                                                נוצר ע"י
+                                            </label>
+                                            <div className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-800 flex items-center justify-between gap-2">
+                                                <span>{eventCreatorName || task.createdByName || "לא צויין"}</span>
+                                                {whatsappLink ? (
+                                                    <a
+                                                        href={whatsappLink}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                                                        title="שליחת הודעת וואטסאפ ליוצר המשימה"
+                                                    >
+                                                        <MessageCircle size={14} />
+                                                        וואטסאפ
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">אין מספר וואטסאפ שמור</span>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
