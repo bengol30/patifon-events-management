@@ -172,10 +172,21 @@ export default function SettingsPage() {
     const [loadingMetricool, setLoadingMetricool] = useState(true);
     const [savingMetricool, setSavingMetricool] = useState(false);
 
-    const [instagramConfig, setInstagramConfig] = useState<{ accessToken: string; accountId: string }>({
-        accessToken: "",
-        accountId: ""
-    });
+    interface InstagramAccount {
+        id: string;
+        name: string;
+        accessToken: string;
+        accountId: string;
+    }
+    const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
+
+    // Form state for adding new account
+    const [newIgAccountName, setNewIgAccountName] = useState("");
+    const [newIgAccessToken, setNewIgAccessToken] = useState("");
+    const [newIgAccountId, setNewIgAccountId] = useState("");
+
+    // State for selected account in post composer
+    const [igSelectedAccountId, setIgSelectedAccountId] = useState<string>("");
     const [loadingInstagram, setLoadingInstagram] = useState(true);
     const [savingInstagram, setSavingInstagram] = useState(false);
 
@@ -357,10 +368,21 @@ export default function SettingsPage() {
             .then((snap) => {
                 if (snap.exists()) {
                     const data = snap.data() as any;
-                    setInstagramConfig({
-                        accessToken: data.accessToken || "",
-                        accountId: data.accountId || ""
-                    });
+                    let accounts: InstagramAccount[] = data.accounts || [];
+
+                    // Fallback for legacy single account
+                    if (accounts.length === 0 && data.accessToken && data.accountId) {
+                        accounts = [{
+                            id: "legacy-default",
+                            name: "חשבון פטיפון",
+                            accessToken: data.accessToken,
+                            accountId: data.accountId
+                        }];
+                    }
+                    setInstagramAccounts(accounts);
+                    if (accounts.length > 0) {
+                        setIgSelectedAccountId(accounts[0].id);
+                    }
                 }
             })
             .catch((err) => {
@@ -777,26 +799,70 @@ export default function SettingsPage() {
         }
     };
 
-    const handleSaveInstagram = async (e: React.FormEvent) => {
+    const handleAddInstagramAccount = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db || !user) return;
+        if (!newIgAccountName || !newIgAccessToken || !newIgAccountId) {
+            setMessage({ text: "יש למלא את כל השדות להוספת חשבון", type: "error" });
+            return;
+        }
         setSavingInstagram(true);
         try {
+            const newAccount: InstagramAccount = {
+                id: Date.now().toString(),
+                name: newIgAccountName.trim(),
+                accessToken: newIgAccessToken.trim(),
+                accountId: newIgAccountId.trim()
+            };
+            const updatedAccounts = [...instagramAccounts, newAccount];
             await setDoc(
                 doc(db, "integrations", "instagram"),
                 {
-                    accessToken: instagramConfig.accessToken.trim(),
-                    accountId: instagramConfig.accountId.trim(),
+                    accounts: updatedAccounts,
                     updatedAt: serverTimestamp(),
                     updatedBy: user.uid,
                     updatedByEmail: user.email || ""
                 },
                 { merge: true }
             );
-            setMessage({ text: "הגדרות Instagram נשמרו בהצלחה", type: "success" });
+            setInstagramAccounts(updatedAccounts);
+            if (!igSelectedAccountId) setIgSelectedAccountId(newAccount.id);
+            setNewIgAccountName("");
+            setNewIgAccessToken("");
+            setNewIgAccountId("");
+            setMessage({ text: "החשבון נוסף בהצלחה!", type: "success" });
         } catch (err) {
-            console.error("Failed saving Instagram config", err);
-            setMessage({ text: "שגיאה בשמירת הגדרות Instagram", type: "error" });
+            console.error("Failed adding Instagram account", err);
+            setMessage({ text: "שגיאה בהוספת החשבון", type: "error" });
+        } finally {
+            setSavingInstagram(false);
+        }
+    };
+
+    const handleDeleteInstagramAccount = async (accountIdToRemove: string) => {
+        if (!db || !user) return;
+        if (!confirm("האם אתה בטוח שברצונך למחוק חשבון זה?")) return;
+        setSavingInstagram(true);
+        try {
+            const updatedAccounts = instagramAccounts.filter(a => a.id !== accountIdToRemove);
+            await setDoc(
+                doc(db, "integrations", "instagram"),
+                {
+                    accounts: updatedAccounts,
+                    updatedAt: serverTimestamp(),
+                    updatedBy: user.uid,
+                    updatedByEmail: user.email || ""
+                },
+                { merge: true }
+            );
+            setInstagramAccounts(updatedAccounts);
+            if (igSelectedAccountId === accountIdToRemove) {
+                setIgSelectedAccountId(updatedAccounts.length > 0 ? updatedAccounts[0].id : "");
+            }
+            setMessage({ text: "החשבון הוסר בהצלחה!", type: "success" });
+        } catch (err) {
+            console.error("Failed removing Instagram account", err);
+            setMessage({ text: "שגיאה בהסרת החשבון", type: "error" });
         } finally {
             setSavingInstagram(false);
         }
@@ -808,8 +874,10 @@ export default function SettingsPage() {
             alert("יש לבחור קובץ (תמונה או וידאו)");
             return;
         }
-        if (!instagramConfig.accessToken || !instagramConfig.accountId) {
-            alert("יש להגדיר תחילה את פרטי החיבור לאינסטגרם");
+
+        const selectedAccount = instagramAccounts.find(a => a.id === igSelectedAccountId);
+        if (!selectedAccount) {
+            alert("יש לבחור חשבון מתוך הרשימה באפשרויות על מנת לפרסם פוסט");
             return;
         }
 
@@ -830,8 +898,8 @@ export default function SettingsPage() {
             if (scheduleTimestamp) {
                 // Internal Scheduling: Save to Firestore
                 await addDoc(collection(db, "scheduled_posts"), {
-                    accessToken: instagramConfig.accessToken,
-                    accountId: instagramConfig.accountId,
+                    accessToken: selectedAccount.accessToken,
+                    accountId: selectedAccount.accountId,
                     imageUrl: igPostType !== "VIDEO" ? downloadUrl : null,
                     videoUrl: igPostType === "VIDEO" ? downloadUrl : null,
                     caption: igCaption,
@@ -848,8 +916,8 @@ export default function SettingsPage() {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        accessToken: instagramConfig.accessToken,
-                        accountId: instagramConfig.accountId,
+                        accessToken: selectedAccount.accessToken,
+                        accountId: selectedAccount.accountId,
                         imageUrl: igPostType !== "VIDEO" ? downloadUrl : undefined,
                         videoUrl: igPostType === "VIDEO" ? downloadUrl : undefined,
                         caption: igCaption,
@@ -3275,42 +3343,82 @@ export default function SettingsPage() {
                                     {loadingInstagram ? (
                                         <div className="mt-4 text-gray-500 text-sm">טוען הגדרות...</div>
                                     ) : (
-                                        <form className="space-y-4 mt-6" onSubmit={handleSaveInstagram}>
-                                            <div className="grid sm:grid-cols-2 gap-4">
-                                                <div className="space-y-1">
-                                                    <label className="text-sm text-gray-600">Access Token (Long Lived)</label>
-                                                    <input
-                                                        type="password"
-                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                        value={instagramConfig.accessToken}
-                                                        onChange={(e) => setInstagramConfig(prev => ({ ...prev, accessToken: e.target.value }))}
-                                                        placeholder="EAAG..."
-                                                        required
-                                                    />
-                                                    <p className="text-xs text-gray-400">יש להפיק טוקן עם הרשאות: instagram_content_publish, instagram_basic</p>
+                                        <div className="mt-6 space-y-6">
+                                            {instagramAccounts.length > 0 && (
+                                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                                    {instagramAccounts.map(account => (
+                                                        <div key={account.id} className="border border-indigo-100 bg-indigo-50/50 rounded-xl p-4 flex flex-col justify-between shadow-sm relative overflow-hidden group">
+                                                            <div className="pb-8">
+                                                                <div className="flex items-center gap-2 font-bold text-indigo-900 mb-2">
+                                                                    <User size={16} className="text-indigo-600" />
+                                                                    {account.name}
+                                                                </div>
+                                                                <p className="text-xs text-indigo-700/70 truncate" dir="ltr"><strong>ID:</strong> {account.accountId}</p>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDeleteInstagramAccount(account.id)}
+                                                                className="absolute bottom-4 left-4 text-red-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                                                                title="מחק חשבון"
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
                                                 </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-sm text-gray-600">Instagram Business Account ID</label>
-                                                    <input
-                                                        type="text"
-                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                        value={instagramConfig.accountId}
-                                                        onChange={(e) => setInstagramConfig(prev => ({ ...prev, accountId: e.target.value }))}
-                                                        placeholder="1784..."
-                                                        required
-                                                    />
+                                            )}
+
+                                            <form className="bg-white border border-gray-100 shadow-sm rounded-xl p-5 space-y-4" onSubmit={handleAddInstagramAccount}>
+                                                <h4 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                                                    <Plus size={16} className="text-indigo-500" /> הוספת חשבון אינסטגרם חדש
+                                                </h4>
+                                                <div className="grid sm:grid-cols-3 gap-4">
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-medium text-gray-600">שם לזיהוי ברשימה</label>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition"
+                                                            value={newIgAccountName}
+                                                            onChange={(e) => setNewIgAccountName(e.target.value)}
+                                                            placeholder="לדוגמה: חשבון אישי..."
+                                                            required
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-medium text-gray-600">Account ID</label>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition"
+                                                            value={newIgAccountId}
+                                                            onChange={(e) => setNewIgAccountId(e.target.value)}
+                                                            placeholder="1784..."
+                                                            required
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-medium text-gray-600">Access Token (Long Lived)</label>
+                                                        <input
+                                                            type="password"
+                                                            className="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition"
+                                                            value={newIgAccessToken}
+                                                            onChange={(e) => setNewIgAccessToken(e.target.value)}
+                                                            placeholder="EAAG..."
+                                                            required
+                                                        />
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div className="flex items-center gap-3">
-                                                <button
-                                                    type="submit"
-                                                    disabled={savingInstagram}
-                                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
-                                                >
-                                                    {savingInstagram ? "שומר..." : "שמור הגדרות"}
-                                                </button>
-                                            </div>
-                                        </form>
+                                                <div className="flex items-center gap-3 pt-2">
+                                                    <button
+                                                        type="submit"
+                                                        disabled={savingInstagram}
+                                                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60 flex items-center justify-center gap-2"
+                                                    >
+                                                        <Plus size={16} />
+                                                        {savingInstagram ? "מוסיף..." : "הוסף חשבון"}
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        </div>
                                     )}
                                 </div>
 
@@ -3321,14 +3429,28 @@ export default function SettingsPage() {
                                     </div>
 
                                     <form onSubmit={handleInstagramPublish} className="space-y-4">
-                                        <div className="grid sm:grid-cols-2 gap-4">
+                                        <div className="grid sm:grid-cols-1 md:grid-cols-3 gap-4">
                                             <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">בחר חשבון מפרסם</label>
+                                                <select
+                                                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-gray-50 text-gray-800 h-[42px]"
+                                                    value={igSelectedAccountId}
+                                                    onChange={(e) => setIgSelectedAccountId(e.target.value)}
+                                                    required
+                                                >
+                                                    {instagramAccounts.length === 0 && <option value="">אין חשבונות מחוברים</option>}
+                                                    {instagramAccounts.map(acc => (
+                                                        <option key={acc.id} value={acc.id}>{acc.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="md:col-span-2">
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">סוג פוסט</label>
-                                                <div className="flex gap-2">
+                                                <div className="flex gap-2 h-[42px]">
                                                     <button
                                                         type="button"
                                                         onClick={() => setIgPostType("IMAGE")}
-                                                        className={`flex-1 py-2 rounded-lg text-sm font-medium border ${igPostType === "IMAGE" ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                                                        className={`flex-1 rounded-lg text-sm font-medium border transition ${igPostType === "IMAGE" ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
                                                     >
                                                         תמונה
                                                     </button>
