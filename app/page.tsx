@@ -3173,9 +3173,9 @@ export default function Dashboard() {
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">אירועים פעילים</p>
                       <p className="mt-1 text-lg font-bold text-fuchsia-800">{events.length}</p>
                     </button>
-                    <button type="button" onClick={() => focusTaskList("deadline")} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right transition hover:bg-slate-100">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">ללא תאריך</p>
-                      <p className="mt-1 text-lg font-bold text-slate-900">{tasksWithoutDueDateCount}</p>
+                    <button type="button" onClick={() => document.getElementById('active-projects')?.scrollIntoView({ behavior: 'smooth' })} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right transition hover:bg-slate-100">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">פרויקטים</p>
+                      <p className="mt-1 text-lg font-bold text-slate-900">{activeProjectsCount}</p>
                     </button>
                   </div>
                 </div>
@@ -3355,7 +3355,7 @@ export default function Dashboard() {
               )}
             </section>
 
-            <section className="bg-white p-5 sm:p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
+            <section id="active-projects" className="bg-white p-5 sm:p-6 rounded-[30px] shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
               <div className="mb-4 flex items-center justify-between gap-2">
                 <div className="text-right">
                   <div className="flex items-center justify-end gap-2">
