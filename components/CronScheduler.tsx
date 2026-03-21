@@ -16,6 +16,7 @@ export default function CronScheduler() {
                 await Promise.allSettled([
                     fetch("/api/cron/publish-scheduled"),
                     fetch("/api/cron/run-scheduled-tasks"),
+                    fetch("/api/cron/run-whatsapp-campaigns"),
                     fetch("/api/cron/dispatch-agent-triggers"),
                 ]);
             } catch (e) {
