@@ -1060,6 +1060,7 @@ export default function EventDetailsPage() {
     const [creatorName, setCreatorName] = useState("");
     const [showSpecialModal, setShowSpecialModal] = useState(false);
     const [creatingSpecialTask, setCreatingSpecialTask] = useState(false);
+    const [expandedSpecialTask, setExpandedSpecialTask] = useState<string | null>(null);
     const [availableWhatsappGroups, setAvailableWhatsappGroups] = useState<WhatsappTargetGroup[]>([]);
     const [loadingWhatsappGroups, setLoadingWhatsappGroups] = useState(false);
     const [selectedWhatsappGroupIds, setSelectedWhatsappGroupIds] = useState<string[]>([]);
@@ -2753,6 +2754,7 @@ export default function EventDetailsPage() {
 
     useEffect(() => {
         if (!showSpecialModal) return;
+        setExpandedSpecialTask(null);
         loadWhatsappGroups().catch(() => undefined);
         setWhatsappContentDraft(getDefaultWhatsappDistributionText());
     }, [showSpecialModal, id, event?.officialPostText, event?.description, officialPostText, officialFlyerUrl]);
@@ -5922,151 +5924,196 @@ export default function EventDetailsPage() {
 
                 {/* Status Edit Modal */}
                 {showSpecialModal && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-xl shadow-lg max-w-xl w-full p-6 space-y-4">
-                            <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2">
-                                    <Sparkles size={20} className="text-indigo-600" />
-                                    <h3 className="text-lg font-bold">משימות מיוחדות</h3>
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4">
+                        <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl">
+                            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-6">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <Sparkles size={20} className="text-indigo-600 shrink-0" />
+                                    <div className="min-w-0">
+                                        <h3 className="text-lg font-bold text-slate-900">משימות מיוחדות</h3>
+                                        <p className="text-xs text-slate-500">בחר/י משימה, פתח/י את הפרטים ורק אז המשך/י ליצירה.</p>
+                                    </div>
                                 </div>
-                                <button onClick={() => setShowSpecialModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <button onClick={() => setShowSpecialModal(false)} className="rounded-full p-1 text-gray-400 transition hover:bg-slate-100 hover:text-gray-600">
                                     <X size={20} />
                                 </button>
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800 flex flex-col gap-2">
-                                    <div>
-                                        <p className="font-semibold text-gray-900 mb-1">שיווק והפצה בקבוצות</p>
-                                        <p>יוצר משימת שיווק עם המלל והפלייר הרשמי, לפרסום ב-5 קבוצות וואטסאפ (30+ אנשים) והעלאת צילומי מסך כהוכחה.</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleCreateSpecialMarketingTask}
-                                        disabled={creatingSpecialTask}
-                                        className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
-                                    >
-                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת שיווק"}
-                                    </button>
-                                </div>
-                                <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm text-amber-800 flex flex-col gap-2">
-                                    <div>
-                                        <p className="font-semibold text-gray-900 mb-1">להעלות סטורי ולתייג</p>
-                                        <p>יוצר משימת סטורי למתנדבים עם הפלייר הרשמי, תיוגי אינסטגרם מהתוכן והמדיה, והנחיה להוסיף מוזיקה ולהעלות צילום מסך.</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleCreateSpecialStoryTask}
-                                        disabled={creatingSpecialTask}
-                                        className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-amber-500 hover:bg-amber-600"}`}
-                                    >
-                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
-                                    </button>
-                                </div>
-                                <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-800 flex flex-col gap-3 sm:col-span-2">
-                                    <div>
-                                        <p className="font-semibold text-gray-900 mb-1">הפצת אירוע בוואטסאפ (באישור)</p>
-                                        <p>יוצר משימה מיוחדת חדשה ונפרדת להפצה מתוזמנת של האירוע בוואטסאפ, עם קבוצות היעד הקיימות, מלל/מדיה רשמיים וחובת אישור לפני כל שליחה.</p>
-                                    </div>
-                                    <div className="rounded-lg border border-emerald-200 bg-white/80 p-3 space-y-3">
-                                        <div className="flex items-center justify-between gap-3">
-                                            <div>
-                                                <p className="text-xs font-semibold text-gray-900">קבוצות יעד מהמאגר</p>
-                                                <p className="text-[11px] text-gray-500">הבחירה נשמרת לתוך payload יציב עם id, שם ו-chatId.</p>
-                                            </div>
+
+                            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 gap-3">
+                                        <div className="overflow-hidden rounded-2xl border border-indigo-100 bg-indigo-50 text-sm text-indigo-800">
                                             <button
                                                 type="button"
-                                                onClick={() => loadWhatsappGroups()}
-                                                className="px-2 py-1 rounded-md border border-emerald-200 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                                onClick={() => setExpandedSpecialTask((prev) => prev === "marketing" ? null : "marketing")}
+                                                className="flex w-full items-start justify-between gap-3 px-4 py-4 text-right"
                                             >
-                                                רענן
+                                                <div>
+                                                    <p className="font-semibold text-gray-900 mb-1">שיווק והפצה בקבוצות</p>
+                                                    <p className="text-xs sm:text-sm">יוצר משימת שיווק עם המלל והפלייר הרשמי, לפרסום ב-5 קבוצות וואטסאפ (30+ אנשים) והעלאת צילומי מסך כהוכחה.</p>
+                                                </div>
+                                                <ChevronDown size={18} className={`mt-1 shrink-0 text-indigo-700 transition-transform ${expandedSpecialTask === "marketing" ? "rotate-180" : ""}`} />
                                             </button>
+                                            {expandedSpecialTask === "marketing" && (
+                                                <div className="border-t border-indigo-100 px-4 pb-4 pt-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleCreateSpecialMarketingTask}
+                                                        disabled={creatingSpecialTask}
+                                                        className={`w-full sm:w-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                                                    >
+                                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת שיווק"}
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
-                                        <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 space-y-2">
-                                            {loadingWhatsappGroups ? (
-                                                <p className="text-xs text-gray-500">טוען קבוצות...</p>
-                                            ) : availableWhatsappGroups.length === 0 ? (
-                                                <p className="text-xs text-gray-500">אין עדיין קבוצות שמורות במאגר whatsapp_groups.</p>
-                                            ) : availableWhatsappGroups.map((group) => {
-                                                const checked = selectedWhatsappGroupIds.includes(group.id);
-                                                return (
-                                                    <label key={group.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition ${checked ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
-                                                        <input
-                                                            type="checkbox"
-                                                            className="mt-1 h-4 w-4 accent-emerald-600"
-                                                            checked={checked}
-                                                            onChange={() => setSelectedWhatsappGroupIds((prev) => checked ? prev.filter(id => id !== group.id) : [...prev, group.id])}
-                                                        />
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-semibold text-gray-900">{group.name}</p>
-                                                            <p className="text-[11px] text-gray-500 break-all">{group.chatId || "ללא chatId"}</p>
+
+                                        <div className="overflow-hidden rounded-2xl border border-amber-100 bg-amber-50 text-sm text-amber-800">
+                                            <button
+                                                type="button"
+                                                onClick={() => setExpandedSpecialTask((prev) => prev === "story" ? null : "story")}
+                                                className="flex w-full items-start justify-between gap-3 px-4 py-4 text-right"
+                                            >
+                                                <div>
+                                                    <p className="font-semibold text-gray-900 mb-1">להעלות סטורי ולתייג</p>
+                                                    <p className="text-xs sm:text-sm">יוצר משימת סטורי למתנדבים עם הפלייר הרשמי, תיוגי אינסטגרם מהתוכן והמדיה, והנחיה להוסיף מוזיקה ולהעלות צילום מסך.</p>
+                                                </div>
+                                                <ChevronDown size={18} className={`mt-1 shrink-0 text-amber-700 transition-transform ${expandedSpecialTask === "story" ? "rotate-180" : ""}`} />
+                                            </button>
+                                            {expandedSpecialTask === "story" && (
+                                                <div className="border-t border-amber-100 px-4 pb-4 pt-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleCreateSpecialStoryTask}
+                                                        disabled={creatingSpecialTask}
+                                                        className={`w-full sm:w-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-amber-500 hover:bg-amber-600"}`}
+                                                    >
+                                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-emerald-50 text-sm text-emerald-800">
+                                            <button
+                                                type="button"
+                                                onClick={() => setExpandedSpecialTask((prev) => prev === "whatsapp" ? null : "whatsapp")}
+                                                className="flex w-full items-start justify-between gap-3 px-4 py-4 text-right"
+                                            >
+                                                <div>
+                                                    <p className="font-semibold text-gray-900 mb-1">הפצת אירוע בוואטסאפ (באישור)</p>
+                                                    <p className="text-xs sm:text-sm">יוצר משימה מיוחדת חדשה ונפרדת להפצה מתוזמנת של האירוע בוואטסאפ, עם קבוצות יעד, מלל/מדיה רשמיים וחובת אישור לפני כל שליחה.</p>
+                                                </div>
+                                                <ChevronDown size={18} className={`mt-1 shrink-0 text-emerald-700 transition-transform ${expandedSpecialTask === "whatsapp" ? "rotate-180" : ""}`} />
+                                            </button>
+                                            {expandedSpecialTask === "whatsapp" && (
+                                                <div className="border-t border-emerald-100 px-4 pb-4 pt-3">
+                                                    <div className="rounded-xl border border-emerald-200 bg-white/80 p-3 space-y-3">
+                                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                            <div>
+                                                                <p className="text-xs font-semibold text-gray-900">קבוצות יעד מהמאגר</p>
+                                                                <p className="text-[11px] text-gray-500">הבחירה נשמרת לתוך payload יציב עם id, שם ו-chatId.</p>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => loadWhatsappGroups()}
+                                                                className="px-2 py-1 rounded-md border border-emerald-200 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                                            >
+                                                                רענן
+                                                            </button>
                                                         </div>
-                                                    </label>
-                                                );
-                                            })}
-                                        </div>
-                                        <div className="flex flex-wrap gap-2">
-                                            <button type="button" onClick={() => setSelectedWhatsappGroupIds(availableWhatsappGroups.map(group => group.id))} className="px-2 py-1 rounded-md border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">בחר הכול</button>
-                                            <button type="button" onClick={() => setSelectedWhatsappGroupIds([])} className="px-2 py-1 rounded-md border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">נקה בחירה</button>
-                                            <span className="text-xs text-gray-600 self-center">נבחרו {selectedWhatsappGroupIds.length} קבוצות</span>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-semibold text-gray-900 mb-1">מלל שיישלח לאישור/הפצה</label>
-                                            <textarea
-                                                className="w-full min-h-[140px] rounded-lg border border-gray-200 p-3 text-sm text-gray-800 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                                                value={whatsappContentDraft}
-                                                onChange={(e) => setWhatsappContentDraft(e.target.value)}
-                                                placeholder="המלל הרשמי יופיע כאן אוטומטית..."
-                                            />
-                                            <p className="mt-1 text-[11px] text-gray-500">ברירת מחדל חכמה: officialPostText, ואם חסר אז description. המדיה תילקח מהפלייר/תמונות האירוע.</p>
-                                        </div>
-                                        <div className="rounded-lg border border-dashed border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-900 space-y-1">
-                                            <p className="font-semibold">מדיה זמינה למשימה</p>
-                                            {getWhatsappMediaUrls().length ? getWhatsappMediaUrls().map((url) => (
-                                                <p key={url} className="break-all">• {url}</p>
-                                            )) : <p>אין כרגע מדיה זמינה, אבל עדיין אפשר ליצור את המשימה.</p>}
+                                                        <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 space-y-2">
+                                                            {loadingWhatsappGroups ? (
+                                                                <p className="text-xs text-gray-500">טוען קבוצות...</p>
+                                                            ) : availableWhatsappGroups.length === 0 ? (
+                                                                <p className="text-xs text-gray-500">אין עדיין קבוצות שמורות במאגר whatsapp_groups.</p>
+                                                            ) : availableWhatsappGroups.map((group) => {
+                                                                const checked = selectedWhatsappGroupIds.includes(group.id);
+                                                                return (
+                                                                    <label key={group.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition ${checked ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="mt-1 h-4 w-4 accent-emerald-600"
+                                                                            checked={checked}
+                                                                            onChange={() => setSelectedWhatsappGroupIds((prev) => checked ? prev.filter(id => id !== group.id) : [...prev, group.id])}
+                                                                        />
+                                                                        <div className="min-w-0">
+                                                                            <p className="text-sm font-semibold text-gray-900">{group.name}</p>
+                                                                            <p className="text-[11px] text-gray-500 break-all">{group.chatId || "ללא chatId"}</p>
+                                                                        </div>
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button type="button" onClick={() => setSelectedWhatsappGroupIds(availableWhatsappGroups.map(group => group.id))} className="px-2 py-1 rounded-md border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">בחר הכול</button>
+                                                            <button type="button" onClick={() => setSelectedWhatsappGroupIds([])} className="px-2 py-1 rounded-md border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">נקה בחירה</button>
+                                                            <span className="text-xs text-gray-600 self-center">נבחרו {selectedWhatsappGroupIds.length} קבוצות</span>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs font-semibold text-gray-900 mb-1">מלל שיישלח לאישור/הפצה</label>
+                                                            <textarea
+                                                                className="w-full min-h-[140px] rounded-lg border border-gray-200 p-3 text-sm text-gray-800 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                                                                value={whatsappContentDraft}
+                                                                onChange={(e) => setWhatsappContentDraft(e.target.value)}
+                                                                placeholder="המלל הרשמי יופיע כאן אוטומטית..."
+                                                            />
+                                                            <p className="mt-1 text-[11px] text-gray-500">ברירת מחדל חכמה: officialPostText, ואם חסר אז description. המדיה תילקח מהפלייר/תמונות האירוע.</p>
+                                                        </div>
+                                                        <div className="rounded-lg border border-dashed border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-900 space-y-1">
+                                                            <p className="font-semibold">מדיה זמינה למשימה</p>
+                                                            {getWhatsappMediaUrls().length ? getWhatsappMediaUrls().map((url) => (
+                                                                <p key={url} className="break-all">• {url}</p>
+                                                            )) : <p>אין כרגע מדיה זמינה, אבל עדיין אפשר ליצור את המשימה.</p>}
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleCreateSpecialWhatsappDistributionTask}
+                                                            disabled={creatingSpecialTask}
+                                                            className={`w-full sm:w-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                                                        >
+                                                            {creatingSpecialTask ? "יוצר..." : "הוסף משימת וואטסאפ"}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleCreateSpecialWhatsappDistributionTask}
-                                        disabled={creatingSpecialTask}
-                                        className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-emerald-600 hover:bg-emerald-700"}`}
-                                    >
-                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת וואטסאפ"}
-                                    </button>
+
+                                    <div className="border-t border-slate-200 pt-4">
+                                        <h4 className="text-sm font-semibold text-gray-800 mb-2">משימות מיוחדות קיימות</h4>
+                                        {specialTasks.length === 0 ? (
+                                            <p className="text-xs text-gray-500">אין משימות מיוחדות קיימות כרגע.</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {specialTasks.map((task) => (
+                                                    <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => router.push(`/tasks/${task.id}?eventId=${id}`)}
+                                                            className="min-w-0 flex-1 text-right"
+                                                        >
+                                                            <p className="text-sm font-semibold text-gray-900 truncate hover:underline">{task.title}</p>
+                                                            <p className="text-xs text-gray-500">
+                                                                סטטוס: {task.status === "DONE" ? "בוצע" : task.status === "IN_PROGRESS" ? "בתהליך" : task.status === "STUCK" ? "תקוע" : "פתוח"}
+                                                            </p>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => confirmDeleteTask(task.id)}
+                                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
+                                                        >
+                                                            מחק
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                            <div className="border-t pt-4">
-                                <h4 className="text-sm font-semibold text-gray-800 mb-2">משימות מיוחדות קיימות</h4>
-                                {specialTasks.length === 0 ? (
-                                    <p className="text-xs text-gray-500">אין משימות מיוחדות קיימות כרגע.</p>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {specialTasks.map((task) => (
-                                            <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => router.push(`/tasks/${task.id}?eventId=${id}`)}
-                                                    className="min-w-0 flex-1 text-right"
-                                                >
-                                                    <p className="text-sm font-semibold text-gray-900 truncate hover:underline">{task.title}</p>
-                                                    <p className="text-xs text-gray-500">
-                                                        סטטוס: {task.status === "DONE" ? "בוצע" : task.status === "IN_PROGRESS" ? "בתהליך" : task.status === "STUCK" ? "תקוע" : "פתוח"}
-                                                    </p>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => confirmDeleteTask(task.id)}
-                                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
-                                                >
-                                                    מחק
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex justify-end">
+
+                            <div className="flex justify-end border-t border-slate-200 px-4 py-4 sm:px-6">
                                 <button
                                     type="button"
                                     onClick={() => setShowSpecialModal(false)}
