@@ -78,6 +78,14 @@ interface Task {
     eventId?: string;
     requiredCompletions?: number | null;
     remainingCompletions?: number | null;
+    scheduledAt?: any;
+    scheduleType?: "ONE_TIME" | "RECURRING" | "REMINDER";
+    scheduleStatus?: "PENDING" | "TRIGGERED" | "DONE" | "FAILED" | "CANCELLED";
+    executionMode?: "NOTIFY_ONLY" | "AGENT_ACTION" | "EXTERNAL_ACTION";
+    agentInstruction?: string;
+    payload?: Record<string, any>;
+    executionResult?: string;
+    lastTriggeredAt?: any;
 }
 
 interface BudgetItem {
@@ -175,6 +183,12 @@ interface EventData {
     customSections?: CustomSection[];
     infoBlocks?: InfoBlock[];
     officialInstagramTags?: string[];
+    officialPostText?: string;
+    officialFlyerUrl?: string;
+    previewImage?: string;
+    coverImage?: string;
+    coverImageUrl?: string;
+    imageUrl?: string;
 }
 
 interface ProjectOption {
@@ -347,6 +361,9 @@ export default function EventDetailsPage() {
     const [editTaskDueMode, setEditTaskDueMode] = useState<"event_day" | "offset">("event_day");
     const [editTaskOffsetDays, setEditTaskOffsetDays] = useState<string>("0");
     const [editTaskTime, setEditTaskTime] = useState<string>("");
+    const [editTaskScheduleEnabled, setEditTaskScheduleEnabled] = useState(false);
+    const [editTaskExecutionMode, setEditTaskExecutionMode] = useState<"NOTIFY_ONLY" | "AGENT_ACTION" | "EXTERNAL_ACTION">("NOTIFY_ONLY");
+    const [editTaskAgentInstruction, setEditTaskAgentInstruction] = useState("");
 
     const getAssigneeKey = (assignee?: Assignee | null) => {
         if (!assignee) return "";
@@ -1941,6 +1958,9 @@ export default function EventDetailsPage() {
         setEditTaskDueMode(meta.mode);
         setEditTaskOffsetDays(meta.offset);
         setEditTaskTime(meta.time);
+        setEditTaskScheduleEnabled(task.scheduleStatus === "PENDING" || task.scheduleStatus === "TRIGGERED" || !!task.scheduledAt);
+        setEditTaskExecutionMode(task.executionMode || "NOTIFY_ONLY");
+        setEditTaskAgentInstruction(task.agentInstruction || "");
         setEditingTask({ ...task, dueDate: ensuredDue, requiredCompletions: required, remainingCompletions: remaining });
         setEditTaskSearch("");
         setSaveEditTaskToLibrary(false);
@@ -1984,6 +2004,12 @@ export default function EventDetailsPage() {
                 createdByName: editingTask.createdByName || user?.displayName || user?.email || "משתמש",
                 requiredCompletions: required,
                 remainingCompletions: remaining,
+                scheduledAt: editTaskScheduleEnabled ? (dueDateValue || editingTask.scheduledAt || null) : null,
+                scheduleType: editTaskScheduleEnabled ? (editingTask.scheduleType || "ONE_TIME") : null,
+                scheduleStatus: editTaskScheduleEnabled ? ((editingTask.scheduleStatus === "DONE" || editingTask.scheduleStatus === "CANCELLED") ? editingTask.scheduleStatus : "PENDING") : null,
+                executionMode: editTaskScheduleEnabled ? editTaskExecutionMode : null,
+                agentInstruction: editTaskScheduleEnabled ? (editTaskAgentInstruction || editingTask.agentInstruction || "") : "",
+                payload: editTaskScheduleEnabled ? ((editingTask as any).payload || {}) : {},
             };
             await updateDoc(taskRef, updateData);
             if (saveEditTaskToLibrary) {
@@ -2427,6 +2453,59 @@ export default function EventDetailsPage() {
         return lines.join("\n");
     };
 
+    const getEventDistributionAssetUrls = () => {
+        const urls = [
+            officialFlyerUrl,
+            event?.officialFlyerUrl,
+            event?.previewImage,
+            event?.coverImage,
+            event?.coverImageUrl,
+            event?.imageUrl,
+        ].map(value => (value || "").trim()).filter(Boolean);
+        return Array.from(new Set(urls));
+    };
+
+    const buildWhatsappDistributionAgentInstruction = (targetGroups: { id: string; name: string; chatId?: string }[]) => {
+        const groupNames = targetGroups.map(group => group.name || group.chatId || group.id).filter(Boolean);
+        const lines = [
+            "PATIFON / WhatsApp event distribution (approval required)",
+            "Do not send anything automatically.",
+            "Before any outbound WhatsApp action, ask Ben for explicit approval.",
+            `Event ID: ${id}`,
+            `Event title: ${event?.title || ""}`,
+            `Target groups: ${groupNames.join(", ") || "No groups configured"}`,
+            "When asking for approval, explicitly list the exact target group names and the final content/media that will be sent.",
+            "If approval was not granted, stop and wait.",
+        ].filter(Boolean);
+        return lines.join("\n");
+    };
+
+    const buildWhatsappDistributionPayload = (targetGroups: { id: string; name: string; chatId?: string }[]) => {
+        const officialText = (officialPostText || event?.officialPostText || "").trim();
+        const fallbackText = (event?.description || "").trim();
+        const assetUrls = getEventDistributionAssetUrls();
+        return {
+            eventId: id,
+            eventTitle: event?.title || "",
+            officialPostText: officialText,
+            description: fallbackText,
+            officialEventText: officialText || fallbackText,
+            officialImageUrl: assetUrls[0] || "",
+            previewImageUrl: event?.previewImage || assetUrls[0] || "",
+            coverImageUrl: event?.coverImageUrl || event?.coverImage || "",
+            flyerUrl: officialFlyerUrl || event?.officialFlyerUrl || assetUrls[0] || "",
+            imageUrls: assetUrls,
+            targetGroups: targetGroups.map(group => ({
+                id: group.id,
+                name: group.name || "קבוצה ללא שם",
+                chatId: group.chatId || "",
+            })),
+            targetGroupNames: targetGroups.map(group => group.name || group.chatId || group.id).filter(Boolean),
+            approvalRequired: true,
+            createdFrom: "special_task",
+        };
+    };
+
     const handleCreateSpecialMarketingTask = async () => {
         if (!db || !id) return;
         setCreatingSpecialTask(true);
@@ -2535,6 +2614,64 @@ export default function EventDetailsPage() {
         } catch (err) {
             console.error("שגיאה ביצירת משימת סטורי", err);
             alert("לא הצלחנו ליצור את משימת הסטורי");
+        } finally {
+            setCreatingSpecialTask(false);
+        }
+    };
+
+    const handleCreateSpecialWhatsappDistributionTask = async () => {
+        if (!db || !id) return;
+        setCreatingSpecialTask(true);
+        try {
+            const groupsSnap = await getDocs(collection(db, "whatsapp_groups"));
+            const targetGroups = groupsSnap.docs.map((groupDoc) => {
+                const data = groupDoc.data() as any;
+                return {
+                    id: groupDoc.id,
+                    name: String(data?.name || "קבוצה ללא שם"),
+                    chatId: String(data?.chatId || ""),
+                };
+            });
+            const payload = buildWhatsappDistributionPayload(targetGroups);
+            const taskPayload: Partial<Task> = {
+                title: "הפצת אירוע בוואטסאפ (באישור)",
+                description: "משימת הפצה מתוזמנת לוואטסאפ. לפני כל שליחה תישלח בקשת אישור מסודרת עם שמות הקבוצות.",
+                priority: "HIGH",
+                status: "TODO",
+                assignee: "",
+                assigneeId: "",
+                assignees: [],
+                specialType: "whatsapp_event_distribution" as any,
+                eventTitle: event?.title || "",
+                eventId: id,
+                previewImage: payload.previewImageUrl || payload.flyerUrl || "",
+                requiredCompletions: 1,
+                remainingCompletions: 1,
+                executionMode: "AGENT_ACTION",
+                agentInstruction: buildWhatsappDistributionAgentInstruction(targetGroups),
+                payload,
+                scheduleType: "ONE_TIME",
+                scheduleStatus: "PENDING",
+            };
+            const start = getEventStartDate();
+            const due = inferSmartDueDate(taskPayload as Task, start);
+            const scheduledAt = due || start || null;
+            await addDoc(collection(db, "events", id, "tasks"), {
+                ...taskPayload,
+                dueDate: due,
+                scheduledAt,
+                filesCount: Array.isArray(payload.imageUrls) ? payload.imageUrls.length : 0,
+                createdAt: serverTimestamp(),
+                createdBy: user?.uid || null,
+                createdByName: user?.displayName || user?.email || "",
+            });
+            alert(targetGroups.length
+                ? `משימת הפצת וואטסאפ נוצרה עם ${targetGroups.length} קבוצות יעד ותדרוש אישור לפני שליחה.`
+                : "משימת הפצת וואטסאפ נוצרה, אבל אין כרגע קבוצות יעד מוגדרות בוואטסאפ.");
+            setShowSpecialModal(false);
+        } catch (err) {
+            console.error("שגיאה ביצירת משימת הפצת וואטסאפ", err);
+            alert("לא הצלחנו ליצור את משימת הפצת הוואטסאפ");
         } finally {
             setCreatingSpecialTask(false);
         }
@@ -3138,8 +3275,10 @@ export default function EventDetailsPage() {
         return (
             type === "marketing_distribution"
             || type === "story_tag"
+            || type === "whatsapp_event_distribution"
             || task.title.includes("שיווק והפצה בקבוצות")
             || task.title.includes("להעלות סטורי")
+            || task.title.includes("הפצת אירוע בוואטסאפ")
         );
     });
     const primaryFocusLabel = overdueTasksCount > 0
@@ -3700,6 +3839,47 @@ export default function EventDetailsPage() {
                                             )}
                                         </div>
                                     </div>
+                                </div>
+                                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 space-y-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="text-sm font-semibold text-emerald-900">תזמון ביצוע אוטומטי</p>
+                                            <p className="text-xs text-emerald-800">כשהמועד יגיע, ה-scheduler של PATIFON ינסה להעביר את המשימה לביצוע.</p>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                                            checked={editTaskScheduleEnabled}
+                                            onChange={(e) => setEditTaskScheduleEnabled(e.target.checked)}
+                                        />
+                                    </div>
+                                    {editTaskScheduleEnabled && (
+                                        <>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">אופן ביצוע</label>
+                                                <select
+                                                    className="w-full p-2 border rounded-lg text-sm"
+                                                    value={editTaskExecutionMode}
+                                                    onChange={(e) => setEditTaskExecutionMode(e.target.value as any)}
+                                                >
+                                                    <option value="NOTIFY_ONLY">רק התראה / וובהוק</option>
+                                                    <option value="AGENT_ACTION">פעולת אייג׳נט</option>
+                                                    <option value="EXTERNAL_ACTION">פעולה חיצונית</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">הוראת ביצוע לאייג׳נט</label>
+                                                <textarea
+                                                    rows={2}
+                                                    className="w-full p-2 border rounded-lg text-sm"
+                                                    placeholder="מה צריך לבצע כשהמועד מגיע?"
+                                                    value={editTaskAgentInstruction}
+                                                    onChange={e => setEditTaskAgentInstruction(e.target.value)}
+                                                />
+                                            </div>
+                                            <p className="text-xs text-gray-600">ברירת המחדל היא להשתמש במועד המשימה עצמו כ-`scheduledAt`.</p>
+                                        </>
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">עדיפות</label>
@@ -5695,6 +5875,20 @@ export default function EventDetailsPage() {
                                         className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-amber-500 hover:bg-amber-600"}`}
                                     >
                                         {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
+                                    </button>
+                                </div>
+                                <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-800 flex flex-col gap-2">
+                                    <div>
+                                        <p className="font-semibold text-gray-900 mb-1">הפצת אירוע בוואטסאפ (באישור)</p>
+                                        <p>יוצר משימה מיוחדת חדשה ונפרדת להפצה מתוזמנת של האירוע בוואטסאפ, עם קבוצות היעד הקיימות, מלל/מדיה רשמיים וחובת אישור לפני כל שליחה.</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleCreateSpecialWhatsappDistributionTask}
+                                        disabled={creatingSpecialTask}
+                                        className={`mt-auto px-3 py-2 rounded-lg text-sm font-semibold text-white ${creatingSpecialTask ? "bg-gray-300" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                                    >
+                                        {creatingSpecialTask ? "יוצר..." : "הוסף משימת וואטסאפ"}
                                     </button>
                                 </div>
                             </div>

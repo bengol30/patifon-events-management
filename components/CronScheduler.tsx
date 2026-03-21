@@ -13,7 +13,11 @@ export default function CronScheduler() {
             localStorage.setItem("lastCronRun", Date.now().toString());
             try {
                 // console.log("Triggering internal cron job...");
-                await fetch("/api/cron/publish-scheduled");
+                await Promise.allSettled([
+                    fetch("/api/cron/publish-scheduled"),
+                    fetch("/api/cron/run-scheduled-tasks"),
+                    fetch("/api/cron/dispatch-agent-triggers"),
+                ]);
             } catch (e) {
                 console.error("Cron trigger failed", e);
             }
