@@ -14,6 +14,32 @@ import TaskChat from "@/components/TaskChat";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import PartnersInput from "@/components/PartnersInput";
 
+interface WhatsappTargetGroup {
+    id: string;
+    name: string;
+    chatId: string;
+}
+
+interface WhatsappDistributionPayload {
+    eventId?: string;
+    eventTitle?: string;
+    officialPostText?: string;
+    description?: string;
+    officialEventText?: string;
+    messageText?: string;
+    officialImageUrl?: string;
+    previewImageUrl?: string;
+    coverImageUrl?: string;
+    flyerUrl?: string;
+    imageUrls?: string[];
+    mediaUrls?: string[];
+    targetGroups?: WhatsappTargetGroup[];
+    targetGroupIds?: string[];
+    targetGroupNames?: string[];
+    approvalRequired?: boolean;
+    createdFrom?: string;
+}
+
 const computeNextOccurrence = (
     baseDate: Date,
     recurrence: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY",
@@ -1033,6 +1059,10 @@ export default function EventDetailsPage() {
     const [creatorName, setCreatorName] = useState("");
     const [showSpecialModal, setShowSpecialModal] = useState(false);
     const [creatingSpecialTask, setCreatingSpecialTask] = useState(false);
+    const [availableWhatsappGroups, setAvailableWhatsappGroups] = useState<WhatsappTargetGroup[]>([]);
+    const [loadingWhatsappGroups, setLoadingWhatsappGroups] = useState(false);
+    const [selectedWhatsappGroupIds, setSelectedWhatsappGroupIds] = useState<string[]>([]);
+    const [whatsappContentDraft, setWhatsappContentDraft] = useState("");
     const handleShareWhatsApp = (title: string, url?: string) => {
         if (!url) {
             alert("אין קישור לקובץ לשיתוף");
@@ -2453,6 +2483,50 @@ export default function EventDetailsPage() {
         return lines.join("\n");
     };
 
+    const getDefaultWhatsappDistributionText = () => {
+        const officialText = (officialPostText || event?.officialPostText || "").trim();
+        const fallbackText = (event?.description || "").trim();
+        return officialText || fallbackText;
+    };
+
+    const getWhatsappMediaUrls = () => {
+        return Array.from(new Set(getEventDistributionAssetUrls()));
+    };
+
+    const selectedWhatsappGroups = useMemo(() => {
+        const selectedSet = new Set(selectedWhatsappGroupIds);
+        return availableWhatsappGroups.filter(group => selectedSet.has(group.id));
+    }, [availableWhatsappGroups, selectedWhatsappGroupIds]);
+
+    const loadWhatsappGroups = async () => {
+        if (!db) return;
+        setLoadingWhatsappGroups(true);
+        try {
+            const groupsSnap = await getDocs(collection(db, "whatsapp_groups"));
+            const groups = groupsSnap.docs.map((groupDoc) => {
+                const data = groupDoc.data() as any;
+                return {
+                    id: groupDoc.id,
+                    name: String(data?.name || "קבוצה ללא שם"),
+                    chatId: String(data?.chatId || ""),
+                } satisfies WhatsappTargetGroup;
+            }).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+            setAvailableWhatsappGroups(groups);
+            setSelectedWhatsappGroupIds(prev => {
+                if (prev.length) {
+                    const validIds = new Set(groups.map(group => group.id));
+                    return prev.filter(id => validIds.has(id));
+                }
+                return groups.map(group => group.id);
+            });
+        } catch (err) {
+            console.error("שגיאה בטעינת קבוצות וואטסאפ", err);
+            alert("לא הצלחנו לטעון את קבוצות הוואטסאפ השמורות");
+        } finally {
+            setLoadingWhatsappGroups(false);
+        }
+    };
+
     const getEventDistributionAssetUrls = () => {
         const urls = [
             officialFlyerUrl,
@@ -2465,8 +2539,9 @@ export default function EventDetailsPage() {
         return Array.from(new Set(urls));
     };
 
-    const buildWhatsappDistributionAgentInstruction = (targetGroups: { id: string; name: string; chatId?: string }[]) => {
+    const buildWhatsappDistributionAgentInstruction = (targetGroups: WhatsappTargetGroup[], customMessage?: string) => {
         const groupNames = targetGroups.map(group => group.name || group.chatId || group.id).filter(Boolean);
+        const finalMessage = (customMessage || getDefaultWhatsappDistributionText()).trim();
         const lines = [
             "PATIFON / WhatsApp event distribution (approval required)",
             "Do not send anything automatically.",
@@ -2474,32 +2549,37 @@ export default function EventDetailsPage() {
             `Event ID: ${id}`,
             `Event title: ${event?.title || ""}`,
             `Target groups: ${groupNames.join(", ") || "No groups configured"}`,
+            finalMessage ? `Final message: ${finalMessage}` : "",
             "When asking for approval, explicitly list the exact target group names and the final content/media that will be sent.",
             "If approval was not granted, stop and wait.",
         ].filter(Boolean);
         return lines.join("\n");
     };
 
-    const buildWhatsappDistributionPayload = (targetGroups: { id: string; name: string; chatId?: string }[]) => {
+    const buildWhatsappDistributionPayload = (targetGroups: WhatsappTargetGroup[], customMessage?: string): WhatsappDistributionPayload => {
         const officialText = (officialPostText || event?.officialPostText || "").trim();
         const fallbackText = (event?.description || "").trim();
-        const assetUrls = getEventDistributionAssetUrls();
+        const finalText = (customMessage || officialText || fallbackText).trim();
+        const assetUrls = getWhatsappMediaUrls();
         return {
             eventId: id,
             eventTitle: event?.title || "",
             officialPostText: officialText,
             description: fallbackText,
-            officialEventText: officialText || fallbackText,
+            officialEventText: finalText,
+            messageText: finalText,
             officialImageUrl: assetUrls[0] || "",
             previewImageUrl: event?.previewImage || assetUrls[0] || "",
             coverImageUrl: event?.coverImageUrl || event?.coverImage || "",
             flyerUrl: officialFlyerUrl || event?.officialFlyerUrl || assetUrls[0] || "",
             imageUrls: assetUrls,
+            mediaUrls: assetUrls,
             targetGroups: targetGroups.map(group => ({
                 id: group.id,
                 name: group.name || "קבוצה ללא שם",
                 chatId: group.chatId || "",
             })),
+            targetGroupIds: targetGroups.map(group => group.id),
             targetGroupNames: targetGroups.map(group => group.name || group.chatId || group.id).filter(Boolean),
             approvalRequired: true,
             createdFrom: "special_task",
@@ -2623,16 +2703,9 @@ export default function EventDetailsPage() {
         if (!db || !id) return;
         setCreatingSpecialTask(true);
         try {
-            const groupsSnap = await getDocs(collection(db, "whatsapp_groups"));
-            const targetGroups = groupsSnap.docs.map((groupDoc) => {
-                const data = groupDoc.data() as any;
-                return {
-                    id: groupDoc.id,
-                    name: String(data?.name || "קבוצה ללא שם"),
-                    chatId: String(data?.chatId || ""),
-                };
-            });
-            const payload = buildWhatsappDistributionPayload(targetGroups);
+            const targetGroups = selectedWhatsappGroups;
+            const finalMessage = whatsappContentDraft.trim() || getDefaultWhatsappDistributionText();
+            const payload = buildWhatsappDistributionPayload(targetGroups, finalMessage);
             const taskPayload: Partial<Task> = {
                 title: "הפצת אירוע בוואטסאפ (באישור)",
                 description: "משימת הפצה מתוזמנת לוואטסאפ. לפני כל שליחה תישלח בקשת אישור מסודרת עם שמות הקבוצות.",
@@ -2648,7 +2721,7 @@ export default function EventDetailsPage() {
                 requiredCompletions: 1,
                 remainingCompletions: 1,
                 executionMode: "AGENT_ACTION",
-                agentInstruction: buildWhatsappDistributionAgentInstruction(targetGroups),
+                agentInstruction: buildWhatsappDistributionAgentInstruction(targetGroups, finalMessage),
                 payload,
                 scheduleType: "ONE_TIME",
                 scheduleStatus: "PENDING",
@@ -2667,7 +2740,7 @@ export default function EventDetailsPage() {
             });
             alert(targetGroups.length
                 ? `משימת הפצת וואטסאפ נוצרה עם ${targetGroups.length} קבוצות יעד ותדרוש אישור לפני שליחה.`
-                : "משימת הפצת וואטסאפ נוצרה, אבל אין כרגע קבוצות יעד מוגדרות בוואטסאפ.");
+                : "משימת הפצת וואטסאפ נוצרה, אבל כרגע לא נבחרו קבוצות יעד.");
             setShowSpecialModal(false);
         } catch (err) {
             console.error("שגיאה ביצירת משימת הפצת וואטסאפ", err);
@@ -2676,6 +2749,12 @@ export default function EventDetailsPage() {
             setCreatingSpecialTask(false);
         }
     };
+
+    useEffect(() => {
+        if (!showSpecialModal) return;
+        loadWhatsappGroups().catch(() => undefined);
+        setWhatsappContentDraft(getDefaultWhatsappDistributionText());
+    }, [showSpecialModal, id, event?.officialPostText, event?.description, officialPostText, officialFlyerUrl]);
 
     const executeDelete = async () => {
         if (!db) return;
@@ -5877,10 +5956,69 @@ export default function EventDetailsPage() {
                                         {creatingSpecialTask ? "יוצר..." : "הוסף משימת סטורי"}
                                     </button>
                                 </div>
-                                <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-800 flex flex-col gap-2">
+                                <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-800 flex flex-col gap-3 sm:col-span-2">
                                     <div>
                                         <p className="font-semibold text-gray-900 mb-1">הפצת אירוע בוואטסאפ (באישור)</p>
                                         <p>יוצר משימה מיוחדת חדשה ונפרדת להפצה מתוזמנת של האירוע בוואטסאפ, עם קבוצות היעד הקיימות, מלל/מדיה רשמיים וחובת אישור לפני כל שליחה.</p>
+                                    </div>
+                                    <div className="rounded-lg border border-emerald-200 bg-white/80 p-3 space-y-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div>
+                                                <p className="text-xs font-semibold text-gray-900">קבוצות יעד מהמאגר</p>
+                                                <p className="text-[11px] text-gray-500">הבחירה נשמרת לתוך payload יציב עם id, שם ו-chatId.</p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => loadWhatsappGroups()}
+                                                className="px-2 py-1 rounded-md border border-emerald-200 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                            >
+                                                רענן
+                                            </button>
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 space-y-2">
+                                            {loadingWhatsappGroups ? (
+                                                <p className="text-xs text-gray-500">טוען קבוצות...</p>
+                                            ) : availableWhatsappGroups.length === 0 ? (
+                                                <p className="text-xs text-gray-500">אין עדיין קבוצות שמורות במאגר whatsapp_groups.</p>
+                                            ) : availableWhatsappGroups.map((group) => {
+                                                const checked = selectedWhatsappGroupIds.includes(group.id);
+                                                return (
+                                                    <label key={group.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition ${checked ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                                                        <input
+                                                            type="checkbox"
+                                                            className="mt-1 h-4 w-4 accent-emerald-600"
+                                                            checked={checked}
+                                                            onChange={() => setSelectedWhatsappGroupIds((prev) => checked ? prev.filter(id => id !== group.id) : [...prev, group.id])}
+                                                        />
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-semibold text-gray-900">{group.name}</p>
+                                                            <p className="text-[11px] text-gray-500 break-all">{group.chatId || "ללא chatId"}</p>
+                                                        </div>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button type="button" onClick={() => setSelectedWhatsappGroupIds(availableWhatsappGroups.map(group => group.id))} className="px-2 py-1 rounded-md border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">בחר הכול</button>
+                                            <button type="button" onClick={() => setSelectedWhatsappGroupIds([])} className="px-2 py-1 rounded-md border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">נקה בחירה</button>
+                                            <span className="text-xs text-gray-600 self-center">נבחרו {selectedWhatsappGroupIds.length} קבוצות</span>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-gray-900 mb-1">מלל שיישלח לאישור/הפצה</label>
+                                            <textarea
+                                                className="w-full min-h-[140px] rounded-lg border border-gray-200 p-3 text-sm text-gray-800 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                                                value={whatsappContentDraft}
+                                                onChange={(e) => setWhatsappContentDraft(e.target.value)}
+                                                placeholder="המלל הרשמי יופיע כאן אוטומטית..."
+                                            />
+                                            <p className="mt-1 text-[11px] text-gray-500">ברירת מחדל חכמה: officialPostText, ואם חסר אז description. המדיה תילקח מהפלייר/תמונות האירוע.</p>
+                                        </div>
+                                        <div className="rounded-lg border border-dashed border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-900 space-y-1">
+                                            <p className="font-semibold">מדיה זמינה למשימה</p>
+                                            {getWhatsappMediaUrls().length ? getWhatsappMediaUrls().map((url) => (
+                                                <p key={url} className="break-all">• {url}</p>
+                                            )) : <p>אין כרגע מדיה זמינה, אבל עדיין אפשר ליצור את המשימה.</p>}
+                                        </div>
                                     </div>
                                     <button
                                         type="button"
