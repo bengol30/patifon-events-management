@@ -12,6 +12,7 @@ import { doc, getDoc, collection, addDoc, serverTimestamp, onSnapshot, updateDoc
 import { useAuth } from "@/context/AuthContext";
 import TaskChat from "@/components/TaskChat";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { buildTaskScheduleUpdate, getScheduledExecutionLabel } from "@/lib/task-scheduler/sync-update";
 import PartnersInput from "@/components/PartnersInput";
 
 interface WhatsappTargetGroup {
@@ -2015,7 +2016,7 @@ export default function EventDetailsPage() {
             const cleanAssignees = sanitizeAssigneesForWrite(editingTask.assignees || []);
             const offsetParsed = parseOffset(editTaskOffsetDays);
             const dueDateValue = editingTask.dueDate || computeDueDateFromMode(editTaskDueMode, offsetParsed ?? 0, editTaskTime || extractTimeString(getEventStartDate() || new Date()));
-            const updateData: any = {
+            const updateData: any = buildTaskScheduleUpdate(editingTask, {
                 title: editingTask.title,
                 description: editingTask.description || "",
                 assignee: cleanAssignees[0]?.name || editingTask.assignee || "",
@@ -2040,7 +2041,7 @@ export default function EventDetailsPage() {
                 executionMode: editTaskScheduleEnabled ? editTaskExecutionMode : null,
                 agentInstruction: editTaskScheduleEnabled ? (editTaskAgentInstruction || editingTask.agentInstruction || "") : "",
                 payload: editTaskScheduleEnabled ? ((editingTask as any).payload || {}) : {},
-            };
+            });
             await updateDoc(taskRef, updateData);
             if (saveEditTaskToLibrary) {
                 const filesForLibrary = await loadTaskFilesForLibrary(editingTask.id);
@@ -3913,6 +3914,11 @@ export default function EventDetailsPage() {
                                             {editingTask.dueDate
                                                 ? `המשימה מתוזמנת ל-${new Date(editingTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
                                                 : "לא נקבע מועד למשימה"}
+                                            {editTaskScheduleEnabled && getScheduledExecutionLabel(editingTask.dueDate, editingTask.scheduledAt) && (
+                                                <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800">
+                                                    זמן הרצה בפועל (scheduledAt): {getScheduledExecutionLabel(editingTask.dueDate, editingTask.scheduledAt)}
+                                                </div>
+                                            )}
                                             {!getEventStartDate() && (
                                                 <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
                                             )}
@@ -6383,7 +6389,7 @@ export default function EventDetailsPage() {
                                 try {
                                     const taskRef = doc(db, "events", id, "tasks", editingDateTask.id);
                                     const dueVal = computeDueDateFromMode(dateModalMode, parseOffset(dateModalOffset) ?? 0, dateModalTime || extractTimeString(getEventStartDate() || new Date()));
-                                    await updateDoc(taskRef, { dueDate: dueVal });
+                                    await updateDoc(taskRef, buildTaskScheduleUpdate(editingDateTask, { dueDate: dueVal }));
                                     setEditingDateTask(null);
                                 } catch (err) {
                                     console.error("Error updating date:", err);
@@ -6438,6 +6444,11 @@ export default function EventDetailsPage() {
                                         {editingDateTask.dueDate
                                             ? `המשימה מתוזמנת ל-${new Date(editingDateTask.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
                                             : "לא נקבע מועד למשימה"}
+                                        {getScheduledExecutionLabel(editingDateTask.dueDate, editingDateTask.scheduledAt) && (
+                                            <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800">
+                                                זמן הרצה בפועל (scheduledAt): {getScheduledExecutionLabel(editingDateTask.dueDate, editingDateTask.scheduledAt)}
+                                            </div>
+                                        )}
                                         {!getEventStartDate() && (
                                             <div className="text-red-500 mt-1">לא נמצא תאריך לאירוע, המועד מחושב ביחס להיום.</div>
                                         )}

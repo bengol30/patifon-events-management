@@ -9,6 +9,7 @@ import Link from "next/link";
 import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake, Repeat, ImageIcon } from "lucide-react";
 import { storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { buildTaskScheduleUpdate, getScheduledExecutionLabel } from "@/lib/task-scheduler/sync-update";
 
 interface Assignee {
     name: string;
@@ -65,6 +66,8 @@ interface Task {
     createdBy?: string | null;
     scope?: "event" | "project" | "manual" | "general";
     specialType?: string;
+    scheduledAt?: string | null;
+    scheduleStatus?: "PENDING" | "TRIGGERED" | "DONE" | "FAILED" | "CANCELLED" | null;
     executionMode?: "NOTIFY_ONLY" | "AGENT_ACTION" | "EXTERNAL_ACTION";
     agentInstruction?: string;
     payload?: WhatsappDistributionPayload | Record<string, any>;
@@ -961,11 +964,12 @@ export default function TaskDetailPage() {
                 return;
             }
 
-            await updateDoc(taskRef, {
-                [field]: value
-            });
+            const updateData = field === "dueDate"
+                ? buildTaskScheduleUpdate(task, { dueDate: String(value) })
+                : { [field]: value };
+            await updateDoc(taskRef, updateData);
             // Update local state
-            setTask(prev => prev ? { ...prev, [field]: value } : prev);
+            setTask(prev => prev ? { ...prev, ...updateData } : prev);
         } catch (err: any) {
             console.error(`Error updating ${field}:`, err);
             // Only show alert for non-existence errors (other errors are logged but silent)
@@ -981,7 +985,10 @@ export default function TaskDetailPage() {
         if (!task) return;
 
         // 1. Update local state immediately for responsive UI
-        setTask(prev => prev ? { ...prev, [field]: value } : prev);
+        const localUpdate = field === "dueDate"
+            ? buildTaskScheduleUpdate(task, { dueDate: String(value) })
+            : { [field]: value };
+        setTask(prev => prev ? { ...prev, ...localUpdate } : prev);
 
         // 2. Clear existing timeout
         if (updateTimeouts.current[field]) {
@@ -993,9 +1000,12 @@ export default function TaskDetailPage() {
             if (!db || !task) return;
             try {
                 const collectionName = task.scope === "project" ? "projects" : "events";
-                await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), {
-                    [field]: value
-                });
+                await updateDoc(
+                    doc(db, collectionName, task.eventId, "tasks", task.id),
+                    field === "dueDate"
+                        ? buildTaskScheduleUpdate(task, { dueDate: String(value) })
+                        : { [field]: value }
+                );
             } catch (err) {
                 console.error(`Error updating ${field}:`, err);
             }
@@ -1313,6 +1323,9 @@ export default function TaskDetailPage() {
                                                 <div className="rounded-lg border border-emerald-200 bg-white p-3 text-xs text-gray-700 space-y-1">
                                                     <p><span className="font-semibold">אישור לפני שליחה:</span> {payload.approvalRequired === false ? "לא" : "כן"}</p>
                                                     <p><span className="font-semibold">מצב ביצוע:</span> {task.executionMode || "AGENT_ACTION"}</p>
+                                                    {getScheduledExecutionLabel(task.dueDate, task.scheduledAt) && (
+                                                        <p><span className="font-semibold">זמן הרצה בפועל:</span> {getScheduledExecutionLabel(task.dueDate, task.scheduledAt)}</p>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -1636,6 +1649,11 @@ export default function TaskDetailPage() {
                                                     {task.dueDate
                                                         ? `המשימה מתוזמנת ל-${new Date(task.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
                                                         : "לא נקבע מועד למשימה"}
+                                                    {getScheduledExecutionLabel(task.dueDate, task.scheduledAt) && (
+                                                        <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800">
+                                                            זמן הרצה בפועל (scheduledAt): {getScheduledExecutionLabel(task.dueDate, task.scheduledAt)}
+                                                        </div>
+                                                    )}
                                                     {!eventStartTime && (
                                                         <div className="text-red-500 mt-1">לא נמצא תאריך אירוע, חישוב המועד הוא ביחס להיום.</div>
                                                     )}
