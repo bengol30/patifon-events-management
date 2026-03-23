@@ -6,14 +6,41 @@ import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, type Firestore, setDoc, increment, getDocs, where, CollectionReference, DocumentReference } from "firebase/firestore";
 import Link from "next/link";
-import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake, Repeat } from "lucide-react";
+import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake, Repeat, ImageIcon } from "lucide-react";
 import { storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { buildTaskScheduleUpdate, getScheduledExecutionLabel } from "@/lib/task-scheduler/sync-update";
 
 interface Assignee {
     name: string;
     userId?: string;
     email?: string;
+}
+
+interface WhatsappTargetGroup {
+    id: string;
+    name: string;
+    chatId?: string;
+}
+
+interface WhatsappDistributionPayload {
+    eventId?: string;
+    eventTitle?: string;
+    officialPostText?: string;
+    description?: string;
+    officialEventText?: string;
+    messageText?: string;
+    officialImageUrl?: string;
+    previewImageUrl?: string;
+    coverImageUrl?: string;
+    flyerUrl?: string;
+    imageUrls?: string[];
+    mediaUrls?: string[];
+    targetGroups?: WhatsappTargetGroup[];
+    targetGroupIds?: string[];
+    targetGroupNames?: string[];
+    approvalRequired?: boolean;
+    createdFrom?: string;
 }
 
 interface Task {
@@ -38,7 +65,14 @@ interface Task {
     createdByPhone?: string;
     createdBy?: string | null;
     scope?: "event" | "project" | "manual" | "general";
+    specialType?: string;
+    scheduledAt?: string | null;
+    scheduleStatus?: "PENDING" | "TRIGGERED" | "DONE" | "FAILED" | "CANCELLED" | null;
+    executionMode?: "NOTIFY_ONLY" | "AGENT_ACTION" | "EXTERNAL_ACTION";
+    agentInstruction?: string;
+    payload?: WhatsappDistributionPayload | Record<string, any>;
 }
+
 
 interface EventTeamMember {
     name: string;
@@ -88,6 +122,8 @@ export default function TaskDetailPage() {
     const [dueMode, setDueMode] = useState<"event_day" | "offset">("event_day");
     const [dueOffsetDays, setDueOffsetDays] = useState<string>("0");
     const [dueTime, setDueTime] = useState<string>("09:00");
+    const [availableWhatsappGroups, setAvailableWhatsappGroups] = useState<WhatsappTargetGroup[]>([]);
+    const [loadingWhatsappGroups, setLoadingWhatsappGroups] = useState(false);
 
     const getTaskBasePath = (targetTask: Task) => {
         const collectionName = targetTask.scope === "project" ? "projects" : "events";
@@ -232,6 +268,79 @@ export default function TaskDetailPage() {
             } catch { /* ignore */ }
         }
         return "";
+    };
+
+    const normalizeWhatsappGroups = (groups: any[] = []): WhatsappTargetGroup[] => {
+        const seen = new Set<string>();
+        return groups
+            .map((group) => ({
+                id: String(group?.id || "").trim(),
+                name: String(group?.name || "קבוצה ללא שם").trim(),
+                chatId: String(group?.chatId || "").trim(),
+            }))
+            .filter((group) => {
+                const key = group.id || `${group.name}|${group.chatId}`;
+                if (!key || seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+    };
+
+    const getWhatsappPayload = (): WhatsappDistributionPayload => {
+        const payload = ((task?.payload || {}) as WhatsappDistributionPayload) || {};
+        const imageUrls = Array.isArray(payload.imageUrls) ? payload.imageUrls : [];
+        const mediaUrls = Array.isArray(payload.mediaUrls) ? payload.mediaUrls : imageUrls;
+        return {
+            ...payload,
+            targetGroups: normalizeWhatsappGroups(Array.isArray(payload.targetGroups) ? payload.targetGroups : []),
+            targetGroupIds: Array.isArray(payload.targetGroupIds) ? payload.targetGroupIds.map((id) => String(id)) : [],
+            targetGroupNames: Array.isArray(payload.targetGroupNames) ? payload.targetGroupNames.map((name) => String(name)) : [],
+            imageUrls,
+            mediaUrls,
+        };
+    };
+
+    const loadWhatsappGroups = async () => {
+        if (!db) return;
+        setLoadingWhatsappGroups(true);
+        try {
+            const snap = await getDocs(collection(db, "whatsapp_groups"));
+            const groups = snap.docs.map((groupDoc) => {
+                const data = groupDoc.data() as any;
+                return {
+                    id: groupDoc.id,
+                    name: String(data?.name || "קבוצה ללא שם"),
+                    chatId: String(data?.chatId || ""),
+                } satisfies WhatsappTargetGroup;
+            }).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+            setAvailableWhatsappGroups(groups);
+        } catch (err) {
+            console.error("שגיאה בטעינת קבוצות וואטסאפ", err);
+        } finally {
+            setLoadingWhatsappGroups(false);
+        }
+    };
+
+    const persistWhatsappPayload = async (updater: (current: WhatsappDistributionPayload) => WhatsappDistributionPayload) => {
+        if (!db || !task) return;
+        const collectionName = task.scope === "project" ? "projects" : "events";
+        const current = getWhatsappPayload();
+        const next = updater(current);
+        const normalizedGroups = normalizeWhatsappGroups(next.targetGroups || []);
+        const imageUrls = Array.isArray(next.imageUrls) ? Array.from(new Set(next.imageUrls.map((url) => String(url || "").trim()).filter(Boolean))) : [];
+        const mediaUrls = Array.from(new Set(([...(Array.isArray(next.mediaUrls) ? next.mediaUrls : []), ...imageUrls]).map((url) => String(url || "").trim()).filter(Boolean)));
+        const normalizedPayload: WhatsappDistributionPayload = {
+            ...next,
+            targetGroups: normalizedGroups,
+            targetGroupIds: normalizedGroups.map((group) => group.id),
+            targetGroupNames: normalizedGroups.map((group) => group.name || group.chatId || group.id).filter(Boolean),
+            messageText: String(next.messageText || next.officialEventText || next.officialPostText || next.description || "").trim(),
+            officialEventText: String(next.officialEventText || next.messageText || next.officialPostText || next.description || "").trim(),
+            imageUrls,
+            mediaUrls,
+        };
+        await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), { payload: normalizedPayload });
+        setTask(prev => prev ? { ...prev, payload: normalizedPayload } : prev);
     };
 
     const dedupeAssignees = (arr: Assignee[]) => {
@@ -855,11 +964,12 @@ export default function TaskDetailPage() {
                 return;
             }
 
-            await updateDoc(taskRef, {
-                [field]: value
-            });
+            const updateData = field === "dueDate"
+                ? buildTaskScheduleUpdate(task, { dueDate: String(value) })
+                : { [field]: value };
+            await updateDoc(taskRef, updateData);
             // Update local state
-            setTask(prev => prev ? { ...prev, [field]: value } : prev);
+            setTask(prev => prev ? { ...prev, ...updateData } : prev);
         } catch (err: any) {
             console.error(`Error updating ${field}:`, err);
             // Only show alert for non-existence errors (other errors are logged but silent)
@@ -875,7 +985,10 @@ export default function TaskDetailPage() {
         if (!task) return;
 
         // 1. Update local state immediately for responsive UI
-        setTask(prev => prev ? { ...prev, [field]: value } : prev);
+        const localUpdate = field === "dueDate"
+            ? buildTaskScheduleUpdate(task, { dueDate: String(value) })
+            : { [field]: value };
+        setTask(prev => prev ? { ...prev, ...localUpdate } : prev);
 
         // 2. Clear existing timeout
         if (updateTimeouts.current[field]) {
@@ -887,9 +1000,12 @@ export default function TaskDetailPage() {
             if (!db || !task) return;
             try {
                 const collectionName = task.scope === "project" ? "projects" : "events";
-                await updateDoc(doc(db, collectionName, task.eventId, "tasks", task.id), {
-                    [field]: value
-                });
+                await updateDoc(
+                    doc(db, collectionName, task.eventId, "tasks", task.id),
+                    field === "dueDate"
+                        ? buildTaskScheduleUpdate(task, { dueDate: String(value) })
+                        : { [field]: value }
+                );
             } catch (err) {
                 console.error(`Error updating ${field}:`, err);
             }
@@ -955,6 +1071,11 @@ export default function TaskDetailPage() {
         const added = exists ? [] : [{ name: member.name, userId: member.userId, email: member.email }];
         await updateAssignees(next, added);
     };
+
+    useEffect(() => {
+        if (task?.specialType !== "whatsapp_event_distribution") return;
+        loadWhatsappGroups().catch(() => undefined);
+    }, [task?.specialType]);
 
     const handleUploadFiles = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1112,6 +1233,105 @@ export default function TaskDetailPage() {
                                     placeholder="הוסף תיאור למשימה..."
                                 />
                             </div>
+
+                            {task.specialType === "whatsapp_event_distribution" && (() => {
+                                const payload = getWhatsappPayload();
+                                const selectedIds = new Set((payload.targetGroupIds?.length ? payload.targetGroupIds : payload.targetGroups?.map((group) => group.id) || []).map((id) => String(id)));
+                                const currentGroups = payload.targetGroups || [];
+                                const mediaReferences = Array.from(new Set(([...((payload.mediaUrls || [])), ...((payload.imageUrls || [])), payload.flyerUrl || "", payload.previewImageUrl || "", payload.officialImageUrl || "", payload.coverImageUrl || ""]).map((url) => String(url || "").trim()).filter(Boolean)));
+                                return (
+                                    <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 space-y-4">
+                                        <div>
+                                            <p className="text-sm font-semibold text-emerald-950">הפצת וואטסאפ לאירוע</p>
+                                            <p className="text-xs text-emerald-900/80">המשימה נשארת באישור לפני שליחה. כאן מנהלים את הקבוצות, המלל והמדיה מתוך payload מסודר ולא מתוך JSON גולמי.</p>
+                                        </div>
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div>
+                                                        <p className="text-xs font-semibold text-gray-900">קבוצות יעד</p>
+                                                        <p className="text-[11px] text-gray-500">נשלפות מ-whatsapp_groups בלבד.</p>
+                                                    </div>
+                                                    <button type="button" onClick={() => loadWhatsappGroups()} className="px-2 py-1 rounded-md border border-emerald-200 text-xs font-semibold text-emerald-700 hover:bg-white">רענן</button>
+                                                </div>
+                                                <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 space-y-2">
+                                                    {loadingWhatsappGroups ? (
+                                                        <p className="text-xs text-gray-500">טוען קבוצות...</p>
+                                                    ) : availableWhatsappGroups.length === 0 ? (
+                                                        <p className="text-xs text-gray-500">אין קבוצות שמורות במאגר כרגע.</p>
+                                                    ) : availableWhatsappGroups.map((group) => {
+                                                        const checked = selectedIds.has(group.id);
+                                                        return (
+                                                            <label key={group.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition ${checked ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="mt-1 h-4 w-4 accent-emerald-600"
+                                                                    checked={checked}
+                                                                    onChange={() => {
+                                                                        const nextGroups = checked
+                                                                            ? currentGroups.filter((item) => item.id !== group.id)
+                                                                            : [...currentGroups, { id: group.id, name: group.name, chatId: group.chatId || "" }];
+                                                                        persistWhatsappPayload((current) => ({ ...current, targetGroups: nextGroups }));
+                                                                    }}
+                                                                />
+                                                                <div className="min-w-0">
+                                                                    <p className="text-sm font-semibold text-gray-900">{group.name}</p>
+                                                                    <p className="text-[11px] text-gray-500 break-all">{group.chatId || "ללא chatId"}</p>
+                                                                </div>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p className="text-xs text-gray-600">נבחרו {currentGroups.length} קבוצות.</p>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-gray-900 mb-1">מלל ההפצה</label>
+                                                    <textarea
+                                                        className="w-full min-h-[180px] rounded-lg border border-gray-200 p-3 text-sm text-gray-800 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                                                        value={payload.messageText || payload.officialEventText || payload.officialPostText || payload.description || ""}
+                                                        onChange={(e) => {
+                                                            const value = e.target.value;
+                                                            setTask(prev => prev ? {
+                                                                ...prev,
+                                                                payload: {
+                                                                    ...(getWhatsappPayload()),
+                                                                    messageText: value,
+                                                                    officialEventText: value,
+                                                                },
+                                                            } : prev);
+                                                        }}
+                                                        onBlur={(e) => {
+                                                            const value = e.target.value;
+                                                            persistWhatsappPayload((current) => ({ ...current, messageText: value, officialEventText: value }));
+                                                        }}
+                                                        placeholder="מלל ההודעה שיישלח באישור ובביצוע"
+                                                    />
+                                                    <p className="mt-1 text-[11px] text-gray-500">המלל נשמר ב-payload.messageText וגם ב-payload.officialEventText כדי לשמור shape יציב.</p>
+                                                </div>
+                                                <div className="rounded-lg border border-dashed border-emerald-200 bg-white p-3 space-y-2">
+                                                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                                                        <ImageIcon size={16} className="text-emerald-700" />
+                                                        מדיה זמינה
+                                                    </div>
+                                                    {mediaReferences.length ? mediaReferences.map((url) => (
+                                                        <a key={url} href={url} target="_blank" rel="noreferrer" className="block break-all text-xs text-emerald-700 hover:underline">{url}</a>
+                                                    )) : (
+                                                        <p className="text-xs text-gray-500">אין כרגע קישורי מדיה שמורים ב-payload.</p>
+                                                    )}
+                                                </div>
+                                                <div className="rounded-lg border border-emerald-200 bg-white p-3 text-xs text-gray-700 space-y-1">
+                                                    <p><span className="font-semibold">אישור לפני שליחה:</span> {payload.approvalRequired === false ? "לא" : "כן"}</p>
+                                                    <p><span className="font-semibold">מצב ביצוע:</span> {task.executionMode || "AGENT_ACTION"}</p>
+                                                    {getScheduledExecutionLabel(task.dueDate, task.scheduledAt) && (
+                                                        <p><span className="font-semibold">זמן הרצה בפועל:</span> {getScheduledExecutionLabel(task.dueDate, task.scheduledAt)}</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                                 <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-100">
@@ -1429,6 +1649,11 @@ export default function TaskDetailPage() {
                                                     {task.dueDate
                                                         ? `המשימה מתוזמנת ל-${new Date(task.dueDate).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
                                                         : "לא נקבע מועד למשימה"}
+                                                    {getScheduledExecutionLabel(task.dueDate, task.scheduledAt) && (
+                                                        <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800">
+                                                            זמן הרצה בפועל (scheduledAt): {getScheduledExecutionLabel(task.dueDate, task.scheduledAt)}
+                                                        </div>
+                                                    )}
                                                     {!eventStartTime && (
                                                         <div className="text-red-500 mt-1">לא נמצא תאריך אירוע, חישוב המועד הוא ביחס להיום.</div>
                                                     )}
