@@ -348,6 +348,8 @@ export default function Dashboard() {
   };
 
   // Edit/Delete State
+  const [showNewGeneralTaskModal, setShowNewGeneralTaskModal] = useState(false);
+  const [newGeneralTask, setNewGeneralTask] = useState({ title: "", description: "", dueDate: "", priority: "NORMAL", eventId: "" });
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   // State for editing status/next step
   const [editingStatusTask, setEditingStatusTask] = useState<Task | null>(null);
@@ -1106,10 +1108,11 @@ export default function Dashboard() {
         taskDocsMap.forEach((docSnap) => {
           const taskData = docSnap.data();
           const isProjectTask = isProjectTaskRef(docSnap.ref);
-          const scope: "event" | "project" = isProjectTask ? "project" : "event";
+          const isGeneralTask = docSnap.ref.parent.id === "tasks" && !docSnap.ref.parent.parent;
+          const scope: "event" | "project" | "general" = isGeneralTask ? "general" : (isProjectTask ? "project" : "event");
           const eventId = docSnap.ref.parent.parent?.id || "";
-          let container = isProjectTask ? projectLookup.get(eventId) : eventLookup.get(eventId);
-          if (!container && isProjectTask) {
+          let container = isGeneralTask ? undefined : (isProjectTask ? projectLookup.get(eventId) : eventLookup.get(eventId));
+          if (!container && isProjectTask && !isGeneralTask) {
             container = { id: eventId, name: taskData.eventTitle || taskData.title || "פרויקט" } as any;
           }
           const isVolunteerTask = taskData.isVolunteerTask === true || taskData.volunteerHours != null;
@@ -1128,9 +1131,11 @@ export default function Dashboard() {
             userEmail,
           });
           const mentionsArr = (taskData.lastMessageMentions as { name?: string; userId?: string; email?: string }[] | undefined) || [];
-          const containerTitle = scope === "project"
-            ? (container as any)?.name || (container as any)?.title || taskData.eventTitle || "פרויקט"
-            : (container as any)?.title || taskData.eventTitle || "אירוע לא ידוע";
+          const containerTitle = scope === "general"
+            ? taskData.eventTitle || "משימה פתוחה"
+            : (scope === "project"
+              ? (container as any)?.name || (container as any)?.title || taskData.eventTitle || "פרויקט"
+              : (container as any)?.title || taskData.eventTitle || "אירוע לא ידוע");
 
           if (match.isAssigned || match.isMentioned) {
             notifTasks.push({
@@ -1650,22 +1655,84 @@ export default function Dashboard() {
     })
     : [];
 
+  const handleCreateGeneralTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!db || !user || !newGeneralTask.title.trim()) return;
+    try {
+      const payload: any = {
+        title: newGeneralTask.title,
+        description: newGeneralTask.description,
+        dueDate: newGeneralTask.dueDate,
+        priority: newGeneralTask.priority,
+        status: "TODO",
+        assignee: user.displayName || "אני",
+        assigneeId: user.uid,
+        assignees: [{ name: user.displayName || "אני", userId: user.uid, email: user.email || "" }],
+        createdAt: serverTimestamp(),
+        currentStatus: "משימה הוגדרה לביצוע",
+        nextStep: "בצע את המשימה",
+      };
+
+      if (newGeneralTask.eventId) {
+        const targetEvent = events.find(ev => ev.id === newGeneralTask.eventId);
+        const targetProject = projects.find(pr => pr.id === newGeneralTask.eventId);
+        const targetScope = targetProject ? "project" : "event";
+        const targetTitle = targetProject ? targetProject.name : (targetEvent ? targetEvent.title : "");
+        const col = targetScope === "project" ? collection(db, "projects", newGeneralTask.eventId, "tasks") : collection(db, "events", newGeneralTask.eventId, "tasks");
+        const docRef = await addDoc(col, { ...payload, eventId: newGeneralTask.eventId, eventTitle: targetTitle, scope: targetScope });
+        setMyTasks(prev => [{ ...payload, id: docRef.id, eventId: newGeneralTask.eventId, eventTitle: targetTitle, scope: targetScope } as any, ...prev]);
+      } else {
+        const docRef = await addDoc(collection(db, "tasks"), { ...payload, eventId: "", eventTitle: "משימה פתוחה", scope: "general" });
+        setMyTasks(prev => [{ ...payload, id: docRef.id, eventId: "", eventTitle: "משימה פתוחה", scope: "general" } as any, ...prev]);
+      }
+      setShowNewGeneralTaskModal(false);
+      setNewGeneralTask({ title: "", description: "", dueDate: "", priority: "NORMAL", eventId: "" });
+    } catch (err) {
+      console.error("Error creating general task:", err);
+      alert("שגיאה ביצירת המשימה");
+    }
+  };
+
   const handleUpdateTask = async (e: React.FormEvent) => {
     // existing update logic for full task edit
     e.preventDefault();
     if (!db || !editingTask) return;
     try {
-      const taskRef = editingTask.scope === "project"
-        ? doc(db, "projects", editingTask.eventId, "tasks", editingTask.id)
-        : doc(db, "events", editingTask.eventId, "tasks", editingTask.id);
-      await updateDoc(taskRef, {
-        title: editingTask.title,
-        dueDate: editingTask.dueDate,
-        priority: editingTask.priority,
-        currentStatus: editingTask.currentStatus || "",
-        nextStep: editingTask.nextStep || "",
-      });
-      setMyTasks(prev => prev.map(t => t.id === editingTask.id ? editingTask : t));
+      if (editingTask.scope === "general" && editingTask.eventId) {
+        const newEventId = editingTask.eventId;
+        const targetEvent = events.find(ev => ev.id === newEventId);
+        const targetProject = projects.find(pr => pr.id === newEventId);
+        const targetScope = targetProject ? "project" : "event";
+        const targetTitle = targetProject ? targetProject.name : (targetEvent ? targetEvent.title : "");
+        const oldRef = doc(db, "tasks", editingTask.id);
+        const newRef = targetScope === "project" ? doc(db, "projects", newEventId, "tasks", editingTask.id) : doc(db, "events", newEventId, "tasks", editingTask.id);
+        const snap = await getDoc(oldRef);
+        if (snap.exists()) {
+          await setDoc(newRef, {
+            ...snap.data(),
+            title: editingTask.title,
+            dueDate: editingTask.dueDate,
+            priority: editingTask.priority,
+            currentStatus: editingTask.currentStatus || "",
+            nextStep: editingTask.nextStep || "",
+            eventId: newEventId,
+            eventTitle: targetTitle,
+            scope: targetScope,
+          });
+          await deleteDoc(oldRef);
+          setMyTasks(prev => prev.map(t => t.id === editingTask.id ? { ...editingTask, eventId: newEventId, eventTitle: targetTitle, scope: targetScope } as any : t));
+        }
+      } else {
+        const taskRef = (editingTask.scope === "general" ? doc(db, "tasks", editingTask.id) : (editingTask.scope === "project" ? doc(db, "projects", editingTask.eventId, "tasks", editingTask.id) : doc(db, "events", editingTask.eventId, "tasks", editingTask.id)));
+        await updateDoc(taskRef, {
+          title: editingTask.title,
+          dueDate: editingTask.dueDate,
+          priority: editingTask.priority,
+          currentStatus: editingTask.currentStatus || "",
+          nextStep: editingTask.nextStep || "",
+        });
+        setMyTasks(prev => prev.map(t => t.id === editingTask.id ? editingTask : t));
+      }
       setEditingTask(null);
     } catch (err) {
       console.error("Error updating task:", err);
@@ -1681,9 +1748,7 @@ export default function Dashboard() {
     if (!taskToComplete) return;
 
     try {
-      const taskRef = taskToComplete.scope === "project"
-        ? doc(db, "projects", taskToComplete.eventId, "tasks", deletingTaskId)
-        : doc(db, "events", taskToComplete.eventId, "tasks", deletingTaskId);
+      const taskRef = (taskToComplete.scope === "general" ? doc(db, "tasks", deletingTaskId) : (taskToComplete.scope === "project" ? doc(db, "projects", taskToComplete.eventId, "tasks", deletingTaskId) : doc(db, "events", taskToComplete.eventId, "tasks", deletingTaskId)));
       const required = taskToComplete.requiredCompletions != null
         ? Math.max(1, Number(taskToComplete.requiredCompletions))
         : 1;
@@ -1718,9 +1783,7 @@ export default function Dashboard() {
     if (!db) return;
 
     try {
-      const taskRef = task.scope === "project"
-        ? doc(db, "projects", task.eventId, "tasks", task.id)
-        : doc(db, "events", task.eventId, "tasks", task.id);
+      const taskRef = (task.scope === "general" ? doc(db, "tasks", task.id) : (task.scope === "project" ? doc(db, "projects", task.eventId, "tasks", task.id) : doc(db, "events", task.eventId, "tasks", task.id)));
       const required = task.requiredCompletions != null
         ? Math.max(1, Number(task.requiredCompletions))
         : 1;
@@ -1828,9 +1891,7 @@ export default function Dashboard() {
       }
       if (task.scope !== "manual") {
         try {
-          const taskRef = task.scope === "project"
-            ? doc(db, "projects", task.eventId, "tasks", task.id)
-            : doc(db, "events", task.eventId, "tasks", task.id);
+          const taskRef = (task.scope === "general" ? doc(db, "tasks", task.id) : (task.scope === "project" ? doc(db, "projects", task.eventId, "tasks", task.id) : doc(db, "events", task.eventId, "tasks", task.id)));
           const snap = await getDoc(taskRef);
           if (snap.exists()) {
             const data = snap.data() as any;
@@ -1931,9 +1992,7 @@ export default function Dashboard() {
       const scope = (entry?.scope || "event") as "event" | "project" | "manual" | "general";
       if (taskId && eventId && scope !== "manual") {
         try {
-          const taskRef = scope === "project"
-            ? doc(db, "projects", eventId, "tasks", taskId)
-            : doc(db, "events", eventId, "tasks", taskId);
+          const taskRef = (scope === "general" ? doc(db, "tasks", taskId) : (scope === "project" ? doc(db, "projects", eventId, "tasks", taskId) : doc(db, "events", eventId, "tasks", taskId)));
           const taskSnap = await getDoc(taskRef);
           if (taskSnap.exists()) {
             const taskData = taskSnap.data() as any;
@@ -2628,9 +2687,7 @@ export default function Dashboard() {
     let taskRef: ReturnType<typeof doc> | null = null;
     let taskData: any = null;
     if (!isManualRequest) {
-      taskRef = req.scope === "project"
-        ? doc(db, "projects", req.eventId, "tasks", req.taskId)
-        : doc(db, "events", req.eventId, "tasks", req.taskId);
+      taskRef = (req.scope === "general" ? doc(db, "tasks", req.taskId) : (req.scope === "project" ? doc(db, "projects", req.eventId, "tasks", req.taskId) : doc(db, "events", req.eventId, "tasks", req.taskId)));
       try {
         const snap = await getDoc(taskRef);
         taskData = snap.exists() ? (snap.data() as any) : null;
@@ -3024,6 +3081,54 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* New General Task Modal */}
+      {showNewGeneralTaskModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">משימה פתוחה חדשה</h3>
+              <button onClick={() => setShowNewGeneralTaskModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateGeneralTask} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">כותרת המשימה</label>
+                <input type="text" required className="w-full p-2 border rounded-lg text-sm" value={newGeneralTask.title} onChange={e => setNewGeneralTask({ ...newGeneralTask, title: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">תיאור (אופציונלי)</label>
+                <textarea rows={2} className="w-full p-2 border rounded-lg text-sm" value={newGeneralTask.description} onChange={e => setNewGeneralTask({ ...newGeneralTask, description: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">תאריך יעד</label>
+                <input type="date" required className="w-full p-2 border rounded-lg text-sm" value={newGeneralTask.dueDate} onChange={e => setNewGeneralTask({ ...newGeneralTask, dueDate: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">עדיפות</label>
+                <select className="w-full p-2 border rounded-lg text-sm" value={newGeneralTask.priority} onChange={e => setNewGeneralTask({ ...newGeneralTask, priority: e.target.value })}>
+                  <option value="NORMAL">רגיל</option>
+                  <option value="HIGH">גבוה</option>
+                  <option value="CRITICAL">דחוף</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">שיוך משימה (אופציונלי)</label>
+                <select className="w-full p-2 border rounded-lg text-sm" value={newGeneralTask.eventId} onChange={e => setNewGeneralTask({ ...newGeneralTask, eventId: e.target.value })}>
+                  <option value="">-- ללא שיוך (משימה כללית) --</option>
+                  {events.map(ev => <option key={ev.id} value={ev.id}>אירוע: {ev.title}</option>)}
+                  {projects.map(pr => <option key={pr.id} value={pr.id}>פרויקט: {pr.name}</option>)}
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 pt-4">
+                <button type="button" onClick={() => setShowNewGeneralTaskModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">ביטול</button>
+                <button type="submit" disabled={!newGeneralTask.title || !newGeneralTask.dueDate} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">צור משימה</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Edit Task Modal */}
       {editingTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -3052,6 +3157,16 @@ export default function Dashboard() {
                   <option value="CRITICAL">דחוף</option>
                 </select>
               </div>
+              {editingTask.scope === "general" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">שיוך לאירוע או פרויקט (אופציונלי)</label>
+                  <select className="w-full p-2 border rounded-lg text-sm" value={editingTask.eventId} onChange={e => setEditingTask({ ...editingTask, eventId: e.target.value })}>
+                    <option value="">-- ללא שיוך (משימה פתוחה) --</option>
+                    {events.map(ev => <option key={ev.id} value={ev.id}>אירוע: {ev.title}</option>)}
+                    {projects.map(pr => <option key={pr.id} value={pr.id}>פרויקט: {pr.name}</option>)}
+                  </select>
+                </div>
+              )}
               {/* New fields for status and next step */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">איפה זה עומד</label>
@@ -3081,9 +3196,7 @@ export default function Dashboard() {
               e.preventDefault();
               if (!db || !editingStatusTask) return;
               try {
-                const taskRef = editingStatusTask.scope === "project"
-                  ? doc(db, "projects", editingStatusTask.eventId, "tasks", editingStatusTask.id)
-                  : doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id);
+                const taskRef = (editingStatusTask.scope === "general" ? doc(db, "tasks", editingStatusTask.id) : (editingStatusTask.scope === "project" ? doc(db, "projects", editingStatusTask.eventId, "tasks", editingStatusTask.id) : doc(db, "events", editingStatusTask.eventId, "tasks", editingStatusTask.id)));
                 await updateDoc(taskRef, {
                   currentStatus: editingStatusTask.currentStatus || "",
                   nextStep: editingStatusTask.nextStep || "",
@@ -3147,35 +3260,60 @@ export default function Dashboard() {
           <div className="space-y-6">
             <section ref={tasksSectionRef} className="overflow-hidden rounded-[30px] bg-white shadow-[0_18px_45px_rgba(74,26,44,0.08)]" style={{ border: '2px solid var(--patifon-cream-dark)' }}>
               <div className="border-b border-[rgba(74,26,44,0.08)] bg-gradient-to-l from-[rgba(255,184,76,0.18)] via-white to-[rgba(74,26,44,0.04)] p-5 sm:p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="text-right">
-                    <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
-                      <span className="rounded-full border border-amber-200 bg-[var(--patifon-yellow)] px-3 py-1 text-xs font-semibold text-[var(--patifon-burgundy)]">{filteredTasks.length} מוצגות</span>
-                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{upcomingTasksCount} לשבוע הקרוב</span>
+                <div className="flex flex-col gap-8">
+                  {/* Top Row: Title vs Button */}
+                  <div className="flex flex-col-reverse sm:flex-row sm:items-start sm:justify-between gap-5">
+
+                    {/* LEFTSIDE: New task button */}
+                    <div className="flex justify-end sm:justify-start w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => setShowNewGeneralTaskModal(true)}
+                        className="flex items-center justify-center gap-2 rounded-2xl bg-[var(--patifon-burgundy)] px-6 py-3 text-sm font-bold text-white shadow-[0_8px_20px_rgba(74,26,44,0.15)] transition-all hover:bg-pink-900 hover:-translate-y-0.5 active:scale-95"
+                        title="הוסף משימה פתוחה ללא אירוע"
+                      >
+                        <Plus size={18} />
+                        משימה חדשה
+                      </button>
                     </div>
-                    <div className="flex items-center justify-end gap-2">
-                      <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>איפה פועלים עכשיו</h2>
-                      <CheckSquare style={{ color: 'var(--patifon-red)' }} />
+
+                    {/* RIGHTSIDE: Title & Description */}
+                    <div className="text-right flex flex-col items-end w-full sm:w-auto">
+                      <div className="flex items-center gap-3">
+                        <h2 className="text-3xl sm:text-4xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>איפה פועלים עכשיו</h2>
+                        <div className="rounded-2xl bg-red-50 p-2 text-[var(--patifon-red)]">
+                          <CheckSquare size={28} />
+                        </div>
+                      </div>
+                      <p className="mt-2 text-sm sm:text-base font-medium text-slate-600 max-w-lg">רשימת העבודה הראשית שלך. לחיצה על המשימה תפתח את כל הפרטים שלה.</p>
+                      <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                        <span className="rounded-xl bg-amber-100/70 border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-900 shadow-sm">{filteredTasks.length} מוצגות</span>
+                        <span className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm">{upcomingTasksCount} לשבוע הקרוב</span>
+                      </div>
                     </div>
-                    <p className="mt-1 text-sm text-gray-600">רשימת העבודה הראשית שלך. דחוף למעלה, צ׳אט ופעולות זמינות בכל כרטיס.</p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[360px]">
-                    <button type="button" onClick={() => focusTaskList("status")} className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-right transition hover:bg-red-100">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-600">תקועות/באיחור</p>
-                      <p className="mt-1 text-lg font-bold text-red-700">{stuckTasksCount + overdueTasksCount}</p>
+                  {/* 4 Filter Cards Row */}
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:flex xl:flex-wrap [&>*]:flex-1">
+                    <button type="button" onClick={() => focusTaskList("status")} className="group relative overflow-hidden rounded-3xl border border-red-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-red-200">
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-red-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-red-500">תקועות/באיחור</p>
+                      <p className="mt-1 text-2xl font-black text-slate-800">{stuckTasksCount + overdueTasksCount}</p>
                     </button>
-                    <button type="button" onClick={() => focusTaskList("priority")} className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right transition hover:bg-amber-100">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">דחופות</p>
-                      <p className="mt-1 text-lg font-bold text-amber-900">{urgentTasksCount}</p>
+                    <button type="button" onClick={() => focusTaskList("priority")} className="group relative overflow-hidden rounded-3xl border border-amber-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-amber-200">
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-amber-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600">דחופות</p>
+                      <p className="mt-1 text-2xl font-black text-slate-800">{urgentTasksCount}</p>
                     </button>
-                    <button type="button" onClick={() => document.getElementById('active-events')?.scrollIntoView({ behavior: 'smooth' })} className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-right transition hover:bg-fuchsia-100">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">אירועים פעילים</p>
-                      <p className="mt-1 text-lg font-bold text-fuchsia-800">{events.length}</p>
+                    <button type="button" onClick={() => document.getElementById('active-events')?.scrollIntoView({ behavior: 'smooth' })} className="group relative overflow-hidden rounded-3xl border border-fuchsia-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-fuchsia-200">
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-fuchsia-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-fuchsia-600">אירועים פעילים</p>
+                      <p className="mt-1 text-2xl font-black text-slate-800">{events.length}</p>
                     </button>
-                    <button type="button" onClick={() => document.getElementById('active-projects')?.scrollIntoView({ behavior: 'smooth' })} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right transition hover:bg-slate-100">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">פרויקטים</p>
-                      <p className="mt-1 text-lg font-bold text-slate-900">{activeProjectsCount}</p>
+                    <button type="button" onClick={() => document.getElementById('active-projects')?.scrollIntoView({ behavior: 'smooth' })} className="group relative overflow-hidden rounded-3xl border border-slate-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-slate-200">
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">פרויקטים</p>
+                      <p className="mt-1 text-2xl font-black text-slate-800">{activeProjectsCount}</p>
                     </button>
                   </div>
                 </div>
@@ -3244,9 +3382,7 @@ export default function Dashboard() {
                             } else {
                               if (!db) return;
                               try {
-                                const taskRef = task.scope === "project"
-                                  ? doc(db, "projects", task.eventId, "tasks", task.id)
-                                  : doc(db, "events", task.eventId, "tasks", task.id);
+                                const taskRef = (task.scope === "general" ? doc(db, "tasks", task.id) : (task.scope === "project" ? doc(db, "projects", task.eventId, "tasks", task.id) : doc(db, "events", task.eventId, "tasks", task.id)));
                                 await updateDoc(taskRef, { status: newStatus });
                                 setMyTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
                               } catch (err) {
@@ -4761,9 +4897,7 @@ export default function Dashboard() {
               e.preventDefault();
               if (!db || !editingDateTask) return;
               try {
-                const taskRef = editingDateTask.scope === "project"
-                  ? doc(db, "projects", editingDateTask.eventId, "tasks", editingDateTask.id)
-                  : doc(db, "events", editingDateTask.eventId, "tasks", editingDateTask.id);
+                const taskRef = (editingDateTask.scope === "general" ? doc(db, "tasks", editingDateTask.id) : (editingDateTask.scope === "project" ? doc(db, "projects", editingDateTask.eventId, "tasks", editingDateTask.id) : doc(db, "events", editingDateTask.eventId, "tasks", editingDateTask.id)));
                 await updateDoc(taskRef, {
                   dueDate: editingDateTask.dueDate,
                 });

@@ -3,14 +3,17 @@
 import {
     AlertTriangle,
     CheckCircle,
-    ChevronLeft,
+    ChevronDown,
+    ChevronUp,
     Circle,
     Clock,
+    ExternalLink,
     MessageCircle,
     Trash2,
     UserPlus,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface TaskProps {
     id: string;
@@ -80,6 +83,7 @@ export default function TaskCard({
     onUpdateCompletions,
 }: TaskProps) {
     const router = useRouter();
+    const [isExpanded, setIsExpanded] = useState(false);
 
     const getStatusMeta = () => {
         switch (status) {
@@ -173,6 +177,11 @@ export default function TaskCard({
     };
 
     const handleCardClick = () => {
+        setIsExpanded(prev => !prev);
+    };
+
+    const handleNavigate = (e: React.MouseEvent) => {
+        e.stopPropagation();
         if (onOpen) {
             onOpen();
             return;
@@ -230,7 +239,11 @@ export default function TaskCard({
 
                         <div className="mt-3 space-y-2">
                             <div className="flex items-start justify-between gap-2">
-                                <ChevronLeft size={18} className="mt-1 shrink-0 text-slate-300 transition group-hover:text-slate-500" />
+                                {isExpanded ? (
+                                    <ChevronUp size={20} className="mt-1 shrink-0 text-indigo-500 transition" />
+                                ) : (
+                                    <ChevronDown size={20} className="mt-1 shrink-0 text-slate-400 transition group-hover:text-slate-600" />
+                                )}
                                 <div className="min-w-0 flex-1">
                                     <h3 className={`text-base font-bold leading-tight text-slate-900 sm:text-lg ${status === "DONE" ? "line-through text-slate-400" : ""}`}>
                                         {title}
@@ -249,185 +262,199 @@ export default function TaskCard({
                                     )}
                                 </div>
                             </div>
-
-                            {description && (
-                                <p className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-3 py-2.5 text-sm leading-6 text-slate-700 line-clamp-3">
-                                    {description}
-                                </p>
-                            )}
                         </div>
                     </div>
                 </div>
 
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
-                    <button
-                        type="button"
-                        onClick={handleDateClick}
-                        className="flex min-h-[56px] items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-right transition hover:border-indigo-200 hover:bg-indigo-50/50"
-                        title="לחץ לשינוי תאריך"
-                    >
-                        <div className="text-right">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">דד ליין</p>
-                            <p className="mt-1 text-sm font-semibold text-slate-800">{dueDateLabel}</p>
-                        </div>
-                        <Clock size={16} className="shrink-0 text-slate-500" />
-                    </button>
+                {isExpanded && (
+                    <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                        {description && (
+                            <p className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-3 py-2.5 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                                {description}
+                            </p>
+                        )}
 
-                    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">אחראים</span>
-                            <span className="text-[11px] font-semibold text-slate-400">{taskAssignees.length}</span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap justify-end gap-2">
-                            {taskAssignees.map((a, idx) => {
-                                const label = a.name || "לא משויך";
-                                return (
-                                    <button
-                                        key={idx}
-                                        type="button"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onAssigneeClick?.(a);
-                                        }}
-                                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
-                                        title="שליחת הודעת מערכת למשתמש"
-                                    >
-                                        {label}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
+                            <button
+                                type="button"
+                                onClick={handleDateClick}
+                                className="flex min-h-[56px] items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-right transition hover:border-indigo-200 hover:bg-indigo-50/50"
+                                title="לחץ לשינוי תאריך"
+                            >
+                                <div className="text-right">
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">דד ליין</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-800">{dueDateLabel}</p>
+                                </div>
+                                <Clock size={16} className="shrink-0 text-slate-500" />
+                            </button>
 
-                {(currentStatus || nextStep || showCompletionCounter) && (
-                    <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
-                        <div className="mb-3 flex items-center justify-between gap-2 text-right">
-                            <div className="flex items-center gap-2">
+                            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">אחראים</span>
+                                    <span className="text-[11px] font-semibold text-slate-400">{taskAssignees.length}</span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap justify-end gap-2">
+                                    {taskAssignees.map((a, idx) => {
+                                        const label = a.name || "לא משויך";
+                                        return (
+                                            <button
+                                                key={idx}
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onAssigneeClick?.(a);
+                                                }}
+                                                className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                                                title="שליחת הודעת מערכת למשתמש"
+                                            >
+                                                {label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+
+                        {(currentStatus || nextStep || showCompletionCounter) && (
+                            <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
+                                <div className="mb-3 flex items-center justify-between gap-2 text-right">
+                                    <div className="flex items-center gap-2">
+                                        {showCompletionCounter && (
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onUpdateCompletions?.();
+                                                }}
+                                                className="inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-indigo-200 bg-white px-2 text-[11px] font-bold text-indigo-700 transition hover:bg-indigo-50"
+                                                title="עדכן מספר ביצועים"
+                                            >
+                                                +1
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">מצב עבודה</p>
+                                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                                            {summaryCount > 0 ? "מה קורה עכשיו" : "מוכן לעבודה"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                    {currentStatus && (
+                                        <div
+                                            onClick={handleEditStatusClick}
+                                            className="cursor-pointer rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-right transition hover:bg-amber-100/80"
+                                        >
+                                            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">איפה זה עומד</p>
+                                            <p className="mt-1.5 text-sm font-medium leading-6 text-amber-950 break-words">{currentStatus}</p>
+                                        </div>
+                                    )}
+
+                                    {nextStep && (
+                                        <div
+                                            onClick={handleEditStatusClick}
+                                            className="cursor-pointer rounded-2xl border border-orange-200 bg-orange-500 px-3 py-3 text-right transition hover:bg-orange-600"
+                                        >
+                                            <p className="text-[11px] font-bold uppercase tracking-wide text-orange-50">הצעד הבא</p>
+                                            <p className="mt-1.5 text-sm font-semibold leading-6 text-white break-words">{nextStep}</p>
+                                        </div>
+                                    )}
+                                </div>
+
                                 {showCompletionCounter && (
-                                    <button
-                                        type="button"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onUpdateCompletions?.();
-                                        }}
-                                        className="inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-indigo-200 bg-white px-2 text-[11px] font-bold text-indigo-700 transition hover:bg-indigo-50"
-                                        title="עדכן מספר ביצועים"
-                                    >
-                                        +1
-                                    </button>
+                                    <div className="mt-3 flex justify-end">
+                                        <div className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-800">
+                                            נותרו {completionRemaining} מתוך {completionRequired}
+                                        </div>
+                                    </div>
                                 )}
                             </div>
-                            <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">מצב עבודה</p>
-                                <p className="mt-1 text-sm font-semibold text-slate-900">
-                                    {summaryCount > 0 ? "מה קורה עכשיו" : "מוכן לעבודה"}
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="grid gap-2 sm:grid-cols-2">
-                            {currentStatus && (
-                                <div
-                                    onClick={handleEditStatusClick}
-                                    className="cursor-pointer rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-right transition hover:bg-amber-100/80"
-                                >
-                                    <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">איפה זה עומד</p>
-                                    <p className="mt-1.5 text-sm font-medium leading-6 text-amber-950 break-words">{currentStatus}</p>
-                                </div>
-                            )}
-
-                            {nextStep && (
-                                <div
-                                    onClick={handleEditStatusClick}
-                                    className="cursor-pointer rounded-2xl border border-orange-200 bg-orange-500 px-3 py-3 text-right transition hover:bg-orange-600"
-                                >
-                                    <p className="text-[11px] font-bold uppercase tracking-wide text-orange-50">הצעד הבא</p>
-                                    <p className="mt-1.5 text-sm font-semibold leading-6 text-white break-words">{nextStep}</p>
-                                </div>
-                            )}
-                        </div>
-
-                        {showCompletionCounter && (
-                            <div className="mt-3 flex justify-end">
-                                <div className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-800">
-                                    נותרו {completionRemaining} מתוך {completionRequired}
-                                </div>
-                            </div>
                         )}
+
+                        <div className="rounded-[26px] border border-slate-200 bg-white p-3 sm:p-4">
+                            <div className="mb-3 text-right">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">פעולות</p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">מה אפשר לעשות עכשיו</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap [&>*]:flex-1">
+                                {onManageAssignees && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onManageAssignees();
+                                        }}
+                                        className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                                        title="נהל אחראים"
+                                    >
+                                        <UserPlus size={16} />
+                                        <span>אחראים</span>
+                                    </button>
+                                )}
+
+                                {onChat && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onChat();
+                                        }}
+                                        className="relative flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-sm font-semibold text-fuchsia-700 transition hover:bg-fuchsia-100"
+                                        title="צ'אט הודעות"
+                                    >
+                                        <MessageCircle size={16} />
+                                        <span>צ׳אט</span>
+                                        {hasUnreadMessages && (
+                                            <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-red-500" />
+                                        )}
+                                    </button>
+                                )}
+
+                                {onEdit && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onEdit();
+                                        }}
+                                        className="flex min-h-[48px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                                        title="עריכת משימה"
+                                    >
+                                        ערוך
+                                    </button>
+                                )}
+
+                                {onDelete && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onDelete();
+                                        }}
+                                        className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                                        title="מחק משימה"
+                                    >
+                                        <Trash2 size={16} />
+                                        <span>מחק</span>
+                                    </button>
+                                )}
+
+                                <button
+                                    type="button"
+                                    onClick={handleNavigate}
+                                    className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                                    title="פתח משימה במלואה"
+                                >
+                                    <ExternalLink size={16} />
+                                    <span>פתח משימה</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
-
-                <div className="rounded-[26px] border border-slate-200 bg-white p-3 sm:p-4">
-                    <div className="mb-3 text-right">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">פעולות</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">מה אפשר לעשות עכשיו</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        {onManageAssignees && (
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onManageAssignees();
-                                }}
-                                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                                title="נהל אחראים"
-                            >
-                                <UserPlus size={16} />
-                                <span>אחראים</span>
-                            </button>
-                        )}
-
-                        {onChat && (
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onChat();
-                                }}
-                                className="relative flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-sm font-semibold text-fuchsia-700 transition hover:bg-fuchsia-100"
-                                title="צ'אט הודעות"
-                            >
-                                <MessageCircle size={16} />
-                                <span>צ׳אט</span>
-                                {hasUnreadMessages && (
-                                    <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-red-500" />
-                                )}
-                            </button>
-                        )}
-
-                        {onEdit && (
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onEdit();
-                                }}
-                                className="flex min-h-[48px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-                                title="עריכת משימה"
-                            >
-                                ערוך
-                            </button>
-                        )}
-
-                        {onDelete && (
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDelete();
-                                }}
-                                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-                                title="מחק משימה"
-                            >
-                                <Trash2 size={16} />
-                                <span>מחק</span>
-                            </button>
-                        )}
-                    </div>
-                </div>
             </div>
         </div>
     );

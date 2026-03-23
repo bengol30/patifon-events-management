@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat, PauseCircle } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat, PauseCircle, Folder, FolderKanban, Settings, Link2 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { db, storage } from "@/lib/firebase";
 import { deleteEventCascade } from "@/lib/firestoreCleanup";
@@ -244,6 +244,7 @@ export default function EventDetailsPage() {
     const [copied, setCopied] = useState(false);
     const [copiedRegister, setCopiedRegister] = useState(false);
     const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
+    const [eventOptions, setEventOptions] = useState<{ id: string, name: string }[]>([]);
     const [selectedProject, setSelectedProject] = useState<string>("");
     const [linkingProject, setLinkingProject] = useState(false);
     const isProjectLinker = (user?.email || "").toLowerCase() === "bengo0469@gmail.com";
@@ -1455,7 +1456,7 @@ export default function EventDetailsPage() {
     useEffect(() => {
         if (!db) return;
         const firestore = db;
-        const loadProjects = async () => {
+        const loadProjectsAndEvents = async () => {
             try {
                 const snap = await getDocs(collection(firestore, "projects"));
                 const opts: ProjectOption[] = [];
@@ -1464,12 +1465,22 @@ export default function EventDetailsPage() {
                     opts.push({ id: d.id, name: data.name || "פרויקט" });
                 });
                 setProjectOptions(opts);
+
+                const eventsSnap = await getDocs(collection(firestore, "events"));
+                const eOpts: { id: string, name: string }[] = [];
+                eventsSnap.forEach((d) => {
+                    const data = d.data() as any;
+                    if (d.id !== id) {
+                        eOpts.push({ id: d.id, name: data.title || "אירוע" });
+                    }
+                });
+                setEventOptions(eOpts);
             } catch (err) {
-                console.error("Failed loading projects", err);
+                console.error("Failed loading collections", err);
             }
         };
-        loadProjects();
-    }, [db]);
+        loadProjectsAndEvents();
+    }, [db, id]);
 
     useEffect(() => {
         if (!id || !db) return;
@@ -4074,253 +4085,171 @@ export default function EventDetailsPage() {
                     </Link>
                 </div>
 
-                <header className="mb-6 overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/80 shadow-[0_16px_50px_rgba(74,26,44,0.12)] backdrop-blur-sm">
-                    <div className="bg-[linear-gradient(135deg,rgba(74,26,44,0.97),rgba(193,39,45,0.9),rgba(241,143,58,0.85))] px-5 py-6 text-white sm:px-7">
-                        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                            <div className="space-y-4 w-full">
-                                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                                    <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">דף ניהול אירוע</span>
-                                    {event.projectId ? (
-                                        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">פרויקט: {event.projectName || event.projectId}</span>
-                                    ) : (
-                                        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">ללא פרויקט משויך</span>
-                                    )}
+                <header className="mb-8 space-y-4">
+                    {/* The Hero Card */}
+                    <div className="overflow-hidden rounded-[2rem] border border-white/60 bg-white shadow-[0_16px_50px_rgba(74,26,44,0.06)]">
+                        {/* Gradient Top Half */}
+                        <div className="bg-[linear-gradient(135deg,rgba(74,26,44,0.97),rgba(193,39,45,0.9),rgba(241,143,58,0.85))] relative p-6 sm:p-8 flex flex-col xl:flex-row justify-between gap-8">
+                            {/* Right Side: Event Core */}
+                            <div className="space-y-4 text-right flex-1">
+                                <div className="flex flex-wrap justify-end items-center gap-2">
+                                    <span className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-bold text-white shadow-sm border border-white/20 tracking-wide uppercase">דף ניהול אירוע</span>
                                     {event.status && (
-                                        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1">סטטוס: {event.status}</span>
+                                        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold text-white shadow-sm border tracking-wide uppercase ${event.status === 'DONE' ? 'bg-emerald-500/20 border-emerald-300/50 text-emerald-100' : 'bg-white/10 border-white/20'}`}>סטטוס: {event.status}</span>
                                     )}
                                     {overdueTasksCount > 0 && (
-                                        <span className="rounded-full border border-red-200/60 bg-red-500/20 px-3 py-1 text-red-50">{overdueTasksCount} משימות באיחור</span>
+                                        <span className="rounded-full border border-red-300 bg-red-500/80 px-3 py-1.5 text-xs font-bold text-white shadow-sm animate-pulse">{overdueTasksCount} משימות באיחור</span>
                                     )}
                                 </div>
-                                <div className="space-y-2">
-                                    <h1 className="text-3xl font-black leading-tight sm:text-4xl">{event.title}</h1>
-                                    <p className="max-w-3xl text-sm text-white/85 sm:text-base">
-                                        {event.description || "כל פרטי האירוע, הצוות, המשימות, התוכן והקבצים במקום אחד ברור ונגיש."}
-                                    </p>
+                                <div className="space-y-1">
+                                    <h1 className="text-4xl sm:text-5xl font-black text-white drop-shadow-md leading-[1.1]">{event.title}</h1>
+                                    <p className="max-w-2xl text-base sm:text-lg font-medium text-white/80">{event.description || "מרכז השליטה שלך לאירוע — צוות, משימות, תוכן וכל מה שצריך."}</p>
                                 </div>
-                                <p className="text-sm font-semibold text-white/90">
-                                    יוצר האירוע: {creatorName || event.creatorName || event.createdByEmail || event.createdBy || "לא ידוע"}
-                                </p>
-                                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/90">
-                                    <div className="flex items-center gap-1">
-                                        <MapPin size={16} />
-                                        <span>{event.location}</span>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                        <Calendar size={16} />
-                                        <span>{startDateLabel}{startTimeLabel ? ` | ${startTimeLabel}` : ""}</span>
-                                    </div>
-                                    {event.dates && event.dates.length > 1 && (
-                                        <div className="flex items-center gap-2 flex-wrap text-xs text-indigo-800">
-                                            {event.dates.map((d, idx) => {
-                                                const dt = d?.seconds ? new Date(d.seconds * 1000) : new Date(d);
-                                                const label = !isNaN(dt.getTime()) ? dt.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "";
-                                                return (
-                                                    <span key={idx} className="px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-full">
-                                                        {label}
-                                                    </span>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                    {event.durationHours && (
-                                        <div className="flex items-center gap-1">
-                                            <Clock size={16} />
-                                            <span>משך משוער: {event.durationHours} שעות</span>
-                                        </div>
-                                    )}
-                                    {event.participantsCount && (
-                                        <div className="flex items-center gap-1">
-                                            <Users size={16} />
-                                            <span>{event.participantsCount} משתתפים</span>
-                                        </div>
-                                    )}
-                                    {event.needsVolunteers && (
-                                        <div className="flex items-center gap-1">
-                                            <Users size={16} />
-                                            <span>
-                                                {event.volunteersCount != null
-                                                    ? `יעד מתנדבים: ${event.volunteersCount}`
-                                                    : "מחפש מתנדבים לאירוע הזה"}
-                                            </span>
-                                        </div>
-                                    )}
-                                    {partnersLabel && (
-                                        <div className="flex items-center gap-1">
-                                            <Handshake size={16} />
-                                            <span>שותפים: {partnersLabel}</span>
-                                        </div>
-                                    )}
+                                <div className="flex flex-wrap justify-end gap-x-5 gap-y-3 text-sm font-semibold text-white/95 pt-2">
+                                    <div className="flex items-center gap-1.5"><MapPin size={18} className="opacity-70" /><span>{event.location}</span></div>
+                                    <div className="flex items-center gap-1.5"><Calendar size={18} className="opacity-70" /><span>{startDateLabel}{startTimeLabel ? ` | ${startTimeLabel}` : ""}</span></div>
+                                    {event.durationHours && <div className="flex items-center gap-1.5"><Clock size={16} className="opacity-70" /><span>משך משוער: {event.durationHours} שעות</span></div>}
+                                    {event.participantsCount && <div className="flex items-center gap-1.5"><Users size={18} className="opacity-70" /><span>{event.participantsCount} משתתפים</span></div>}
+                                    {event.needsVolunteers && <div className="flex items-center gap-1.5"><Handshake size={18} className="opacity-70" /><span>{event.volunteersCount != null ? `יעד מתנדבים: ${event.volunteersCount}` : "דרושים מתנדבים"}</span></div>}
+                                    {partnersLabel && <div className="flex items-center gap-1.5"><Handshake size={16} className="opacity-70" /><span>שותפים: {partnersLabel}</span></div>}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-3">
-                                    {event.projectId ? (
-                                        <span className="inline-flex items-center gap-2 text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
-                                            פרויקט משויך: {event.projectName || event.projectId}
-                                        </span>
-                                    ) : (
-                                        <span className="text-xs text-gray-600">אין פרויקט משויך</span>
-                                    )}
-                                    {isProjectLinker && projectOptions.length > 0 && (
-                                        <div className="flex items-center gap-2">
-                                            <select
-                                                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                                value={selectedProject}
-                                                onChange={(e) => setSelectedProject(e.target.value)}
-                                            >
-                                                <option value="">בחר פרויקט</option>
-                                                {projectOptions.map((p) => (
-                                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                                ))}
-                                            </select>
-                                            <button
-                                                onClick={handleLinkProject}
-                                                disabled={!selectedProject || linkingProject}
-                                                className="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition disabled:opacity-60"
-                                            >
-                                                {linkingProject ? "מקשר..." : "שייך לפרויקט"}
+                            </div>
+
+                            {/* Left Side: Contact & Project */}
+                            <div className="flex flex-col sm:flex-row xl:flex-col gap-3 min-w-[280px]">
+                                {/* Contact Card */}
+                                <div className="flex-1 rounded-2xl border border-white/20 bg-white/10 p-4 shadow-inner text-right">
+                                    <p className="text-[10px] font-bold text-white/60 tracking-widest uppercase mb-3">איש קשר ובעלים</p>
+                                    <div className="flex items-center justify-between gap-4">
+                                        {event.contactPerson?.phone && (
+                                            <button type="button" onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)} className="w-10 h-10 flex items-center justify-center rounded-full bg-[#25D366] text-white shadow hover:scale-105 transition shrink-0" title="וואטסאפ איש קשר">
+                                                <MessageCircle size={18} />
                                             </button>
+                                        )}
+                                        <div className="text-right">
+                                            {event.contactPerson?.name ? (
+                                                <>
+                                                    <p className="font-bold text-white text-sm">{event.contactPerson.name}</p>
+                                                    {(event.contactPerson.phone || event.contactPerson.email) && <p className="text-xs text-white/70" dir="ltr">{event.contactPerson.phone || event.contactPerson.email}</p>}
+                                                </>
+                                            ) : (
+                                                <p className="font-bold text-white text-sm">{creatorName || event.creatorName || event.createdByEmail || event.createdBy}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Project Card */}
+                                <div className="flex-1 rounded-2xl border border-white/20 bg-white/10 p-4 shadow-inner text-right flex flex-col gap-2">
+                                    <div className="flex items-center justify-end gap-2 mb-1">
+                                        <p className="text-[10px] font-bold text-white/60 tracking-widest uppercase">אזור פרויקטים</p>
+                                        <FolderKanban size={14} className="text-white/60" />
+                                    </div>
+
+                                    {/* Link & Go to assigned project */}
+                                    {event.projectId ? (
+                                        <div className="flex items-center justify-between gap-2 p-1.5 bg-white/5 rounded-xl border border-white/10">
+                                            <button onClick={() => router.push(`/projects/${event.projectId}`)} className="bg-white text-indigo-900 hover:bg-white/90 px-3 py-1.5 text-xs font-bold rounded-lg transition shadow-sm shrink-0">לפרויקט</button>
+                                            <p className="text-sm font-bold text-white truncate text-right pl-1">{event.projectName || event.projectId}</p>
+                                        </div>
+                                    ) : isProjectLinker && projectOptions.length > 0 ? (
+                                        <div className="flex gap-2">
+                                            <button onClick={handleLinkProject} disabled={!selectedProject || linkingProject} className="bg-white/20 border border-white/30 text-white hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-bold transition disabled:opacity-50 shrink-0">שייך</button>
+                                            <select className="flex-1 text-sm bg-white/10 border border-white/20 text-white rounded-lg px-2 py-1.5 focus:outline-none placeholder-white/50 text-right" dir="rtl" value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
+                                                <option value="" className="text-black text-right">בחר פרויקט לחיבור</option>
+                                                {projectOptions.map(p => <option key={p.id} value={p.id} className="text-black text-right">{p.name}</option>)}
+                                            </select>
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs font-medium text-white/70">אירוע עצמאי (ללא פרויקט אב)</p>
+                                    )}
+
+                                    {/* Quick Navigation to any event */}
+                                    {eventOptions.length > 0 && (
+                                        <div className="mt-1">
+                                            <select
+                                                className="w-full text-xs font-bold bg-black/20 text-white rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-white/50 text-right transition cursor-pointer"
+                                                dir="rtl"
+                                                value=""
+                                                onChange={e => {
+                                                    if (e.target.value) {
+                                                        router.push(`/events/${e.target.value}`);
+                                                    }
+                                                }}
+                                            >
+                                                <option value="" className="text-slate-800 text-right font-bold">🚀 ניווט מהיר אל אירוע חלופי...</option>
+                                                {eventOptions.map(eItem => <option key={eItem.id} value={eItem.id} className="text-slate-800 text-right">{eItem.name}</option>)}
+                                            </select>
                                         </div>
                                     )}
                                 </div>
                             </div>
                         </div>
-                        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
-                            <div className="rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
-                                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                                    <div className="space-y-3">
-                                        <div>
-                                            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">פוקוס להיום</p>
-                                            <p className="mt-1 text-lg font-black text-white sm:text-xl">{primaryFocusLabel}</p>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2 text-xs text-white/85">
-                                            <button type="button" onClick={() => scrollToRef(teamTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{teamTasks.length} משימות צוות</button>
-                                            <button type="button" onClick={() => event.needsVolunteers ? openDetailsAndScroll(volunteersSectionRef) : scrollToRef(volunteerTasksRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{volunteerProgressLabel}</button>
-                                            <button type="button" onClick={() => openDetailsAndScroll(teamSectionRef)} className="rounded-full border border-white/15 bg-white/10 px-3 py-1 transition hover:bg-white/15">{event.team?.length || 0} אנשי צוות</button>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[340px]">
-                                        <button onClick={openTaskComposer} className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-[var(--patifon-burgundy)] shadow-sm transition hover:-translate-y-0.5">משימה חדשה</button>
-                                        <button onClick={handleOpenContentModal} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">תוכן ומדיה</button>
-                                        <button onClick={() => router.push(`/events/${id}/files`)} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">קבצים ומסמכים</button>
-                                        {event.needsVolunteers ? (
-                                            <button
-                                                onClick={() => {
-                                                    setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : "");
-                                                    setShowVolunteerModal(true);
-                                                }}
-                                                className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
-                                            >
-                                                מתנדבים
-                                            </button>
-                                        ) : (
-                                            <button onClick={copyInviteLink} className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15">שיתוף צוות</button>
-                                        )}
-                                    </div>
-                                </div>
+
+                        {/* Quick Actions Row */}
+                        <div className="bg-white px-6 py-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 border-b border-slate-100">
+                            {/* Focus Label */}
+                            <div className="flex flex-col text-right w-full xl:w-auto">
+                                <p className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">פוקוס היום</p>
+                                <p className="text-lg font-black text-slate-800">{primaryFocusLabel}</p>
                             </div>
-                            <div className="flex flex-col gap-3 rounded-[1.5rem] border border-white/15 bg-white/10 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.16)] backdrop-blur-sm">
-                                <div className="space-y-3">
-                                    {event.contactPerson?.name ? (
-                                        <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                <div className="p-2 rounded-full" style={{ background: 'var(--patifon-cream)', color: 'var(--patifon-burgundy)' }}>
-                                                    <User size={20} />
-                                                </div>
-                                                <div className="text-sm min-w-0">
-                                                    <p className="font-semibold truncate">איש קשר: {event.contactPerson.name}</p>
-                                                    <div className="text-gray-600 flex flex-col gap-0.5">
-                                                        {event.contactPerson.phone && <span className="truncate">טלפון: {event.contactPerson.phone}</span>}
-                                                        {event.contactPerson.email && <span className="truncate">אימייל: {event.contactPerson.email}</span>}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            {event.contactPerson.phone && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleOpenWhatsApp(event.contactPerson?.phone)}
-                                                    className="p-2 rounded-full border border-green-200 text-green-700 hover:bg-green-50 transition shrink-0"
-                                                    title="שליחת הודעת וואטסאפ"
-                                                >
-                                                    <MessageCircle size={18} />
-                                                </button>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="rounded-2xl border border-dashed border-white/30 bg-white/10 p-3 text-sm text-white/75">
-                                            לא הוגדר איש קשר לאירוע.
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="rounded-2xl border border-white/15 bg-white/95 p-3 text-slate-900 shadow-sm">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowAdvancedActions(!showAdvancedActions)}
-                                        className="flex w-full items-center justify-between rounded-xl px-2 py-1 text-sm font-semibold hover:bg-slate-50"
-                                    >
-                                        <div className="text-right">
-                                            <span>פעולות משניות והגדרות</span>
-                                            <p className="mt-1 text-xs font-normal text-slate-500">עריכה, שיתוף, הרשמה, יומן, פוסט, שליטה ופעולות בעלים.</p>
-                                        </div>
-                                        <ChevronDown size={18} className={`transition-transform ${showAdvancedActions ? "rotate-180" : ""}`} />
-                                    </button>
-                                    {showAdvancedActions && (
-                                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                            <button onClick={copyInviteLink} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copied ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
-                                                {copied ? <Check size={16} /> : <Share2 size={16} />}
-                                                {copied ? "קישור הועתק" : "שיתוף צוות"}
-                                            </button>
-                                            <button onClick={handleAddEventToCalendar} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                                <Calendar size={16} />
-                                                יומן והזמנות
-                                            </button>
-                                            <button onClick={() => setIsEditEventOpen(true)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                                <Edit2 size={16} />
-                                                עריכת פרטי אירוע
-                                            </button>
-                                            <button onClick={() => router.push(`/events/${id}/registrants`)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                                <Users size={16} />
-                                                נרשמים
-                                            </button>
-                                            <button
-                                                onClick={copyRegisterLink}
-                                                className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${copiedRegister ? "border-green-600 bg-green-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
-                                            >
-                                                {copiedRegister ? <Check size={16} /> : <List size={16} />}
-                                                {copiedRegister ? "קישור הועתק" : "קישור הרשמה"}
-                                            </button>
-                                            <button onClick={handleOpenPostModal} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
-                                                <Sparkles size={16} />
-                                                מלל לפוסט
-                                            </button>
-                                            <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`rounded-xl border px-3 py-2 text-sm font-semibold flex items-center justify-center gap-2 ${canManageTeam ? "border-slate-200 text-slate-700 hover:bg-slate-50" : "border-slate-200 text-slate-400 cursor-not-allowed"}`}>
-                                                <PauseCircle size={16} />
-                                                מרכז בקרה
-                                            </button>
-                                            {isOwner && (
-                                                <button
-                                                    onClick={confirmDeleteEvent}
-                                                    className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 flex items-center justify-center gap-2"
-                                                >
-                                                    <Trash2 size={16} />
-                                                    מחק אירוע
-                                                </button>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
+
+                            {/* Primary Buttons */}
+                            <div className="flex flex-wrap items-center justify-end gap-2 w-full xl:w-[auto]">
+                                {event.needsVolunteers ? (
+                                    <button onClick={() => { setVolunteerCountInput(event.volunteersCount ? String(event.volunteersCount) : ""); setShowVolunteerModal(true); }} className="flex-auto sm:flex-none flex justify-center items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-700 shadow-[inset_0_-2px_4px_rgba(0,0,0,0.02)] transition hover:border-slate-300 hover:bg-slate-100 active:scale-95"><Users size={16} />מתנדבים</button>
+                                ) : (
+                                    <button onClick={copyInviteLink} className="flex-auto sm:flex-none flex justify-center items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 active:scale-95"><Share2 size={16} />שיתוף צוות</button>
+                                )}
+                                <button onClick={() => router.push(`/events/${id}/files`)} className="flex-auto sm:flex-none flex justify-center items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 active:scale-95"><Folder size={16} />קבצים</button>
+                                <button onClick={handleOpenContentModal} className="flex-auto sm:flex-none flex justify-center items-center gap-1.5 rounded-xl border border-[rgba(241,143,58,0.3)] bg-orange-50 px-4 py-2.5 text-sm font-bold text-orange-700 shadow-sm transition hover:border-orange-300 hover:bg-orange-100 active:scale-95"><Sparkles size={16} />תוכן</button>
+                                <button onClick={openTaskComposer} className="flex-auto sm:flex-none flex justify-center items-center gap-1.5 rounded-xl bg-[var(--patifon-burgundy)] px-6 py-2.5 text-sm font-bold text-white shadow-lg transition hover:bg-pink-900 active:scale-95 sm:order-first"><Plus size={16} />משימה חדשה</button>
                             </div>
+                        </div>
+
+                        {/* Secondary Actions Row (Scrollable) */}
+                        <div className="bg-slate-50 px-6 py-3 flex items-center justify-end gap-2 overflow-x-auto custom-scrollbar flex-row-reverse">
+                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-auto shrink-0 hidden sm:block">מתקדם</span>
+                            {isOwner && (
+                                <button onClick={confirmDeleteEvent} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50 transition drop-shadow-sm">
+                                    <Trash2 size={14} /> מחק
+                                </button>
+                            )}
+                            <button onClick={() => setShowControlCenter(true)} disabled={!canManageTeam} className={`shrink-0 flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-xs font-bold transition drop-shadow-sm ${canManageTeam ? "border-slate-200 text-slate-600 hover:bg-slate-50" : "border-slate-200 text-slate-400 opacity-60"}`}>
+                                <PauseCircle size={14} /> בקרה
+                            </button>
+                            <button onClick={handleOpenPostModal} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition drop-shadow-sm">
+                                <List size={14} /> טיוטת פוסט
+                            </button>
+                            <button onClick={copyRegisterLink} className={`shrink-0 flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-xs font-bold transition drop-shadow-sm ${copiedRegister ? "border-green-400 text-green-700 bg-green-50" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                                {copiedRegister ? <Check size={14} /> : <Link2 size={14} />}
+                                {copiedRegister ? "הועתק" : "טופס הרשמה"}
+                            </button>
+                            {event.needsVolunteers || <button onClick={() => router.push(`/events/${id}/registrants`)} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition drop-shadow-sm"><Users size={14} /> נרשמים</button>}
+                            <button onClick={() => setIsEditEventOpen(true)} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition drop-shadow-sm">
+                                <Settings size={14} /> הגדרות
+                            </button>
+                            <button onClick={handleAddEventToCalendar} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition drop-shadow-sm">
+                                <Calendar size={14} /> יומן
+                            </button>
+                            <button onClick={copyInviteLink} className={`shrink-0 flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-xs font-bold transition drop-shadow-sm ${copied ? "border-green-400 text-green-700 bg-green-50" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                                {copied ? <Check size={14} /> : <Share2 size={14} />}
+                                {copied ? "הועתק קישור הזמנה" : "הזמן צוות"}
+                            </button>
                         </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 border-t border-[rgba(74,26,44,0.08)] bg-white/70 px-3 py-4 sm:gap-3 sm:px-6">
+
+                    {/* Quick Stats Banner */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         {summaryCards.map((card) => (
                             <button
                                 key={card.label}
                                 type="button"
                                 onClick={() => handleEventSummaryCardClick(card.label)}
-                                className={`rounded-2xl border px-4 py-3 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.tone}`}
+                                className={`rounded-[1.5rem] border bg-white p-5 text-right shadow-sm transition hover:-translate-y-1 hover:shadow-md outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${card.tone}`}
                             >
-                                <p className="text-xs font-semibold opacity-80">{card.label}</p>
-                                <p className="mt-1 text-2xl font-black">{card.value}</p>
+                                <p className="text-[11px] sm:text-xs font-bold uppercase tracking-widest opacity-80 mb-1">{card.label}</p>
+                                <p className="text-3xl font-black">{card.value}</p>
                             </button>
                         ))}
                     </div>
