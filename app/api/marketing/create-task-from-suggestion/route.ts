@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
 
     const adminUserId = process.env.ADMIN_USER_ID || "oeOslKHvZwPWHH6u0kAJuSLQZSg1";
     const adminUserName = process.env.ADMIN_USER_NAME || "בן גולן";
-    const adminUserEmail = process.env.ADMIN_USER_EMAIL || "bengol30@gmail.com";
+    const adminUserEmail = process.env.ADMIN_USER_EMAIL || "bengo0469@gmail.com";
 
     const taskPayload = {
       title: draft.title,
