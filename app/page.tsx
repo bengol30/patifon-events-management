@@ -1142,6 +1142,17 @@ export default function Dashboard() {
           }
         }
 
+        if (isAdmin) {
+          try {
+            const adminAllTasksSnap = await getDocs(query(collectionGroup(db, "tasks"), limit(1000)));
+            adminAllTasksSnap.forEach((d) => {
+              taskDocsMap.set(d.ref.path, d);
+            });
+          } catch (err) {
+            console.warn("Admin full task scan failed", err);
+          }
+        }
+
         const userTasks: Task[] = [];
         const notifTasks: Task[] = [];
         let tasksInMyEvents = 0;

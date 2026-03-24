@@ -71,6 +71,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "suggestionType לא נתמך" }, { status: 400 });
     }
 
+    const adminUserId = process.env.ADMIN_USER_ID || "oeOslKHvZwPWHH6u0kAJuSLQZSg1";
+    const adminUserName = process.env.ADMIN_USER_NAME || "בן גולן";
+    const adminUserEmail = process.env.ADMIN_USER_EMAIL || "bengol30@gmail.com";
+
     const taskPayload = {
       title: draft.title,
       description: draft.description,
@@ -84,8 +88,14 @@ export async function POST(req: NextRequest) {
       payload: draft.payload,
       eventId,
       eventTitle: draft.eventTitle,
+      assignee: adminUserName,
+      assigneeId: adminUserId,
+      assigneeEmail: adminUserEmail,
+      assignees: [{ name: adminUserName, userId: adminUserId, email: adminUserEmail }],
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
+      currentStatus: "משימה חדשה נוצרה ממערכת ההצעות",
+      nextStep: "סקור את הפרטים ובצע לפי התוכנית",
     };
 
     const taskRef = await eventRef.collection("tasks").add(taskPayload);
