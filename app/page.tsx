@@ -405,7 +405,7 @@ export default function Dashboard() {
 
   // Chat State
   const [chatTask, setChatTask] = useState<Task | null>(null);
-  const isProjectManager = (user?.email || "").toLowerCase() === "bengo0469@gmail.com";
+  const isProjectManager = ["bengo0469@gmail.com", "bengol30@gmail.com"].includes((user?.email || "").toLowerCase());
   const isAdmin = isProjectManager;
 
   // Reset cached lists when user changes
