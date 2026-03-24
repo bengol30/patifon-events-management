@@ -86,7 +86,7 @@ export interface MarketingTaskDraft {
   description: string;
   status: "TODO";
   priority: "HIGH";
-  executionMode: "MANUAL_TRACKED";
+  executionMode: "MANUAL_TRACKED" | "AUTOMATED";
   requiredCompletions: number;
   remainingCompletions: number;
   dueDate: string;
@@ -295,7 +295,7 @@ export const buildWhatsappCampaignDraft = (args: {
     description: descriptionLines.join("\n"),
     status: "TODO",
     priority: "HIGH",
-    executionMode: "MANUAL_TRACKED",
+    executionMode: "AUTOMATED",
     requiredCompletions: payload.sendPlan.length,
     remainingCompletions: payload.sendPlan.length,
     dueDate: payload.sendPlan[0]?.scheduledAt || new Date().toISOString(),

@@ -75,15 +75,22 @@ export async function POST(req: NextRequest) {
     const adminUserName = process.env.ADMIN_USER_NAME || "בן גולן";
     const adminUserEmail = process.env.ADMIN_USER_EMAIL || "bengo0469@gmail.com";
 
+    const isWhatsappCampaign = draft.specialType === "whatsapp_campaign_patifon";
+    const firstScheduledAt = isWhatsappCampaign
+      ? String(((draft.payload as any)?.sendPlan?.[0]?.scheduledAt) || draft.dueDate || "")
+      : "";
+
     const taskPayload = {
       title: draft.title,
       description: draft.description,
       status: draft.status,
       priority: draft.priority,
-      executionMode: draft.executionMode,
+      executionMode: isWhatsappCampaign ? "AUTOMATED" : draft.executionMode,
       requiredCompletions: draft.requiredCompletions,
       remainingCompletions: draft.remainingCompletions,
       dueDate: draft.dueDate,
+      scheduledAt: isWhatsappCampaign ? firstScheduledAt || null : null,
+      scheduleStatus: isWhatsappCampaign ? "PENDING" : null,
       specialType: draft.specialType,
       payload: draft.payload,
       eventId,
@@ -94,8 +101,8 @@ export async function POST(req: NextRequest) {
       assignees: [{ name: adminUserName, userId: adminUserId, email: adminUserEmail }],
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-      currentStatus: "משימה חדשה נוצרה ממערכת ההצעות",
-      nextStep: "סקור את הפרטים ובצע לפי התוכנית",
+      currentStatus: isWhatsappCampaign ? "0 מתוך " + String(draft.requiredCompletions || 0) + " הושלמו" : "משימה חדשה נוצרה ממערכת ההצעות",
+      nextStep: isWhatsappCampaign ? String(((draft.payload as any)?.sendPlan?.[0]?.scheduledLabel) || "ממתין לשליחה הראשונה") : "סקור את הפרטים ובצע לפי התוכנית",
     };
 
     const taskRef = await eventRef.collection("tasks").add(taskPayload);
