@@ -100,6 +100,8 @@ export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber }: {
     },
     remainingCompletions: remaining,
     status: nextStatus,
+    scheduledAt: nextPending ? (nextPending.scheduledAt || null) : null,
+    scheduleStatus: remaining === 0 ? "DONE" : "PENDING",
     currentStatus: `${completedCount} מתוך ${totalCount} הושלמו`,
     nextStep: nextPending ? (nextPending.scheduledLabel || `שליחה ${nextPending.step} מתוזמנת ל-${nextPending.scheduledAt}`) : "הקמפיין הושלם",
     description: buildProgressDescription(task, note),
