@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit, AlertTriangle } from "lucide-react";
+import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit, AlertTriangle, Sparkles } from "lucide-react";
 import { db, auth, storage } from "@/lib/firebase";
 import { deleteEventCascade, deleteProjectCascade } from "@/lib/firestoreCleanup";
 import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc, onSnapshot, limit } from "firebase/firestore";
@@ -151,6 +151,40 @@ type VolunteerErrorEntry = {
   action: VolunteerErrorAction;
 };
 
+type MarketingSuggestion = {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  eventStartTime: string | null;
+  suggestionType: "whatsapp_campaign" | "instagram_story_campaign";
+  title: string;
+  reason: string;
+  ctaLabel: string;
+  secondaryLabel: string;
+  blockers: string[];
+  summary?: {
+    hasOfficialText?: boolean;
+    hasMedia?: boolean;
+    hasWhatsappGroups?: boolean;
+    instagramConnected?: boolean;
+    daysUntilEvent?: number | null;
+  };
+};
+
+type MarketingTaskDraft = {
+  suggestionType: "whatsapp_campaign" | "instagram_story_campaign";
+  eventId: string;
+  eventTitle: string;
+  title: string;
+  description: string;
+  requiredCompletions: number;
+  remainingCompletions: number;
+  dueDate: string;
+  specialType: string;
+  payload: any;
+  defaults: any;
+};
+
 const matchAssignee = (opts: {
   taskData: any;
   userId?: string | null;
@@ -197,6 +231,17 @@ export default function Dashboard() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [allEventsRaw, setAllEventsRaw] = useState<Event[]>([]);
   const [allProjectsRaw, setAllProjectsRaw] = useState<Project[]>([]);
+  const [marketingSuggestions, setMarketingSuggestions] = useState<MarketingSuggestion[]>([]);
+  const [loadingMarketingSuggestions, setLoadingMarketingSuggestions] = useState(false);
+  const [showMarketingSuggestionsModal, setShowMarketingSuggestionsModal] = useState(false);
+  const [selectedMarketingSuggestion, setSelectedMarketingSuggestion] = useState<MarketingSuggestion | null>(null);
+  const [marketingDraft, setMarketingDraft] = useState<MarketingTaskDraft | null>(null);
+  const [buildingMarketingDraft, setBuildingMarketingDraft] = useState(false);
+  const [savingMarketingTask, setSavingMarketingTask] = useState(false);
+  const [marketingActionError, setMarketingActionError] = useState<string | null>(null);
+  const [marketingWhatsappMessage, setMarketingWhatsappMessage] = useState("");
+  const [marketingWhatsappGroups, setMarketingWhatsappGroups] = useState<{ id: string; name: string; chatId: string }[]>([]);
+  const [marketingInstagramStoryPlan, setMarketingInstagramStoryPlan] = useState<any[]>([]);
   const [skipTargetedTaskQuery, setSkipTargetedTaskQuery] = useState(() => {
     if (typeof window !== "undefined") {
       try {
@@ -1546,6 +1591,116 @@ export default function Dashboard() {
     };
     loadRegisterEvents();
   }, [db, user, isAdmin, showRegisterEventsModal, allEventsRaw]);
+
+  useEffect(() => {
+    const loadMarketingSuggestions = async () => {
+      if (!user) return;
+      try {
+        setLoadingMarketingSuggestions(true);
+        const res = await fetch("/api/marketing/suggestions", { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "שגיאה בטעינת הצעות שיווק");
+        const suggestions = Array.isArray(data?.suggestions) ? data.suggestions as MarketingSuggestion[] : [];
+        setMarketingSuggestions(suggestions);
+        setShowMarketingSuggestionsModal(suggestions.length > 0);
+      } catch (err) {
+        console.error("Error loading marketing suggestions", err);
+      } finally {
+        setLoadingMarketingSuggestions(false);
+      }
+    };
+    loadMarketingSuggestions();
+  }, [user]);
+
+  const openMarketingWizard = async (suggestion: MarketingSuggestion) => {
+    try {
+      setSelectedMarketingSuggestion(suggestion);
+      setMarketingActionError(null);
+      setBuildingMarketingDraft(true);
+      const endpoint = suggestion.suggestionType === "whatsapp_campaign"
+        ? "/api/marketing/build-whatsapp-campaign-task"
+        : "/api/marketing/build-instagram-story-task";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: suggestion.eventId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "לא הצלחנו להכין טיוטת משימה");
+      const draft = data?.draft as MarketingTaskDraft;
+      setMarketingDraft(draft);
+      setMarketingWhatsappMessage(String(draft?.payload?.messageText || ""));
+      setMarketingWhatsappGroups(Array.isArray(draft?.payload?.targetGroups) ? draft.payload.targetGroups : []);
+      setMarketingInstagramStoryPlan(Array.isArray(draft?.payload?.storyPlan) ? draft.payload.storyPlan : []);
+    } catch (err) {
+      console.error("Error building marketing draft", err);
+      setMarketingActionError(err instanceof Error ? err.message : "שגיאה בפתיחת האשף");
+    } finally {
+      setBuildingMarketingDraft(false);
+    }
+  };
+
+  const updateMarketingSuggestionState = async (suggestion: MarketingSuggestion, action: "dismiss" | "suppress") => {
+    try {
+      await fetch("/api/marketing/suggestions/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: suggestion.eventId, suggestionType: suggestion.suggestionType, action }),
+      });
+      setMarketingSuggestions(prev => prev.filter(item => item.id !== suggestion.id));
+      if (selectedMarketingSuggestion?.id === suggestion.id) {
+        setSelectedMarketingSuggestion(null);
+        setMarketingDraft(null);
+      }
+    } catch (err) {
+      console.error("Error updating marketing suggestion state", err);
+      setMarketingActionError("לא הצלחנו לעדכן את מצב ההצעה");
+    }
+  };
+
+  const createMarketingTask = async () => {
+    if (!selectedMarketingSuggestion || !marketingDraft) return;
+    try {
+      setSavingMarketingTask(true);
+      setMarketingActionError(null);
+      const body = selectedMarketingSuggestion.suggestionType === "whatsapp_campaign"
+        ? {
+            eventId: selectedMarketingSuggestion.eventId,
+            suggestionType: selectedMarketingSuggestion.suggestionType,
+            targetGroups: marketingWhatsappGroups,
+            messageText: marketingWhatsappMessage,
+            stepCount: marketingDraft.requiredCompletions,
+            schedule: Array.isArray(marketingDraft.payload?.sendPlan) ? marketingDraft.payload.sendPlan.map((step: any) => step.scheduledAt) : [],
+          }
+        : {
+            eventId: selectedMarketingSuggestion.eventId,
+            suggestionType: selectedMarketingSuggestion.suggestionType,
+            storyCount: marketingInstagramStoryPlan.length,
+            storyPlan: marketingInstagramStoryPlan,
+            accountId: marketingDraft?.payload?.accountId || "",
+          };
+      const res = await fetch("/api/marketing/create-task-from-suggestion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "לא הצלחנו ליצור את המשימה");
+      setMarketingSuggestions(prev => {
+        const next = prev.filter(item => item.id !== selectedMarketingSuggestion.id);
+        setShowMarketingSuggestionsModal(next.length > 0);
+        return next;
+      });
+      setSelectedMarketingSuggestion(null);
+      setMarketingDraft(null);
+      alert("משימת השיווק נוצרה בהצלחה בתוך האירוע");
+    } catch (err) {
+      console.error("Error creating marketing task", err);
+      setMarketingActionError(err instanceof Error ? err.message : "שגיאה ביצירת משימת שיווק");
+    } finally {
+      setSavingMarketingTask(false);
+    }
+  };
 
   // Load completion approval requests for task owners
   useEffect(() => {
@@ -4882,6 +5037,150 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showMarketingSuggestionsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+          <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[32px] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-l from-amber-50 via-white to-fuchsia-50 px-6 py-5">
+              <div className="text-right">
+                <div className="flex items-center justify-end gap-2">
+                  <Sparkles className="text-amber-500" size={20} />
+                  <h3 className="text-xl font-black text-slate-900">הצעות שיווק חכמות</h3>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">זיהינו אירועים ששווה להזיז עכשיו עם ברירות מחדל מוכנות.</p>
+              </div>
+              <button onClick={() => setShowMarketingSuggestionsModal(false)} className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid max-h-[calc(90vh-88px)] grid-cols-1 overflow-y-auto lg:grid-cols-[360px_minmax(0,1fr)]">
+              <aside className="border-l border-slate-200 bg-slate-50/70 p-4">
+                {loadingMarketingSuggestions ? (
+                  <div className="py-10 text-center text-sm text-slate-500">טוען הצעות…</div>
+                ) : marketingSuggestions.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">אין כרגע הצעות חדשות.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {marketingSuggestions.map((suggestion) => (
+                      <div key={suggestion.id} className={`rounded-3xl border p-4 text-right transition ${selectedMarketingSuggestion?.id === suggestion.id ? "border-fuchsia-300 bg-white shadow-sm" : "border-slate-200 bg-white/90"}`}>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-fuchsia-700">{suggestion.suggestionType === "whatsapp_campaign" ? "WhatsApp" : "Instagram Story"}</p>
+                        <h4 className="mt-1 text-base font-bold text-slate-900">{suggestion.eventTitle}</h4>
+                        <p className="mt-2 text-sm text-slate-600">{suggestion.reason}</p>
+                        <div className="mt-3 flex flex-wrap justify-end gap-2">
+                          <button onClick={() => openMarketingWizard(suggestion)} className="rounded-xl bg-[var(--patifon-burgundy)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90">{suggestion.ctaLabel}</button>
+                          <button onClick={() => updateMarketingSuggestionState(suggestion, "dismiss")} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">{suggestion.secondaryLabel}</button>
+                          <button onClick={() => updateMarketingSuggestionState(suggestion, "suppress")} className="rounded-xl px-2 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100">אל תציע שוב</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </aside>
+              <section className="p-6 text-right">
+                {!selectedMarketingSuggestion ? (
+                  <div className="flex h-full min-h-[320px] items-center justify-center rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 text-center text-slate-500">בחר הצעה מצד ימין כדי לפתוח אשף קצר עם ברירות מחדל חכמות.</div>
+                ) : buildingMarketingDraft ? (
+                  <div className="flex h-full min-h-[320px] items-center justify-center text-slate-500">מכין טיוטת משימה…</div>
+                ) : marketingDraft ? (
+                  <div className="space-y-5">
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-fuchsia-700">{marketingDraft.suggestionType === "whatsapp_campaign" ? "WhatsApp Wizard" : "Instagram Story Wizard"}</p>
+                      <h4 className="mt-1 text-2xl font-black text-slate-900">{marketingDraft.title}</h4>
+                      <p className="mt-2 text-sm text-slate-600">אירוע: {marketingDraft.eventTitle}</p>
+                    </div>
+
+                    {marketingDraft.suggestionType === "whatsapp_campaign" ? (
+                      <>
+                        <div className="rounded-[28px] border border-slate-200 p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-bold text-slate-900">1. לאילו קבוצות לשלוח?</p>
+                            <span className="text-xs text-slate-500">ברירת מחדל: כל הקבוצות הזמינות</span>
+                          </div>
+                          <div className="mt-3 grid gap-2 md:grid-cols-2">
+                            {((marketingDraft.defaults?.targetGroups || []) as { id: string; name: string; chatId: string }[]).map((group) => {
+                              const checked = marketingWhatsappGroups.some((item) => item.id === group.id);
+                              return (
+                                <label key={group.id} className="flex items-start gap-3 rounded-2xl border border-slate-200 px-3 py-3">
+                                  <input type="checkbox" checked={checked} onChange={(e) => {
+                                    setMarketingWhatsappGroups(prev => e.target.checked
+                                      ? [...prev, group].filter((item, index, arr) => arr.findIndex((candidate) => candidate.id === item.id) === index)
+                                      : prev.filter(item => item.id !== group.id));
+                                  }} className="mt-1 h-4 w-4 accent-fuchsia-600" />
+                                  <div className="min-w-0 text-right">
+                                    <p className="text-sm font-semibold text-slate-900">{group.name}</p>
+                                    <p className="text-xs text-slate-500 break-all">{group.chatId || "ללא chatId"}</p>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="rounded-[28px] border border-slate-200 p-5">
+                          <p className="text-sm font-bold text-slate-900">2. המלל המוצע</p>
+                          <textarea value={marketingWhatsappMessage} onChange={(e) => setMarketingWhatsappMessage(e.target.value)} className="mt-3 min-h-[180px] w-full rounded-2xl border border-slate-200 p-3 text-sm text-slate-800" />
+                        </div>
+                        <div className="rounded-[28px] border border-slate-200 p-5">
+                          <p className="text-sm font-bold text-slate-900">3. זמנים מוצעים</p>
+                          <div className="mt-3 space-y-2">
+                            {(marketingDraft.payload?.sendPlan || []).map((step: any, index: number) => (
+                              <input key={step.step || index} type="datetime-local" value={String(step.scheduledAt || "").slice(0, 16)} onChange={(e) => {
+                                const value = e.target.value;
+                                setMarketingDraft(prev => prev ? {
+                                  ...prev,
+                                  payload: {
+                                    ...prev.payload,
+                                    sendPlan: (prev.payload.sendPlan || []).map((item: any, idx: number) => idx === index ? { ...item, scheduledAt: new Date(value).toISOString(), scheduledLabel: value } : item),
+                                  },
+                                } : prev);
+                              }} className="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm" />
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="rounded-[28px] border border-slate-200 p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-bold text-slate-900">תוכנית הסטוריז</p>
+                          <span className="text-xs text-slate-500">ברירת מחדל: פלייר רשמי + המרה אוטומטית ל-9:16</span>
+                        </div>
+                        <div className="mt-4 space-y-3">
+                          {marketingInstagramStoryPlan.map((step, index) => (
+                            <div key={step.stepIndex || index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <div>
+                                  <label className="mb-1 block text-xs font-semibold text-slate-600">זמן</label>
+                                  <input type="datetime-local" value={String(step.scheduledTime || "").slice(0, 16)} onChange={(e) => setMarketingInstagramStoryPlan(prev => prev.map((item, idx) => idx === index ? { ...item, scheduledTime: new Date(e.target.value).toISOString() } : item))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs font-semibold text-slate-600">טקסט על הסטורי</label>
+                                  <input type="text" value={step.overlayText || ""} onChange={(e) => setMarketingInstagramStoryPlan(prev => prev.map((item, idx) => idx === index ? { ...item, overlayText: e.target.value } : item))} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                                </div>
+                              </div>
+                              <p className="mt-2 text-xs text-slate-500">{step.contentType === "text_only" ? "ללא מדיה — יעלה כטקסט בלבד" : `סוג תוכן: ${step.contentType}`}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {marketingActionError && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{marketingActionError}</div>}
+
+                    <div className="flex flex-wrap justify-between gap-3">
+                      <button onClick={() => updateMarketingSuggestionState(selectedMarketingSuggestion, "dismiss")} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">לא עכשיו</button>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => setSelectedMarketingSuggestion(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">חזור להצעות</button>
+                        <button onClick={createMarketingTask} disabled={savingMarketingTask} className="rounded-xl bg-[var(--patifon-orange)] px-4 py-2 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">{savingMarketingTask ? "יוצר משימה…" : "צור משימה אמיתית"}</button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex h-full min-h-[320px] items-center justify-center text-slate-500">לא הצלחנו להכין טיוטה להצעה הזאת.</div>
+                )}
+              </section>
+            </div>
+          </div>
         </div>
       )}
 

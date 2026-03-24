@@ -1,7 +1,16 @@
 import admin from 'firebase-admin';
+import fs from 'fs';
 
 let adminDb: admin.firestore.Firestore | null = null;
 let adminAuth: admin.auth.Auth | null = null;
+
+const initWithServiceAccount = (serviceAccount: Record<string, string>) => {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
+    });
+    adminDb = admin.firestore();
+    adminAuth = admin.auth();
+};
 
 if (!admin.apps.length) {
     try {
@@ -12,13 +21,8 @@ if (!admin.apps.length) {
             const serviceAccount = JSON.parse(
                 Buffer.from(base64ServiceAccount, 'base64').toString('utf-8')
             );
-
-            admin.initializeApp({
-                credential: admin.credential.cert(serviceAccount),
-            });
+            initWithServiceAccount(serviceAccount);
             console.log('Firebase Admin initialized successfully with base64 credentials');
-            adminDb = admin.firestore();
-            adminAuth = admin.auth();
         } else {
             // Fallback to individual environment variables
             const projectId = process.env.FIREBASE_PROJECT_ID;
@@ -26,18 +30,18 @@ if (!admin.apps.length) {
             const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
             if (projectId && clientEmail && privateKey) {
-                admin.initializeApp({
-                    credential: admin.credential.cert({
-                        projectId,
-                        clientEmail,
-                        privateKey,
-                    }),
-                });
+                initWithServiceAccount({ projectId, clientEmail, privateKey });
                 console.log('Firebase Admin initialized successfully with individual credentials');
-                adminDb = admin.firestore();
-                adminAuth = admin.auth();
             } else {
-                console.warn('Firebase Admin credentials not configured - some features may not work');
+                // Local fallback for Ben/OpenClaw workspace dev flows
+                const localVaultPath = '/home/ben/.openclaw/secrets/entries/firebase-admin-patifon.json';
+                if (fs.existsSync(localVaultPath)) {
+                    const serviceAccount = JSON.parse(fs.readFileSync(localVaultPath, 'utf8'));
+                    initWithServiceAccount(serviceAccount);
+                    console.log('Firebase Admin initialized successfully with local vault credentials');
+                } else {
+                    console.warn('Firebase Admin credentials not configured - some features may not work');
+                }
             }
         }
     } catch (error) {

@@ -1,0 +1,106 @@
+import { NextRequest, NextResponse } from "next/server";
+import { FieldValue } from "firebase-admin/firestore";
+
+import { adminDb } from "@/lib/firebase-admin";
+import { buildInstagramStoryCampaignDraft, buildWhatsappCampaignDraft } from "@/lib/marketing-suggestions";
+import type { WhatsappCampaignGroup } from "@/lib/whatsapp-campaign/types";
+
+export async function POST(req: NextRequest) {
+  try {
+    if (!adminDb) return NextResponse.json({ error: "Firebase Admin לא מוגדר" }, { status: 500 });
+    const body = await req.json() as Record<string, unknown>;
+    const eventId = String(body.eventId || "").trim();
+    const suggestionType = String(body.suggestionType || "").trim();
+    if (!eventId || !suggestionType) return NextResponse.json({ error: "eventId או suggestionType חסרים" }, { status: 400 });
+
+    const eventRef = adminDb.collection("events").doc(eventId);
+    const eventSnap = await eventRef.get();
+    if (!eventSnap.exists) return NextResponse.json({ error: "האירוע לא נמצא" }, { status: 404 });
+
+    let draft;
+    if (suggestionType === "whatsapp_campaign") {
+      const targetGroups = (Array.isArray(body.targetGroups) ? body.targetGroups : []).map((group) => ({
+        id: String((group as Record<string, unknown>).id || ""),
+        name: String((group as Record<string, unknown>).name || "קבוצה ללא שם"),
+        chatId: String((group as Record<string, unknown>).chatId || ""),
+      })).filter((group) => group.id) as WhatsappCampaignGroup[];
+      draft = buildWhatsappCampaignDraft({
+        event: { id: eventSnap.id, ...(eventSnap.data() as Record<string, unknown>) },
+        groups: targetGroups,
+        registrationBaseUrl: String(body.registrationBaseUrl || process.env.NEXT_PUBLIC_BASE_URL || ""),
+        stepCount: Number(body.stepCount || 0) || undefined,
+      });
+      const payload = draft.payload as any;
+      if (typeof body.messageText === "string" && body.messageText.trim()) {
+        const messageText = body.messageText.trim();
+        payload.messageText = messageText;
+        payload.sendPlan = (payload.sendPlan || []).map((step: any) => ({ ...step, messageText }));
+        payload.messageVariants = (payload.sendPlan || []).map((step: any) => step.messageText || messageText);
+      }
+      if (Array.isArray(body.schedule)) {
+        const nextSchedule = body.schedule.map((value) => String(value || "").trim()).filter(Boolean);
+        if (nextSchedule.length) {
+          draft = buildWhatsappCampaignDraft({
+            event: { id: eventSnap.id, ...(eventSnap.data() as Record<string, unknown>) },
+            groups: targetGroups,
+            registrationBaseUrl: String(body.registrationBaseUrl || process.env.NEXT_PUBLIC_BASE_URL || ""),
+            stepCount: nextSchedule.length,
+          });
+          (draft.payload as any).sendPlan = (draft.payload as any).sendPlan.map((step: any, index: number) => ({
+            ...step,
+            scheduledAt: nextSchedule[index] || step.scheduledAt,
+            scheduledLabel: nextSchedule[index] || step.scheduledLabel,
+          }));
+          draft.dueDate = nextSchedule[0] || draft.dueDate;
+        }
+      }
+    } else if (suggestionType === "instagram_story_campaign") {
+      draft = buildInstagramStoryCampaignDraft({
+        event: { id: eventSnap.id, ...(eventSnap.data() as Record<string, unknown>) },
+        accountId: String(body.accountId || ""),
+        storyCount: Number(body.storyCount || 0) || undefined,
+        isTest: body.isTest === true,
+      });
+      const payload = draft.payload as any;
+      if (Array.isArray(body.storyPlan) && body.storyPlan.length) {
+        payload.storyPlan = body.storyPlan;
+        draft.requiredCompletions = body.storyPlan.length;
+        draft.remainingCompletions = body.storyPlan.length;
+      }
+    } else {
+      return NextResponse.json({ error: "suggestionType לא נתמך" }, { status: 400 });
+    }
+
+    const taskPayload = {
+      title: draft.title,
+      description: draft.description,
+      status: draft.status,
+      priority: draft.priority,
+      executionMode: draft.executionMode,
+      requiredCompletions: draft.requiredCompletions,
+      remainingCompletions: draft.remainingCompletions,
+      dueDate: draft.dueDate,
+      specialType: draft.specialType,
+      payload: draft.payload,
+      eventId,
+      eventTitle: draft.eventTitle,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    const taskRef = await eventRef.collection("tasks").add(taskPayload);
+    await adminDb.collection("marketing_suggestions_state").doc(`${eventId}_${suggestionType}`).set({
+      eventId,
+      suggestionType,
+      status: "ACCEPTED",
+      acceptedAt: FieldValue.serverTimestamp(),
+      taskId: taskRef.id,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return NextResponse.json({ ok: true, taskId: taskRef.id, task: { id: taskRef.id, ...taskPayload } });
+  } catch (error) {
+    console.error("create marketing task failed", error);
+    return NextResponse.json({ error: "שגיאה ביצירת משימת שיווק" }, { status: 500 });
+  }
+}
