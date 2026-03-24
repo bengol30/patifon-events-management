@@ -1226,17 +1226,18 @@ export default function Dashboard() {
             unassignedCount += 1;
           }
 
+          const isVisibleInAdminHome = isAdmin && taskData.status !== "DONE";
           const isAssignedToUser = taskData.status !== "DONE" && match.isAssigned;
-          if (isAssignedToUser) {
+          if (isAssignedToUser || isVisibleInAdminHome) {
             userTasks.push({
               id: docSnap.id,
               title: taskData.title,
               dueDate: taskData.dueDate,
               priority: (taskData.priority as "NORMAL" | "HIGH" | "CRITICAL") || "NORMAL",
               assignee: taskData.assignee,
-              assigneeId: match.assigneeId,
+              assigneeId: (taskData as any).assigneeId || match.assigneeId,
               assigneeEmail: (taskData as any).assigneeEmail || (match.assigneesArr[0]?.email) || "",
-              assignees: match.assigneesArr,
+              assignees: match.assigneesArr.length ? match.assigneesArr : ((taskData.assignees as { name?: string; userId?: string; email?: string; phone?: string }[] | undefined) || []),
               status: (taskData.status as "TODO" | "IN_PROGRESS" | "DONE" | "STUCK") || "TODO",
               eventId,
               eventTitle: containerTitle,
