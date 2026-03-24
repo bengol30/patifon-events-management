@@ -1602,7 +1602,6 @@ export default function Dashboard() {
         if (!res.ok) throw new Error(data?.error || "שגיאה בטעינת הצעות שיווק");
         const suggestions = Array.isArray(data?.suggestions) ? data.suggestions as MarketingSuggestion[] : [];
         setMarketingSuggestions(suggestions);
-        setShowMarketingSuggestionsModal(suggestions.length > 0);
       } catch (err) {
         console.error("Error loading marketing suggestions", err);
       } finally {
@@ -3419,8 +3418,22 @@ export default function Dashboard() {
                   {/* Top Row: Title vs Button */}
                   <div className="flex flex-col-reverse sm:flex-row sm:items-start sm:justify-between gap-5">
 
-                    {/* LEFTSIDE: New task button */}
-                    <div className="flex justify-end sm:justify-start w-full sm:w-auto">
+                    {/* LEFTSIDE: Task action buttons */}
+                    <div className="flex flex-wrap justify-end gap-3 sm:justify-start w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => setShowMarketingSuggestionsModal(true)}
+                        className="flex items-center justify-center gap-2 rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-6 py-3 text-sm font-bold text-fuchsia-900 shadow-[0_8px_20px_rgba(140,24,97,0.08)] transition-all hover:bg-fuchsia-100 hover:-translate-y-0.5 active:scale-95"
+                        title="פתח הצעות משימות שיווק חכמות"
+                      >
+                        <Sparkles size={18} />
+                        הצעות משימות
+                        {marketingSuggestions.length > 0 && (
+                          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-black text-fuchsia-700 shadow-sm">
+                            {marketingSuggestions.length}
+                          </span>
+                        )}
+                      </button>
                       <button
                         type="button"
                         onClick={() => setShowNewGeneralTaskModal(true)}
