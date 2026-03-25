@@ -2778,7 +2778,14 @@ export default function EventDetailsPage() {
 
         try {
             if (type === 'task' && itemId) {
+                const taskSnap = await getDoc(doc(db, "events", id, "tasks", itemId));
+                const taskData = taskSnap.data();
+                const specialType = taskData?.specialType;
                 await deleteDoc(doc(db, "events", id, "tasks", itemId));
+                if (specialType === 'instagram_story_campaign_patifon') {
+                    const postsSnap = await getDocs(query(collection(db, "scheduled_posts"), where("eventId", "==", id), where("taskId", "==", itemId)));
+                    await Promise.all(postsSnap.docs.map(d => deleteDoc(d.ref)));
+                }
             } else if (type === 'budget' && itemId) {
                 await deleteDoc(doc(db, "events", id, "budgetItems", itemId));
             } else if (type === 'event') {
