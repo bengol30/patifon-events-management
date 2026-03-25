@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
+import { promisify } from "node:util";
+import { exec as execCallback } from "node:child_process";
 
 import { adminDb } from "@/lib/firebase-admin";
 import { resolveInstagramAccountToken } from "@/lib/instagram-story-campaign/scheduler";
+
+const exec = promisify(execCallback);
 
 export const dynamic = "force-dynamic";
 
@@ -54,13 +58,39 @@ export async function GET() {
     const now = Math.floor(Date.now() / 1000);
     const snapshot = await adminDb.collection("scheduled_posts").where("status", "==", "pending").get();
     const results: Array<Record<string, unknown>> = [];
+    const selectedByTask = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
 
     for (const docSnap of snapshot.docs) {
       const post = docSnap.data() as Record<string, unknown>;
       const postId = docSnap.id;
       if (!(Number(post.scheduleTime || 0) <= now)) continue;
+      const taskKey = `${clean(post.eventId)}:${clean(post.taskId)}`;
+      const existing = selectedByTask.get(taskKey);
+      if (!existing || Number((existing.data() as Record<string, unknown>).stepIndex || 0) > Number(post.stepIndex || 0)) {
+        selectedByTask.set(taskKey, docSnap);
+      }
+    }
+
+    for (const docSnap of selectedByTask.values()) {
+      const post = docSnap.data() as Record<string, unknown>;
+      const postId = docSnap.id;
 
       try {
+        const source = clean(post.source);
+        const type = clean(post.type) || "STORY";
+
+        if (source === "instagram_story_campaign_patifon" && type === "STORY") {
+          const eventId = clean(post.eventId);
+          const taskId = clean(post.taskId);
+          const stepIndex = Number(post.stepIndex || 0);
+          if (!eventId || !taskId || !stepIndex) throw new Error("Missing eventId/taskId/stepIndex for story campaign post");
+          const script = "/home/ben/.openclaw/workspace/scripts/ig-story-send-with-convert.mjs";
+          await exec(`node ${script} ${JSON.stringify(eventId)} ${JSON.stringify(taskId)} ${JSON.stringify(String(stepIndex))}`);
+          await docSnap.ref.delete();
+          results.push({ id: postId, status: "published_via_convert_script", stepIndex });
+          continue;
+        }
+
         const accountId = clean(post.accountId);
         const tokenInfo = await resolveInstagramAccountToken(accountId);
         const accessToken = tokenInfo.accessToken;
@@ -68,7 +98,6 @@ export async function GET() {
         const imageUrl = clean(post.imageUrl);
         const videoUrl = clean(post.videoUrl);
         const caption = clean(post.caption);
-        const type = clean(post.type) || "STORY";
         const version = "v19.0";
         const baseUrl = `https://graph.facebook.com/${version}/${resolvedAccountId}/media`;
 
