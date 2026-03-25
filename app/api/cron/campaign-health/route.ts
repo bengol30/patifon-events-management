@@ -16,6 +16,7 @@ export async function GET() {
 
     const issues: Array<Record<string, unknown>> = [];
     const checked: Array<Record<string, unknown>> = [];
+    const taskExists = new Map<string, boolean>();
 
     for (const eventDoc of eventsSnap.docs) {
       const tasksSnap = await eventDoc.ref.collection('tasks').get();
@@ -89,6 +90,31 @@ export async function GET() {
           }
         }
         checked.push(base);
+        taskExists.set(`${eventDoc.id}:${taskDoc.id}`, true);
+      }
+    }
+
+    for (const [postId, post] of scheduledPosts.entries()) {
+      const eventId = clean((post as Record<string, unknown>).eventId);
+      const taskId = clean((post as Record<string, unknown>).taskId);
+      const source = clean((post as Record<string, unknown>).source);
+      if (source !== 'instagram_story_campaign_patifon') continue;
+      const status = clean((post as Record<string, unknown>).status);
+      if (status !== 'pending') continue;
+      const taskKey = `${eventId}:${taskId}`;
+      if (!taskExists.has(taskKey)) {
+        const taskRef = adminDb.collection('events').doc(eventId).collection('tasks').doc(taskId);
+        const taskSnap = await taskRef.get();
+        if (!taskSnap.exists || clean((taskSnap.data() as Record<string, unknown> | undefined)?.status) === 'DONE') {
+          issues.push({
+            eventId,
+            taskId,
+            severity: 'medium',
+            type: 'orphaned_scheduled_post',
+            scheduledPostId: postId,
+            message: 'Pending scheduled_post exists but task is deleted or DONE - should be cleaned up',
+          });
+        }
       }
     }
 
