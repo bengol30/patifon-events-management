@@ -25,9 +25,10 @@ async function updateStoryTaskProgress(post: Record<string, unknown>, result: { 
   const payload = (task.payload || {}) as Record<string, unknown>;
   const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
   const nextPlan = storyPlan.map((step) => {
-    if (Number(step.stepIndex || 0) !== stepIndex) return step;
+    const base = Object.fromEntries(Object.entries(step).filter(([, value]) => value !== undefined)) as Record<string, unknown>;
+    if (Number(step.stepIndex || 0) !== stepIndex) return base;
     const nextStep = {
-      ...step,
+      ...base,
       status: result.status === "published" ? "POSTED" : "FAILED",
       error: result.error || "",
     } as Record<string, unknown>;
