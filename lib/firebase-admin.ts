@@ -35,10 +35,16 @@ if (!admin.apps.length) {
             } else {
                 // Local fallback for Ben/OpenClaw workspace dev flows
                 const localVaultPath = '/home/ben/.openclaw/secrets/entries/firebase-admin-patifon.json';
+                const projectLocalPath = process.cwd() + '/patifon-events-firebase-adminsdk-fbsvc-793c956bf4.json';
+
                 if (fs.existsSync(localVaultPath)) {
                     const serviceAccount = JSON.parse(fs.readFileSync(localVaultPath, 'utf8'));
                     initWithServiceAccount(serviceAccount);
                     console.log('Firebase Admin initialized successfully with local vault credentials');
+                } else if (fs.existsSync(projectLocalPath)) {
+                    const serviceAccount = JSON.parse(fs.readFileSync(projectLocalPath, 'utf8'));
+                    initWithServiceAccount(serviceAccount);
+                    console.log('Firebase Admin initialized successfully with project local credentials');
                 } else {
                     console.warn('Firebase Admin credentials not configured - some features may not work');
                 }

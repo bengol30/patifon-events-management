@@ -2,9 +2,9 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit, AlertTriangle, Sparkles } from "lucide-react";
+import { Plus, Calendar, CheckSquare, Settings, Filter, Edit2, Trash2, Check, X, MessageCircle, LogOut, MapPin, Users, Clock, UserPlus, BarChart3, UserCircle2, Bell, FolderKanban, FileEdit, AlertTriangle, Sparkles, CheckCircle, RefreshCw } from "lucide-react";
 import { db, auth, storage } from "@/lib/firebase";
 import { deleteEventCascade, deleteProjectCascade } from "@/lib/firestoreCleanup";
 import { collection, query, where, getDocs, orderBy, collectionGroup, deleteDoc, updateDoc, doc, getDoc, arrayUnion, setDoc, serverTimestamp, addDoc, onSnapshot, limit } from "firebase/firestore";
@@ -71,6 +71,8 @@ interface Task {
   remainingCompletions?: number | null;
   completionCount?: number;
   totalVolunteerHours?: number;
+  payload?: any;
+  subStatus?: string; // added for sub-task visualization
 }
 
 interface TeamNote {
@@ -394,6 +396,7 @@ export default function Dashboard() {
 
   // Edit/Delete State
   const [showNewGeneralTaskModal, setShowNewGeneralTaskModal] = useState(false);
+  const [showWeeklyScheduleModal, setShowWeeklyScheduleModal] = useState(false);
   const [newGeneralTask, setNewGeneralTask] = useState({ title: "", description: "", dueDate: "", priority: "NORMAL", eventId: "" });
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   // State for editing status/next step
@@ -755,6 +758,7 @@ export default function Dashboard() {
             readBy: data.readBy,
             lastMessageText: data.lastMessageText,
             lastMessageMentions: data.lastMessageMentions,
+            payload: data.payload,
           };
           tasks.push(baseTask);
           const shouldIncludeNotif = match.isAssigned || (includeMentions && match.isMentioned);
@@ -1214,7 +1218,8 @@ export default function Dashboard() {
               lastMessageMentions: mentionsArr,
               lastMessageText: taskData.lastMessageText || "",
               requiredCompletions: taskData.requiredCompletions != null ? Number(taskData.requiredCompletions) : null,
-              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null
+              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null,
+              payload: taskData.payload
             } as Task);
           }
 
@@ -1249,7 +1254,8 @@ export default function Dashboard() {
               readBy: taskData.readBy || {},
               lastMessageText: taskData.lastMessageText || "",
               requiredCompletions: taskData.requiredCompletions != null ? Number(taskData.requiredCompletions) : null,
-              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null
+              remainingCompletions: taskData.remainingCompletions != null ? Number(taskData.remainingCompletions) : null,
+              payload: taskData.payload
             } as Task);
           }
         });
@@ -1604,24 +1610,25 @@ export default function Dashboard() {
     loadRegisterEvents();
   }, [db, user, isAdmin, showRegisterEventsModal, allEventsRaw]);
 
-  useEffect(() => {
-    const loadMarketingSuggestions = async () => {
-      if (!user) return;
-      try {
-        setLoadingMarketingSuggestions(true);
-        const res = await fetch("/api/marketing/suggestions", { cache: "no-store" });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "שגיאה בטעינת הצעות שיווק");
-        const suggestions = Array.isArray(data?.suggestions) ? data.suggestions as MarketingSuggestion[] : [];
-        setMarketingSuggestions(suggestions);
-      } catch (err) {
-        console.error("Error loading marketing suggestions", err);
-      } finally {
-        setLoadingMarketingSuggestions(false);
-      }
-    };
-    loadMarketingSuggestions();
+  const loadMarketingSuggestions = useCallback(async (showLoading = true) => {
+    if (!user) return;
+    try {
+      if (showLoading) setLoadingMarketingSuggestions(true);
+      const res = await fetch("/api/marketing/suggestions", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "שגיאה בטעינת הצעות שיווק");
+      const suggestions = Array.isArray(data?.suggestions) ? data.suggestions as MarketingSuggestion[] : [];
+      setMarketingSuggestions(suggestions);
+    } catch (err) {
+      console.error("Error loading marketing suggestions", err);
+    } finally {
+      if (showLoading) setLoadingMarketingSuggestions(false);
+    }
   }, [user]);
+
+  useEffect(() => {
+    loadMarketingSuggestions(true);
+  }, [loadMarketingSuggestions]);
 
   const openMarketingWizard = async (suggestion: MarketingSuggestion) => {
     try {
@@ -1676,20 +1683,20 @@ export default function Dashboard() {
       setMarketingActionError(null);
       const body = selectedMarketingSuggestion.suggestionType === "whatsapp_campaign"
         ? {
-            eventId: selectedMarketingSuggestion.eventId,
-            suggestionType: selectedMarketingSuggestion.suggestionType,
-            targetGroups: marketingWhatsappGroups,
-            messageText: marketingWhatsappMessage,
-            stepCount: marketingDraft.requiredCompletions,
-            schedule: Array.isArray(marketingDraft.payload?.sendPlan) ? marketingDraft.payload.sendPlan.map((step: any) => step.scheduledAt) : [],
-          }
+          eventId: selectedMarketingSuggestion.eventId,
+          suggestionType: selectedMarketingSuggestion.suggestionType,
+          targetGroups: marketingWhatsappGroups,
+          messageText: marketingWhatsappMessage,
+          stepCount: marketingDraft.requiredCompletions,
+          schedule: Array.isArray(marketingDraft.payload?.sendPlan) ? marketingDraft.payload.sendPlan.map((step: any) => step.scheduledAt) : [],
+        }
         : {
-            eventId: selectedMarketingSuggestion.eventId,
-            suggestionType: selectedMarketingSuggestion.suggestionType,
-            storyCount: marketingInstagramStoryPlan.length,
-            storyPlan: marketingInstagramStoryPlan,
-            accountId: marketingDraft?.payload?.accountId || "",
-          };
+          eventId: selectedMarketingSuggestion.eventId,
+          suggestionType: selectedMarketingSuggestion.suggestionType,
+          storyCount: marketingInstagramStoryPlan.length,
+          storyPlan: marketingInstagramStoryPlan,
+          accountId: marketingDraft?.payload?.accountId || "",
+        };
       const res = await fetch("/api/marketing/create-task-from-suggestion", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1796,7 +1803,46 @@ export default function Dashboard() {
   const unreadFilteredTasksCount = filteredTasks.filter((task) => task.lastMessageTime && (!task.readBy || !task.readBy[user?.uid || '']) && task.lastMessageBy !== user?.uid).length;
   const urgentTasksCount = myTasks.filter((task) => task.priority === "CRITICAL" || task.priority === "HIGH").length;
   const stuckTasksCount = myTasks.filter((task) => task.status === "STUCK").length;
-  const upcomingTasksCount = myTasks.filter((task) => task.dueDate && !isNaN(new Date(task.dueDate).getTime()) && new Date(task.dueDate).getTime() <= Date.now() + 7 * 24 * 60 * 60 * 1000).length;
+
+  const currentWeekStart = new Date();
+  currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay());
+  currentWeekStart.setHours(0, 0, 0, 0);
+
+  const currentWeekEnd = new Date(currentWeekStart);
+  currentWeekEnd.setDate(currentWeekStart.getDate() + 6);
+  currentWeekEnd.setHours(23, 59, 59, 999);
+
+  const expandedTasks = useMemo(() => {
+    const list: Task[] = [];
+    myTasks.forEach(task => {
+      const plan = task.payload?.sendPlan || task.payload?.storyPlan;
+      if (Array.isArray(plan) && plan.length > 0 && plan.some(p => p.scheduledAt)) {
+        plan.forEach((step: any, idx: number) => {
+          if (step.scheduledAt) {
+            list.push({
+              ...task,
+              id: `${task.id}-sub-${idx}`,
+              dueDate: step.scheduledAt,
+              title: `${task.title} (חלק ${idx + 1}/${plan.length})`,
+              subStatus: step.status
+            });
+          }
+        });
+      } else {
+        list.push(task);
+      }
+    });
+    return list;
+  }, [myTasks]);
+
+  const upcomingTasksList = expandedTasks
+    .filter((task) => {
+      if (!task.dueDate || task.status === "DONE") return false;
+      const t = new Date(task.dueDate).getTime();
+      return !isNaN(t) && t >= currentWeekStart.getTime() && t <= currentWeekEnd.getTime();
+    })
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  const upcomingTasksCount = upcomingTasksList.length;
   const overdueTasksCount = myTasks.filter((task) => task.status !== "DONE" && task.dueDate && !isNaN(new Date(task.dueDate).getTime()) && new Date(task.dueDate).getTime() < Date.now()).length;
   const inProgressTasksCount = myTasks.filter((task) => task.status === "IN_PROGRESS").length;
   const tasksWithoutDueDateCount = myTasks.filter((task) => !task.dueDate).length;
@@ -3247,6 +3293,103 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Weekly Schedule Google Calendar Modal */}
+      {showWeeklyScheduleModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4 sm:p-6" onClick={() => setShowWeeklyScheduleModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-7xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="border-b border-slate-100 bg-slate-50/50 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+                  <Calendar size={22} className="text-indigo-500" />
+                  לוח משימות שבועי
+                </h3>
+                <p className="text-sm font-medium text-slate-500 mt-1">
+                  המשימות שלך לשבוע הקרוב, מסודרות לפי ימים ושעות
+                </p>
+              </div>
+              <button
+                onClick={() => setShowWeeklyScheduleModal(false)}
+                className="rounded-full p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto bg-slate-50/30 p-4">
+              <div className="grid grid-cols-1 md:grid-cols-7 gap-3 min-w-[800px] h-full">
+                {Array.from({ length: 7 }).map((_, i) => {
+                  const dayDate = new Date();
+                  dayDate.setDate(dayDate.getDate() - dayDate.getDay() + i);
+
+                  const startOfDay = new Date(dayDate);
+                  startOfDay.setHours(0, 0, 0, 0);
+
+                  const endOfDay = new Date(dayDate);
+                  endOfDay.setHours(23, 59, 59, 999);
+
+                  const dayTasks = upcomingTasksList.filter(t => {
+                    const taskTime = new Date(t.dueDate).getTime();
+                    return taskTime >= startOfDay.getTime() && taskTime <= endOfDay.getTime();
+                  }).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+
+                  const today = new Date();
+                  const isToday = dayDate.getDate() === today.getDate() && dayDate.getMonth() === today.getMonth();
+
+                  return (
+                    <div key={i} className="flex flex-col h-full">
+                      <div className={`text-center py-2 mb-2 rounded-xl border ${isToday ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <div className="text-sm font-bold">{dayDate.toLocaleDateString("he-IL", { weekday: 'long' })}</div>
+                        <div className="text-xs font-medium opacity-80">{dayDate.toLocaleDateString("he-IL", { month: 'numeric', day: 'numeric' })}</div>
+                      </div>
+
+                      <div className="flex-1 bg-white border border-slate-100 rounded-xl p-2 flex flex-col gap-2 overflow-y-auto min-h-[400px]">
+                        {dayTasks.length === 0 ? (
+                          <div className="flex items-center justify-center h-full text-slate-300 text-xs font-medium">אין משימות</div>
+                        ) : (
+                          dayTasks.map(task => {
+                            const timeStr = new Date(task.dueDate).toLocaleTimeString("he-IL", { hour: '2-digit', minute: '2-digit' });
+                            const isUrgent = task.priority === "CRITICAL" || task.priority === "HIGH";
+                            const isDone = task.subStatus === "SENT" || task.subStatus === "DONE" || task.status === "DONE";
+
+                            return (
+                              <div
+                                key={task.id}
+                                onClick={() => {
+                                  setShowWeeklyScheduleModal(false);
+                                  const originalId = task.id.split('-sub-')[0];
+                                  if (task.eventId) {
+                                    router.push(`/tasks/${originalId}?eventId=${task.eventId}`);
+                                  } else {
+                                    router.push(`/tasks/${originalId}`);
+                                  }
+                                }}
+                                className={`p-2.5 rounded-lg border text-right cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${isDone ? 'border-slate-200 bg-slate-50 opacity-60' : (isUrgent ? 'border-red-100 bg-red-50/50' : 'border-indigo-50 bg-indigo-50/30')}`}
+                              >
+                                <div className="text-[10px] font-bold text-slate-500 mb-1 flex items-center justify-end gap-1">
+                                  {isDone && <CheckCircle size={10} className="text-emerald-500 mr-auto" />}
+                                  <span>{timeStr}</span>
+                                  <Clock size={10} />
+                                </div>
+                                <div className={`text-xs font-bold line-clamp-2 leading-tight ${isDone ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={task.title}>{task.title}</div>
+                                {task.eventTitle && (
+                                  <div className="text-[9px] text-slate-500 mt-1 truncate max-w-full">
+                                    {task.eventTitle}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* New General Task Modal */}
       {showNewGeneralTaskModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -3432,29 +3575,7 @@ export default function Dashboard() {
 
                     {/* LEFTSIDE: Task action buttons */}
                     <div className="flex flex-wrap justify-end gap-3 sm:justify-start w-full sm:w-auto">
-                      <button
-                        type="button"
-                        onClick={() => setShowMarketingSuggestionsModal(true)}
-                        className="flex items-center justify-center gap-2 rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-6 py-3 text-sm font-bold text-fuchsia-900 shadow-[0_8px_20px_rgba(140,24,97,0.08)] transition-all hover:bg-fuchsia-100 hover:-translate-y-0.5 active:scale-95"
-                        title="פתח הצעות משימות שיווק חכמות"
-                      >
-                        <Sparkles size={18} />
-                        הצעות משימות
-                        {marketingSuggestions.length > 0 && (
-                          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-black text-fuchsia-700 shadow-sm">
-                            {marketingSuggestions.length}
-                          </span>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowNewGeneralTaskModal(true)}
-                        className="flex items-center justify-center gap-2 rounded-2xl bg-[var(--patifon-burgundy)] px-6 py-3 text-sm font-bold text-white shadow-[0_8px_20px_rgba(74,26,44,0.15)] transition-all hover:bg-pink-900 hover:-translate-y-0.5 active:scale-95"
-                        title="הוסף משימה פתוחה ללא אירוע"
-                      >
-                        <Plus size={18} />
-                        משימה חדשה
-                      </button>
+                      {/* הצעות משימות ומשימה חדשה הועברו לריבועים למטה */}
                     </div>
 
                     {/* RIGHTSIDE: Title & Description */}
@@ -3475,20 +3596,25 @@ export default function Dashboard() {
 
                   {/* 4 Filter Cards Row */}
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:flex xl:flex-wrap [&>*]:flex-1">
-                    <button type="button" onClick={() => focusTaskList("status")} className="group relative overflow-hidden rounded-3xl border border-red-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-red-200">
-                      <div className="absolute inset-x-0 bottom-0 h-1 bg-red-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
-                      <p className="text-[11px] font-bold uppercase tracking-widest text-red-500">תקועות/באיחור</p>
-                      <p className="mt-1 text-2xl font-black text-slate-800">{stuckTasksCount + overdueTasksCount}</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewGeneralTaskModal(true)}
+                      className="group relative overflow-hidden rounded-[24px] bg-[var(--patifon-burgundy)] p-4 sm:p-5 text-center shadow-[0_8px_20px_rgba(74,26,44,0.15)] transition-all hover:-translate-y-0.5 hover:bg-[#5a1b32] hover:shadow-lg active:scale-95 flex flex-col items-center justify-center gap-2 min-h-[110px]"
+                      title="הוסף משימה פתוחה ללא אירוע"
+                    >
+                      <Plus size={32} className="text-white opacity-90" />
+                      <p className="text-[15px] font-black text-white tracking-wide">משימה חדשה</p>
                     </button>
-                    <button type="button" onClick={() => focusTaskList("priority")} className="group relative overflow-hidden rounded-3xl border border-amber-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-amber-200">
-                      <div className="absolute inset-x-0 bottom-0 h-1 bg-amber-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
-                      <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600">דחופות</p>
-                      <p className="mt-1 text-2xl font-black text-slate-800">{urgentTasksCount}</p>
+
+                    <button type="button" onClick={() => setShowWeeklyScheduleModal(true)} className="group relative overflow-hidden rounded-[24px] border border-indigo-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-indigo-200">
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-indigo-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-indigo-600">לו״ז שבועי</p>
+                      <p className="mt-1 text-2xl font-black text-slate-800">{upcomingTasksList.length}</p>
                     </button>
-                    <button type="button" onClick={() => document.getElementById('active-events')?.scrollIntoView({ behavior: 'smooth' })} className="group relative overflow-hidden rounded-3xl border border-fuchsia-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-fuchsia-200">
+                    <button type="button" onClick={() => setShowMarketingSuggestionsModal(true)} className="group relative overflow-hidden rounded-3xl border border-fuchsia-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-fuchsia-200">
                       <div className="absolute inset-x-0 bottom-0 h-1 bg-fuchsia-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
-                      <p className="text-[11px] font-bold uppercase tracking-widest text-fuchsia-600">אירועים פעילים</p>
-                      <p className="mt-1 text-2xl font-black text-slate-800">{events.length}</p>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-fuchsia-600">הצעות משימות</p>
+                      <p className="mt-1 text-2xl font-black text-slate-800">{marketingSuggestions.length}</p>
                     </button>
                     <button type="button" onClick={() => document.getElementById('active-projects')?.scrollIntoView({ behavior: 'smooth' })} className="group relative overflow-hidden rounded-3xl border border-slate-100 bg-white p-4 sm:p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-slate-200">
                       <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-400 scale-x-0 transition-transform group-hover:scale-x-100 origin-right duration-300"></div>
@@ -5076,9 +5202,20 @@ export default function Dashboard() {
                 </div>
                 <p className="mt-1 text-sm text-slate-600">זיהינו אירועים ששווה להזיז עכשיו עם ברירות מחדל מוכנות.</p>
               </div>
-              <button onClick={() => setShowMarketingSuggestionsModal(false)} className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => loadMarketingSuggestions(true)}
+                  disabled={loadingMarketingSuggestions}
+                  className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                  title="סרוק מחדש אירועים למציאת הצעות"
+                >
+                  <RefreshCw size={16} className={loadingMarketingSuggestions ? "animate-spin" : ""} />
+                  <span className="hidden sm:inline">סרוק שוב</span>
+                </button>
+                <button onClick={() => setShowMarketingSuggestionsModal(false)} className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             <div className="grid max-h-[calc(90vh-88px)] grid-cols-1 overflow-y-auto lg:grid-cols-[360px_minmax(0,1fr)]">
               <aside className="border-l border-slate-200 bg-slate-50/70 p-4">
