@@ -26,12 +26,17 @@ async function updateStoryTaskProgress(post: Record<string, unknown>, result: { 
   const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
   const nextPlan = storyPlan.map((step) => {
     if (Number(step.stepIndex || 0) !== stepIndex) return step;
-    return {
+    const nextStep = {
       ...step,
       status: result.status === "published" ? "POSTED" : "FAILED",
-      postedAt: result.status === "published" ? new Date().toISOString() : step.postedAt,
       error: result.error || "",
-    };
+    } as Record<string, unknown>;
+    if (result.status === "published") {
+      nextStep.postedAt = new Date().toISOString();
+    } else if (step.postedAt) {
+      nextStep.postedAt = step.postedAt;
+    }
+    return nextStep;
   });
   const completed = nextPlan.filter((step) => clean(step.status) === "POSTED").length;
   const total = nextPlan.length;
