@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
-import { promisify } from "node:util";
-import { exec as execCallback } from "node:child_process";
 
 import { adminDb } from "@/lib/firebase-admin";
+import { publishInstagramStoryCampaignStep } from "@/lib/instagram-story-campaign/publish-step";
 import { resolveInstagramAccountToken } from "@/lib/instagram-story-campaign/scheduler";
-
-const exec = promisify(execCallback);
 
 export const dynamic = "force-dynamic";
 
@@ -90,10 +87,9 @@ export async function GET() {
           const taskId = clean(post.taskId);
           const stepIndex = Number(post.stepIndex || 0);
           if (!eventId || !taskId || !stepIndex) throw new Error("Missing eventId/taskId/stepIndex for story campaign post");
-          const script = "/home/ben/.openclaw/workspace/scripts/ig-story-send-with-convert.mjs";
-          await exec(`node ${script} ${JSON.stringify(eventId)} ${JSON.stringify(taskId)} ${JSON.stringify(String(stepIndex))}`);
+          const publishResult = await publishInstagramStoryCampaignStep({ eventId, taskId, stepIndex });
           await docSnap.ref.delete();
-          results.push({ id: postId, status: "published_via_convert_script", stepIndex });
+          results.push({ id: postId, status: "published_via_internal_convert", stepIndex, ...publishResult });
           continue;
         }
 
