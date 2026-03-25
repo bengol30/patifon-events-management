@@ -359,7 +359,7 @@ export const buildInstagramStoryCampaignDraft = (args: {
     description: descriptionLines.join("\n"),
     status: "TODO",
     priority: "HIGH",
-    executionMode: "MANUAL_TRACKED",
+    executionMode: "AUTOMATED",
     requiredCompletions: storyPlan.length,
     remainingCompletions: storyPlan.length,
     dueDate: storyPlan[0]?.scheduledTime || new Date().toISOString(),

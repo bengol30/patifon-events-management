@@ -50,6 +50,10 @@ export async function GET() {
           continue;
         }
 
+        if (specialType === 'instagram_story_campaign_patifon' && clean(task.executionMode) !== 'AUTOMATED') {
+          issues.push({ ...base, severity: 'medium', type: 'non_automated_instagram_story', message: 'Instagram story campaign is not marked AUTOMATED' });
+        }
+
         const payload = (task.payload || {}) as Record<string, unknown>;
         const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
         if (!storyPlan.length) {
