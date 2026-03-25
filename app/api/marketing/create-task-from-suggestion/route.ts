@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase-admin";
 import { buildInstagramStoryCampaignDraft, buildWhatsappCampaignDraft } from "@/lib/marketing-suggestions";
+import { syncInstagramStoryScheduledPosts } from "@/lib/instagram-story-campaign/scheduler";
 import type { WhatsappCampaignGroup } from "@/lib/whatsapp-campaign/types";
 
 export async function POST(req: NextRequest) {
@@ -106,6 +107,15 @@ export async function POST(req: NextRequest) {
     };
 
     const taskRef = await eventRef.collection("tasks").add(taskPayload);
+
+    if (draft.specialType === "instagram_story_campaign_patifon") {
+      await syncInstagramStoryScheduledPosts({
+        eventId,
+        taskId: taskRef.id,
+        payload: taskPayload.payload as unknown as Record<string, unknown>,
+      });
+    }
+
     await adminDb.collection("marketing_suggestions_state").doc(`${eventId}_${suggestionType}`).set({
       eventId,
       suggestionType,
