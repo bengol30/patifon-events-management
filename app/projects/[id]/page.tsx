@@ -252,6 +252,17 @@ export default function ProjectDetailsPage() {
           const pTasksSnap = await getDocs(collection(db, "projects", projectId, "tasks"));
           pTasksSnap.forEach((t) => {
             const d = t.data() as any;
+            
+            // Debug log for Imagine Me tasks
+            if (projectId === 'yed4WRBzsXrdGzousyq0') {
+              console.log(`Loading task: ${d.title}`, {
+                currentStatus: d.currentStatus,
+                nextStep: d.nextStep,
+                priority: d.priority,
+                followUpStatus: d.customData?.followUpStatus,
+              });
+            }
+            
             tasks.push({
               id: t.id,
               title: d.title || "משימה",
