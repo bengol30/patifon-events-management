@@ -34,6 +34,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
   const [generatingMessage, setGeneratingMessage] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [whatsappHistory, setWhatsappHistory] = useState<any>(null);
+  const [conversationSummary, setConversationSummary] = useState<string>("");
   const [suggestedMessage, setSuggestedMessage] = useState<string>("");
   const [editedMessage, setEditedMessage] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,23 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
       }
 
       setWhatsappHistory(data);
-      alert(`נמצאו ${data.messageCount} הודעות בהיסטוריה`);
+
+      // Now summarize the conversation
+      const summaryRes = await fetch("/api/imagine/summarize-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: data.messages,
+          customerName,
+          projectId,
+        }),
+      });
+
+      const summaryData = await summaryRes.json();
+
+      if (summaryData.ok) {
+        setConversationSummary(summaryData.summary);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -77,12 +94,13 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
     setError(null);
 
     try {
-      const historyText = whatsappHistory
+      // Use conversation summary if available, otherwise use raw history
+      const historyContext = conversationSummary || (whatsappHistory
         ? whatsappHistory.messages
             .slice(0, 10)
             .map((m: any) => `${m.from}: ${m.text}`)
             .join("\n")
-        : "";
+        : "");
 
       const res = await fetch("/api/imagine/generate-followup-message", {
         method: "POST",
@@ -94,7 +112,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           eventType: taskData.customData?.eventType,
           eventDate: taskData.customData?.eventDate,
           eventLocation: taskData.customData?.eventLocation,
-          whatsappHistory: historyText,
+          whatsappHistory: historyContext,
         }),
       });
 
@@ -188,6 +206,16 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
             </span>
           )}
         </div>
+
+        {/* Conversation Summary */}
+        {conversationSummary && (
+          <div className="p-4 bg-white border border-green-200 rounded-lg">
+            <h4 className="font-bold text-sm text-gray-900 mb-2">📋 סיכום השיחה:</h4>
+            <div className="text-sm text-gray-700 whitespace-pre-wrap" dir="rtl">
+              {conversationSummary}
+            </div>
+          </div>
+        )}
 
         {/* Generate AI Message */}
         <div className="flex items-center gap-3">
