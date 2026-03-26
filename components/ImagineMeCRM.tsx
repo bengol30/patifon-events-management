@@ -101,6 +101,24 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
         if (summaryData.ok) {
           setConversationSummary(summaryData.summary);
+          
+          // Now analyze and update task status based on conversation
+          const analyzeRes = await fetch("/api/imagine/analyze-conversation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              projectId,
+              taskId,
+              conversationSummary: summaryData.summary,
+              recentMessages: last5,
+            }),
+          });
+
+          const analyzeData = await analyzeRes.json();
+
+          if (analyzeData.ok) {
+            console.log('Task status updated based on conversation:', analyzeData.updated);
+          }
         } else {
           setError(`Summary failed: ${summaryData.error || 'Unknown error'}`);
         }
