@@ -127,9 +127,9 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
               `הדף יתרענן כדי להציג את העדכון...`
             );
             
-            // Reload to show updated status
+            // Hard reload to bypass cache
             setTimeout(() => {
-              window.location.reload();
+              window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
             }, 1000);
           }
         } else {
@@ -242,9 +242,9 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           `הדף יתרענן כדי להציג את העדכון...`
         );
         
-        // Reload page to show updated status
+        // Hard reload to bypass cache
         setTimeout(() => {
-          window.location.reload();
+          window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
         }, 1000);
       } else {
         alert("ההודעה נשלחה, אך העדכון נכשל");
