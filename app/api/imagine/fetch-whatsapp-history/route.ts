@@ -80,13 +80,19 @@ export async function POST(request: Request) {
 
     const messages = await messagesRes.json();
 
+    // Filter messages from 10.2.2026 onwards
+    const cutoffDate = new Date('2026-02-10T00:00:00Z').getTime() / 1000; // Unix timestamp
+
     // Format for AI processing
     const formattedMessages = Array.isArray(messages)
-      ? messages.map((msg: any) => ({
-          timestamp: msg.timestamp,
-          from: msg.chatId === chatId ? 'customer' : 'us',
-          text: msg.textMessage || msg.extendedTextMessage?.text || '[media]',
-        }))
+      ? messages
+          .filter((msg: any) => msg.timestamp >= cutoffDate) // Only messages after 10.2.2026
+          .map((msg: any) => ({
+            timestamp: msg.timestamp,
+            from: msg.type === 'incoming' ? 'customer' : 'us',
+            text: msg.textMessage || msg.extendedTextMessage?.text || '[media]',
+            type: msg.type, // Keep type for debugging
+          }))
       : [];
 
     return NextResponse.json({
