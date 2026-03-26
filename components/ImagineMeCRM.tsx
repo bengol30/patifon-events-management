@@ -75,22 +75,29 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
       setWhatsappHistory(data);
 
-      // Now summarize the conversation
-      const summaryRes = await fetch("/api/imagine/summarize-history", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: data.messages,
-          customerName,
-          projectId,
-          taskId, // Send taskId so it can be saved to Firestore
-        }),
-      });
+      // Only summarize if we have messages
+      if (data.messages && data.messages.length > 0) {
+        // Now summarize the conversation
+        const summaryRes = await fetch("/api/imagine/summarize-history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: data.messages,
+            customerName,
+            projectId,
+            taskId, // Send taskId so it can be saved to Firestore
+          }),
+        });
 
-      const summaryData = await summaryRes.json();
+        const summaryData = await summaryRes.json();
 
-      if (summaryData.ok) {
-        setConversationSummary(summaryData.summary);
+        if (summaryData.ok) {
+          setConversationSummary(summaryData.summary);
+        } else {
+          setError(`Summary failed: ${summaryData.error || 'Unknown error'}`);
+        }
+      } else {
+        setError(`לא נמצאו הודעות מ-10.2.2026 ואילך (סה"כ ${data.messageCount} הודעות בארכיון)`);
       }
     } catch (err: any) {
       setError(err.message);
