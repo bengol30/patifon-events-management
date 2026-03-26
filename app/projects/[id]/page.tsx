@@ -64,6 +64,7 @@ interface ProjectTask {
   scope?: "event" | "project" | "manual" | "general";
   isVolunteerTask?: boolean;
   volunteerHours?: number | null;
+  customData?: any; // For Imagine Me CRM data
 }
 
 const STATUS_OPTIONS = ["בתכנון", "בביצוע", "בהקפאה", "הושלם"];
@@ -268,6 +269,7 @@ export default function ProjectDetailsPage() {
               scope: "project",
               isVolunteerTask: !!d.isVolunteerTask,
               volunteerHours: d.volunteerHours ?? null,
+              customData: d.customData, // Include customData for ImagineMeCRM
             });
           });
         } catch (err) {
