@@ -24,9 +24,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Phone number required' }, { status: 400 });
     }
 
-    // Format phone for WhatsApp (remove + and spaces)
-    const formattedPhone = phone.replace(/[\s\+\-]/g, '');
-    const chatId = `${formattedPhone}@c.us`;
+    // Normalize phone for WhatsApp (same logic as PATIFON's send endpoint)
+    const normalizePhone = (p: string) => {
+      const digits = (p || '').replace(/\D/g, '');
+      if (!digits) return '';
+      if (digits.startsWith('00')) return digits.slice(2);
+      if (digits.startsWith('972')) return digits;
+      if (digits.startsWith('0')) return `972${digits.slice(1)}`;
+      return digits;
+    };
+
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) {
+      return NextResponse.json({ ok: false, error: 'Invalid phone number' }, { status: 400 });
+    }
+
+    const chatId = `${normalizedPhone}@c.us`;
 
     // Get WhatsApp settings from Firestore
     if (!adminDb) {
