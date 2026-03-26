@@ -33,17 +33,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Database not initialized' }, { status: 500 });
     }
 
-    const whatsappDoc = await adminDb.collection('settings').doc('whatsapp').get();
-    const whatsappSettings = whatsappDoc.data() as { instanceId?: string; token?: string } | undefined;
+    const whatsappDoc = await adminDb.collection('integrations').doc('whatsapp').get();
+    const whatsappData = whatsappDoc.data() as { idInstance?: string; apiTokenInstance?: string } | undefined;
 
-    if (!whatsappSettings?.instanceId || !whatsappSettings?.token) {
+    if (!whatsappData?.idInstance || !whatsappData?.apiTokenInstance) {
       return NextResponse.json(
         { ok: false, error: 'WhatsApp not configured in PATIFON' },
         { status: 500 }
       );
     }
 
-    const { instanceId, token } = whatsappSettings;
+    const instanceId = whatsappData.idInstance;
+    const token = whatsappData.apiTokenInstance;
     const apiUrl = `https://api.green-api.com/waInstance${instanceId}`;
 
     // Get last 70 messages
