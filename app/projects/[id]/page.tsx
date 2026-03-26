@@ -1117,6 +1117,7 @@ export default function ProjectDetailsPage() {
                     eventTitle={t.eventTitle}
                     scope={t.scope}
                     previewImage={t.previewImage}
+                    customData={t.customData}
                     onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
                     onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
                     onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}

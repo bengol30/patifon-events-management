@@ -185,9 +185,36 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
         throw new Error(data.error || "Failed to send message");
       }
 
-      alert("ההודעה נשלחה בהצלחה!");
+      // Update task status after successful send
+      const updateRes = await fetch("/api/imagine/update-after-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          taskId,
+          messageSent: editedMessage,
+          conversationSummary,
+          recentMessages,
+        }),
+      });
+
+      const updateData = await updateRes.json();
+
+      if (updateData.ok) {
+        alert(
+          `✅ ההודעה נשלחה!\n\n` +
+          `סטטוס: ${updateData.updated.currentStatus}\n` +
+          `שלב הבא: ${updateData.updated.nextStep}`
+        );
+      } else {
+        alert("ההודעה נשלחה, אך העדכון נכשל");
+      }
+
       setEditedMessage("");
       setSuggestedMessage("");
+      
+      // Reload page to show updated status
+      window.location.reload();
     } catch (err: any) {
       setError(err.message);
     } finally {
