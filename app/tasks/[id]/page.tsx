@@ -7,6 +7,7 @@ import { db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, type Firestore, setDoc, increment, getDocs, where, CollectionReference, DocumentReference } from "firebase/firestore";
 import Link from "next/link";
 import { ArrowRight, Calendar, Clock, User, AlertTriangle, CheckCircle, Circle, MessageCircle, Send, Handshake, Repeat, ImageIcon } from "lucide-react";
+import ImagineMeCRM from "@/components/ImagineMeCRM";
 import { storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { buildTaskScheduleUpdate, getScheduledExecutionLabel } from "@/lib/task-scheduler/sync-update";
@@ -1738,6 +1739,13 @@ export default function TaskDetailPage() {
                                         </Link>
                                     </div>
                                 )}
+
+                                {/* Imagine Me CRM Component - Only shows for Imagine Me project */}
+                                <ImagineMeCRM 
+                                    projectId={task.eventId} 
+                                    taskId={task.id} 
+                                    taskData={task as any}
+                                />
                             </div>
                         )}
                     </div>
