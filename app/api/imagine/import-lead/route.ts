@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     }
 
     // Create task in PATIFON
-    const taskTitle = `${lead.customer_name || 'לקוח'}${lead.company ? ` - ${lead.company}` : ''}`;
+    const taskTitle = `${lead.name || 'לקוח'}${lead.company ? ` - ${lead.company}` : ''}`;
 
     const newTask = {
       title: taskTitle,
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
       ok: true,
       taskId: taskRef.id,
       lead: {
-        name: lead.customer_name,
+        name: lead.name,
         company: lead.company,
         phone: lead.phone,
         eventType: lead.event_type,

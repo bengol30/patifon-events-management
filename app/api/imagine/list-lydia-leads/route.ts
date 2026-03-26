@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       .filter((lead: any) => !importedLydiaIds.has(lead.id))
       .map((lead: any) => ({
         id: lead.id,
-        customerName: lead.customer_name || 'לא צוין',
+        customerName: lead.name || 'לא צוין',
         company: lead.company || null,
         phone: lead.phone || null,
         eventType: lead.event_type || null,
