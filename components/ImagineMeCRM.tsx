@@ -78,8 +78,8 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
       // Only summarize if we have messages
       if (data.messages && data.messages.length > 0) {
-        // Get last 5 messages
-        const last5 = data.messages.slice(-5).reverse(); // Most recent first
+        // Get last 5 messages (Green API returns newest first, so take first 5)
+        const last5 = data.messages.slice(0, 5); // Already newest first
         setRecentMessages(last5);
 
         // Now summarize the conversation

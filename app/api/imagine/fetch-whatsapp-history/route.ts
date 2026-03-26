@@ -93,6 +93,7 @@ export async function POST(request: Request) {
             text: msg.textMessage || msg.extendedTextMessage?.text || '[media]',
             type: msg.type, // Keep type for debugging
           }))
+          .sort((a, b) => b.timestamp - a.timestamp) // Sort by timestamp DESC (newest first)
       : [];
 
     return NextResponse.json({
