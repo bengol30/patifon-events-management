@@ -29,6 +29,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
   // Only show for Imagine Me project
   if (projectId !== IMAGINE_ME_PROJECT_ID) {
+    console.log('ImagineMeCRM hidden - projectId mismatch:', { received: projectId, expected: IMAGINE_ME_PROJECT_ID });
     return null;
   }
 
@@ -47,10 +48,12 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
   // Load existing summary on mount
   useEffect(() => {
+    console.log('ImagineMeCRM mounted for task:', taskId, 'projectId:', projectId);
     if (taskData.customData?.conversationSummary) {
       setConversationSummary(taskData.customData.conversationSummary);
+      console.log('Loaded existing summary');
     }
-  }, [taskData]);
+  }, [taskData, taskId, projectId]);
 
   const handleFetchHistory = async () => {
     if (!phone) {
@@ -204,17 +207,20 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
         alert(
           `✅ ההודעה נשלחה!\n\n` +
           `סטטוס: ${updateData.updated.currentStatus}\n` +
-          `שלב הבא: ${updateData.updated.nextStep}`
+          `שלב הבא: ${updateData.updated.nextStep}\n\n` +
+          `הדף יתרענן כדי להציג את העדכון...`
         );
+        
+        // Reload page to show updated status
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
       } else {
         alert("ההודעה נשלחה, אך העדכון נכשל");
       }
 
       setEditedMessage("");
       setSuggestedMessage("");
-      
-      // Reload page to show updated status
-      window.location.reload();
     } catch (err: any) {
       setError(err.message);
     } finally {
