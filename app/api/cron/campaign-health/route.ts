@@ -18,6 +18,21 @@ export async function GET() {
     const checked: Array<Record<string, unknown>> = [];
     const taskExists = new Map<string, boolean>();
 
+    // Check Instagram token
+    const instagramSnap = await adminDb.collection('integrations').doc('instagram').get();
+    const instagramData = instagramSnap.data() as Record<string, unknown> | undefined;
+    const hasInstagramToken = !!(
+      instagramData?.accessToken ||
+      (Array.isArray(instagramData?.accounts) && instagramData.accounts.some((a: any) => a?.accessToken))
+    );
+    if (!hasInstagramToken) {
+      issues.push({
+        severity: 'critical',
+        type: 'missing_instagram_token',
+        message: 'Instagram integration has no valid access token - story campaigns will fail',
+      });
+    }
+
     for (const eventDoc of eventsSnap.docs) {
       const tasksSnap = await eventDoc.ref.collection('tasks').get();
       for (const taskDoc of tasksSnap.docs) {
@@ -71,7 +86,9 @@ export async function GET() {
           const expectedId = `ig-story-${eventDoc.id}-${taskDoc.id}-step${stepIndex}`;
           const scheduled = scheduledPosts.get(expectedId) as (Record<string, unknown> & { id: string }) | undefined;
           const status = clean((step as Record<string, unknown>).status);
-          if (!scheduled && status !== 'POSTED') {
+          const taskStatus = clean(task.status);
+          // Only flag missing scheduled_post if step is not POSTED and task is not DONE
+          if (!scheduled && status !== 'POSTED' && taskStatus !== 'DONE') {
             issues.push({ ...base, severity: 'high', type: 'missing_scheduled_post', stepIndex, message: 'Story campaign step has no scheduled_posts mirror' });
             continue;
           }
