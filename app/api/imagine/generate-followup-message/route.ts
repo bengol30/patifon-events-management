@@ -8,8 +8,16 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: Request) {
   try {
-    const { customerName, company, eventType, eventDate, eventLocation, whatsappHistory, projectId } =
-      await request.json();
+    const {
+      customerName,
+      company,
+      eventType,
+      eventDate,
+      eventLocation,
+      whatsappHistory,
+      recentMessages,
+      projectId,
+    } = await request.json();
 
     // Safety: only allow for Imagine Me project
     const IMAGINE_ME_PROJECT_ID = 'yed4WRBzsXrdGzousyq0';
@@ -24,29 +32,55 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Customer name required' }, { status: 400 });
     }
 
-    const systemPrompt = `You are a helpful assistant for Imagine Me, a business that creates AI-generated photos for events.
+    // Calculate time since last message
+    let daysSinceLastMessage = null;
+    let lastMessageDate = null;
+    if (recentMessages && recentMessages.length > 0) {
+      const lastMsg = recentMessages[0]; // Most recent
+      lastMessageDate = new Date(lastMsg.timestamp * 1000);
+      const now = new Date();
+      daysSinceLastMessage = Math.floor((now.getTime() - lastMessageDate.getTime()) / (1000 * 60 * 60 * 24));
+    }
 
-**Services:**
-1. **Event Booth** - We come to the event with equipment and create AI photos on-site, printed on magnets or wood blocks
-2. **Imagen Wow (Photo on Demand)** - A special link for companies/organizations where employees can take photos and receive personalized AI images
+    const systemPrompt = `You are Ben from Imagine Me, writing a personal WhatsApp message to a past client.
 
-**Your task:**
-Generate a warm, friendly follow-up message in Hebrew for a past client. The message should:
-- Reference their past event naturally
-- Ask if they have any upcoming events
-- Present both services briefly
-- Be conversational and authentic
-- Not be too salesy
-- Keep it short (max 150 words)
+**Your business:**
+- **Event Booth** - Come to events with AI photo equipment, print on magnets/wood
+- **Imagen Wow** - Online link for company employees to get AI photos
 
-**Customer info:**
-- Name: ${customerName}
-- Company: ${company || 'לא צוין'}
-- Past event: ${eventType || 'אירוע'} on ${eventDate || 'תאריך לא ידוע'} ${eventLocation ? `at ${eventLocation}` : ''}
+**Writing style:**
+- SHORT and natural (like a real WhatsApp message)
+- Friendly and human, not corporate
+- Use emojis sparingly (1-2 max)
+- Hebrew, casual tone
+- Maximum 2-3 sentences
 
-${whatsappHistory ? `**Recent conversation context:**\n${whatsappHistory}` : ''}
+**Context:**
+- Customer: ${customerName}${company ? ` from ${company}` : ''}
+- Past event: ${eventType || 'אירוע'} ${eventDate ? `(${eventDate})` : ''}
+${daysSinceLastMessage !== null ? `- Days since last contact: ${daysSinceLastMessage}` : ''}
 
-Write the message in Hebrew, addressed to ${customerName}.`;
+**Recent messages (last 5):**
+${recentMessages && recentMessages.length > 0 ? recentMessages.map((m: any) => {
+  const date = new Date(m.timestamp * 1000);
+  const sender = m.from === 'customer' ? customerName : 'אני (בן)';
+  return `${sender} (${date.toLocaleDateString('he-IL')}): ${m.text.substring(0, 80)}`;
+}).join('\n') : 'אין היסטוריה'}
+
+**Your message strategy:**
+${daysSinceLastMessage && daysSinceLastMessage > 7 ? `
+- It's been ${daysSinceLastMessage} days - send a GENTLE reminder
+- Don't pressure, just check in
+- Ask if they have upcoming events
+` : `
+- Continue the conversation naturally
+- Reference the last exchange if relevant
+- Offer help or ask about future events
+`}
+
+${whatsappHistory ? `\n**Conversation summary:**\n${whatsappHistory}` : ''}
+
+Write ONE short WhatsApp message in Hebrew. Natural, human, brief.`;
 
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

@@ -37,6 +37,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
   const [sendingMessage, setSendingMessage] = useState(false);
   const [whatsappHistory, setWhatsappHistory] = useState<any>(null);
   const [conversationSummary, setConversationSummary] = useState<string>("");
+  const [recentMessages, setRecentMessages] = useState<any[]>([]);
   const [suggestedMessage, setSuggestedMessage] = useState<string>("");
   const [editedMessage, setEditedMessage] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +78,10 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
       // Only summarize if we have messages
       if (data.messages && data.messages.length > 0) {
+        // Get last 5 messages
+        const last5 = data.messages.slice(-5).reverse(); // Most recent first
+        setRecentMessages(last5);
+
         // Now summarize the conversation
         const summaryRes = await fetch("/api/imagine/summarize-history", {
           method: "POST",
@@ -130,6 +135,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           eventDate: taskData.customData?.eventDate,
           eventLocation: taskData.customData?.eventLocation,
           whatsappHistory: historyContext,
+          recentMessages, // Send last 5 messages
         }),
       });
 
@@ -226,11 +232,42 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
         {/* Conversation Summary */}
         {conversationSummary && (
-          <div className="p-4 bg-white border border-green-200 rounded-lg">
-            <h4 className="font-bold text-sm text-gray-900 mb-2">📋 סיכום השיחה:</h4>
-            <div className="text-sm text-gray-700 whitespace-pre-wrap" dir="rtl">
-              {conversationSummary}
+          <div className="p-4 bg-white border border-green-200 rounded-lg space-y-3">
+            <div>
+              <h4 className="font-bold text-sm text-gray-900 mb-2">📋 סיכום השיחה:</h4>
+              <div className="text-sm text-gray-700 whitespace-pre-wrap" dir="rtl">
+                {conversationSummary}
+              </div>
             </div>
+
+            {/* Recent Messages */}
+            {recentMessages.length > 0 && (
+              <div className="pt-3 border-t border-gray-200">
+                <h4 className="font-bold text-sm text-gray-900 mb-2">💬 5 הודעות אחרונות:</h4>
+                <div className="space-y-2">
+                  {recentMessages.map((msg: any, i: number) => {
+                    const date = new Date(msg.timestamp * 1000);
+                    const isFromCustomer = msg.from === 'customer';
+                    const sender = isFromCustomer ? customerName : 'אני (בן)';
+                    
+                    return (
+                      <div
+                        key={i}
+                        className={`p-2 rounded text-xs ${
+                          isFromCustomer ? 'bg-gray-100' : 'bg-blue-50'
+                        }`}
+                        dir="rtl"
+                      >
+                        <div className="font-semibold text-gray-900 mb-1">
+                          {sender} • {date.toLocaleDateString('he-IL')} {date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                        <div className="text-gray-700">{msg.text}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
