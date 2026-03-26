@@ -118,6 +118,19 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
           if (analyzeData.ok) {
             console.log('Task status updated based on conversation:', analyzeData.updated);
+            
+            // Show update notification
+            alert(
+              `📊 הסטטוס עודכן אוטומטית!\n\n` +
+              `${analyzeData.updated.currentStatus}\n\n` +
+              `שלב הבא: ${analyzeData.updated.nextStep}\n\n` +
+              `הדף יתרענן כדי להציג את העדכון...`
+            );
+            
+            // Reload to show updated status
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
           }
         } else {
           setError(`Summary failed: ${summaryData.error || 'Unknown error'}`);
