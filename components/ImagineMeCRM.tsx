@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MessageCircle, Sparkles, Send, Loader2 } from "lucide-react";
 
 interface ImagineMeCRMProps {
@@ -18,6 +18,8 @@ interface ImagineMeCRMProps {
       followUpStatus?: string;
       whatsappHistoryFetched?: boolean;
       aiSuggestionGenerated?: boolean;
+      conversationSummary?: string;
+      lastSummaryUpdate?: string;
     };
   };
 }
@@ -41,6 +43,13 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
   const phone = taskData.customData?.phone;
   const customerName = taskData.title.split(" - ")[0];
+
+  // Load existing summary on mount
+  useEffect(() => {
+    if (taskData.customData?.conversationSummary) {
+      setConversationSummary(taskData.customData.conversationSummary);
+    }
+  }, [taskData]);
 
   const handleFetchHistory = async () => {
     if (!phone) {
@@ -74,6 +83,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           messages: data.messages,
           customerName,
           projectId,
+          taskId, // Send taskId so it can be saved to Firestore
         }),
       });
 
