@@ -53,12 +53,29 @@ Based on the conversation history, determine:
 4. **Priority** - One of: "NORMAL" | "HIGH" | "CRITICAL"
 
 **Guidelines:**
+- **CRITICAL**: Check the MOST RECENT message first! It overrides everything else.
+- If customer said "לא רלוונטי" / "לא מתאים" / "לא מעוניין" / "ירדנו מזה" → "not_interested" + NORMAL
 - If customer is actively discussing details/pricing → "negotiating" + HIGH priority
 - If customer asked question and waiting for Ben → "awaiting_response" + HIGH
 - If Ben sent message and waiting for customer → "awaiting_response" + NORMAL
 - If customer said they'll check/think about it → "interested" + NORMAL
-- If customer said no/not interested → "not_interested" + NORMAL
 - If last contact was >7 days ago → increase priority to HIGH
+
+**Most Recent Message Priority:**
+The NEWEST message (first in the list) is the current state. If it says "not relevant", that's the status NOW.
+
+**Examples of "not_interested" status:**
+- "לצערי הפעם זה לא רלוונטי"
+- "לא מתאים לנו"
+- "ירדנו מזה"
+- "לא מעוניינים"
+- "נעבור הפעם"
+
+For these, set:
+- currentStatus: "הלקוח ירד מהעסקה" or "לא מעוניין כרגע"
+- nextStep: "לסגור את הליד או להשאיר לעתיד"
+- followUpStatus: "not_interested"
+- priority: "NORMAL"
 
 Respond ONLY with valid JSON:
 {
