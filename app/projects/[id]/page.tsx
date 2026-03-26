@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Calendar, CheckCircle2, FolderKanban, Loader2, Pencil, Users, PlusCircle, MapPin, Trash2, MessageCircle, CheckSquare, Clock, X, UserPlus } from "lucide-react";
 import TaskCard from "@/components/TaskCard";
+import ImagineMeCRM from "@/components/ImagineMeCRM";
 
 interface Project {
   id: string;
@@ -1098,44 +1099,50 @@ export default function ProjectDetailsPage() {
           ) : (
             <div className="space-y-3">
               {projectTasks.map((t) => (
-                <TaskCard
-                  key={t.id}
-                  id={t.id}
-                  title={t.title}
-                  description={t.description}
-                  assignee={t.assignee || "לא משויך"}
-                  assignees={t.assignees}
-                  status={t.status}
-                  dueDate={t.dueDate || ""}
-                  priority={t.priority || "NORMAL"}
-                  currentStatus={t.currentStatus}
-                  nextStep={t.nextStep}
-                  eventId={t.eventId}
-                  eventTitle={t.eventTitle}
-                  scope={t.scope}
-                  previewImage={t.previewImage}
-                  onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
-                  onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
-                  onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
-                  onManageAssignees={t.scope === "event"
-                    ? () => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)
-                    : undefined}
-                  onDelete={() => {
-                    if (!db) return;
-                    if (confirm("למחוק משימה זו?")) {
-                      const ref = t.scope === "project"
-                        ? doc(db, "projects", projectId, "tasks", t.id)
-                        : doc(db, "events", t.eventId, "tasks", t.id);
-                      deleteDoc(ref).then(() => {
-                        setProjectTasks(prev => prev.filter(pt => pt.id !== t.id));
-                      }).catch(err => {
-                        console.error("Failed deleting task", err);
-                        alert("שגיאה במחיקת משימה");
-                      });
-                    }
-                  }}
-                  onChat={() => router.push(`/tasks/${t.id}?eventId=${t.eventId}`)}
-                />
+                <div key={t.id}>
+                  <TaskCard
+                    id={t.id}
+                    title={t.title}
+                    description={t.description}
+                    assignee={t.assignee || "לא משויך"}
+                    assignees={t.assignees}
+                    status={t.status}
+                    dueDate={t.dueDate || ""}
+                    priority={t.priority || "NORMAL"}
+                    currentStatus={t.currentStatus}
+                    nextStep={t.nextStep}
+                    eventId={t.eventId}
+                    eventTitle={t.eventTitle}
+                    scope={t.scope}
+                    previewImage={t.previewImage}
+                    onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
+                    onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
+                    onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
+                    onManageAssignees={t.scope === "event"
+                      ? () => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)
+                      : undefined}
+                    onDelete={() => {
+                      if (!db) return;
+                      if (confirm("למחוק משימה זו?")) {
+                        const ref = t.scope === "project"
+                          ? doc(db, "projects", projectId, "tasks", t.id)
+                          : doc(db, "events", t.eventId, "tasks", t.id);
+                        deleteDoc(ref).then(() => {
+                          setProjectTasks(prev => prev.filter(pt => pt.id !== t.id));
+                        }).catch(err => {
+                          console.error("Failed deleting task", err);
+                          alert("שגיאה במחיקת משימה");
+                        });
+                      }
+                    }}
+                    onChat={() => router.push(`/tasks/${t.id}?eventId=${t.eventId}`)}
+                  />
+                  <ImagineMeCRM 
+                    projectId={projectId} 
+                    taskId={t.id} 
+                    taskData={t as any}
+                  />
+                </div>
               ))}
             </div>
           )}

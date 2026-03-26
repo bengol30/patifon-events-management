@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { adminDb } from '@/lib/firebase-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,10 +28,13 @@ export async function POST(request: Request) {
     const formattedPhone = phone.replace(/[\s\+\-]/g, '');
     const chatId = `${formattedPhone}@c.us`;
 
-    // Get WhatsApp settings
-    const whatsappSettings = await fetch(
-      `${process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL || ''}/settings/whatsapp.json`
-    ).then((r) => r.json());
+    // Get WhatsApp settings from Firestore
+    if (!adminDb) {
+      return NextResponse.json({ ok: false, error: 'Database not initialized' }, { status: 500 });
+    }
+
+    const whatsappDoc = await adminDb.collection('settings').doc('whatsapp').get();
+    const whatsappSettings = whatsappDoc.data() as { instanceId?: string; token?: string } | undefined;
 
     if (!whatsappSettings?.instanceId || !whatsappSettings?.token) {
       return NextResponse.json(
