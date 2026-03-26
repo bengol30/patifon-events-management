@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { adminDb } from '@/lib/firebase-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: Request) {
   try {
-    const { messages, customerName, projectId } = await request.json();
+    const { messages, customerName, projectId, taskId } = await request.json();
 
     // Safety: only allow for Imagine Me project
     const IMAGINE_ME_PROJECT_ID = 'yed4WRBzsXrdGzousyq0';
@@ -70,6 +71,32 @@ Respond in Hebrew, be concise and factual.`;
 
     const openaiData = await openaiRes.json();
     const summary = openaiData.choices?.[0]?.message?.content || '';
+
+    // Save summary to Firestore (in task's customData)
+    if (taskId && adminDb) {
+      try {
+        const taskRef = adminDb.collection('projects').doc(projectId).collection('tasks').doc(taskId);
+        const taskDoc = await taskRef.get();
+        
+        if (taskDoc.exists) {
+          const existingData = taskDoc.data();
+          const updatedCustomData = {
+            ...(existingData?.customData || {}),
+            conversationSummary: summary,
+            lastSummaryUpdate: new Date().toISOString(),
+          };
+          
+          await taskRef.update({
+            customData: updatedCustomData,
+          });
+          
+          console.log('Summary saved successfully to task:', taskId);
+        }
+      } catch (err) {
+        console.error('Failed to save summary to Firestore:', err);
+        // Don't fail the request if save fails
+      }
+    }
 
     return NextResponse.json({
       ok: true,
