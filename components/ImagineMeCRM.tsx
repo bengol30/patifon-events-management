@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { MessageCircle, Sparkles, Send, Loader2 } from "lucide-react";
+import { MessageCircle, Sparkles, Send, Loader2, Clock3, CalendarClock } from "lucide-react";
+import { db } from "@/lib/firebase";
+import { doc, updateDoc } from "firebase/firestore";
 
 interface ImagineMeCRMProps {
   projectId: string;
   taskId: string;
   taskData: {
     title: string;
+    currentStatus?: string;
+    nextStep?: string;
     customData?: {
       phone?: string;
       lydiaId?: string;
@@ -21,14 +25,46 @@ interface ImagineMeCRMProps {
       conversationSummary?: string;
       lastSummaryUpdate?: string;
       recentMessages?: any[];
+      suggestedSendAt?: string;
+      suggestedSendReason?: string;
+      pendingFollowupMessage?: string;
+      crmActionType?: string;
     };
+    scheduledAt?: string | null;
+    scheduleStatus?: string | null;
   };
 }
+
+const toDatetimeLocalValue = (value?: string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Jerusalem",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${lookup.year}-${lookup.month}-${lookup.day}T${lookup.hour}:${lookup.minute}`;
+};
+
+const fromDatetimeLocalValue = (value: string) => {
+  if (!value) return null;
+  const isoLike = `${value}:00+03:00`;
+  const parsed = new Date(isoLike);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+};
 
 export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeCRMProps) {
   const IMAGINE_ME_PROJECT_ID = "yed4WRBzsXrdGzousyq0";
 
-  // Only show for Imagine Me project
   if (projectId !== IMAGINE_ME_PROJECT_ID) {
     console.log('ImagineMeCRM hidden - projectId mismatch:', { received: projectId, expected: IMAGINE_ME_PROJECT_ID });
     return null;
@@ -37,17 +73,22 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
   const [fetchingHistory, setFetchingHistory] = useState(false);
   const [generatingMessage, setGeneratingMessage] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [schedulingMessage, setSchedulingMessage] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
   const [whatsappHistory, setWhatsappHistory] = useState<any>(null);
   const [conversationSummary, setConversationSummary] = useState<string>("");
   const [recentMessages, setRecentMessages] = useState<any[]>([]);
   const [suggestedMessage, setSuggestedMessage] = useState<string>("");
   const [editedMessage, setEditedMessage] = useState<string>("");
+  const [scheduledAt, setScheduledAt] = useState<string>("");
+  const [scheduleReason, setScheduleReason] = useState<string>("");
+  const [scheduleConfidence, setScheduleConfidence] = useState<string>("");
+  const [localScheduledStatus, setLocalScheduledStatus] = useState<string>(taskData.scheduleStatus || "");
   const [error, setError] = useState<string | null>(null);
 
   const phone = taskData.customData?.phone;
   const customerName = taskData.title.split(" - ")[0];
 
-  // Load existing summary on mount
   useEffect(() => {
     console.log('ImagineMeCRM mounted for task:', taskId, 'projectId:', projectId);
     if (taskData.customData?.conversationSummary) {
@@ -58,7 +99,51 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
       setRecentMessages(taskData.customData.recentMessages);
       console.log('Loaded existing recent messages');
     }
+
+    const existingSchedule = taskData.customData?.suggestedSendAt || taskData.scheduledAt || null;
+    if (existingSchedule) {
+      setScheduledAt(toDatetimeLocalValue(existingSchedule));
+    }
+    if (taskData.customData?.suggestedSendReason) {
+      setScheduleReason(taskData.customData.suggestedSendReason);
+    }
+    if (taskData.customData?.pendingFollowupMessage) {
+      setSuggestedMessage(taskData.customData.pendingFollowupMessage);
+      setEditedMessage(taskData.customData.pendingFollowupMessage);
+    }
+    setLocalScheduledStatus(taskData.scheduleStatus || "");
   }, [taskData, taskId, projectId]);
+
+  const persistTaskState = async (updates: Record<string, any>) => {
+    if (!db) return;
+    const taskRef = doc(db, "projects", projectId, "tasks", taskId);
+    await updateDoc(taskRef, updates);
+  };
+
+  const persistSuggestedSchedule = async (nextIso: string, reason?: string, confidence?: string, pendingMessage?: string) => {
+    await persistTaskState({
+      scheduledAt: nextIso,
+      dueDate: nextIso,
+      scheduleStatus: "PENDING",
+      executionMode: "EXTERNAL_ACTION",
+      currentStatus: taskData.currentStatus || "הודעת follow-up מוכנה",
+      nextStep: `שליחה מתוזמנת ל-${new Date(nextIso).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`,
+      customData: {
+        ...(taskData.customData || {}),
+        conversationSummary,
+        recentMessages,
+        suggestedSendAt: nextIso,
+        suggestedSendReason: reason || "",
+        pendingFollowupMessage: pendingMessage ?? editedMessage,
+        crmActionType: "send_followup_message",
+      },
+    });
+
+    setScheduledAt(toDatetimeLocalValue(nextIso));
+    setScheduleReason(reason || "");
+    setScheduleConfidence(confidence || "");
+    setLocalScheduledStatus("PENDING");
+  };
 
   const handleFetchHistory = async () => {
     if (!phone) {
@@ -84,13 +169,10 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
       setWhatsappHistory(data);
 
-      // Only summarize if we have messages
       if (data.messages && data.messages.length > 0) {
-        // Get last 5 messages (Green API returns newest first, so take first 5)
-        const last5 = data.messages.slice(0, 5); // Already newest first
+        const last5 = data.messages.slice(0, 5);
         setRecentMessages(last5);
 
-        // Now summarize the conversation
         const summaryRes = await fetch("/api/imagine/summarize-history", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -98,7 +180,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
             messages: data.messages,
             customerName,
             projectId,
-            taskId, // Send taskId so it can be saved to Firestore
+            taskId,
           }),
         });
 
@@ -106,8 +188,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
         if (summaryData.ok) {
           setConversationSummary(summaryData.summary);
-          
-          // Now analyze and update task status based on conversation
+
           const analyzeRes = await fetch("/api/imagine/analyze-conversation", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -148,7 +229,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
     setError(null);
 
     try {
-      // Use conversation summary if available, otherwise use raw history
       const historyContext = conversationSummary || (whatsappHistory
         ? whatsappHistory.messages
             .slice(0, 10)
@@ -167,7 +247,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           eventDate: taskData.customData?.eventDate,
           eventLocation: taskData.customData?.eventLocation,
           whatsappHistory: historyContext,
-          recentMessages, // Send last 5 messages
+          recentMessages,
         }),
       });
 
@@ -179,6 +259,31 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
       setSuggestedMessage(data.message);
       setEditedMessage(data.message);
+
+      const suggestRes = await fetch("/api/imagine/suggest-send-time", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          customerName,
+          company: taskData.customData?.company,
+          eventType: taskData.customData?.eventType,
+          eventDate: taskData.customData?.eventDate,
+          conversationSummary,
+          recentMessages,
+          draftMessage: data.message,
+        }),
+      });
+
+      const suggestData = await suggestRes.json();
+      if (suggestData?.ok && suggestData?.suggestedSendAt) {
+        await persistSuggestedSchedule(
+          suggestData.suggestedSendAt,
+          suggestData.reason,
+          suggestData.confidence,
+          data.message,
+        );
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -201,7 +306,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
     setError(null);
 
     try {
-      // Use PATIFON's WhatsApp send endpoint
       const res = await fetch("/api/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,7 +321,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
         throw new Error(data.error || "Failed to send message");
       }
 
-      // Update task status after successful send
       const updateRes = await fetch("/api/imagine/update-after-send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -244,10 +347,65 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
       setEditedMessage("");
       setSuggestedMessage("");
+      setLocalScheduledStatus("");
     } catch (err: any) {
       setError(err.message);
     } finally {
       setSendingMessage(false);
+    }
+  };
+
+  const handleScheduleChange = async (value: string) => {
+    setScheduledAt(value);
+    const iso = fromDatetimeLocalValue(value);
+    if (!iso) return;
+
+    try {
+      setSavingSchedule(true);
+      setError(null);
+      await persistSuggestedSchedule(
+        iso,
+        scheduleReason || "תוזמן ידנית מתוך ה-CRM",
+        scheduleConfidence || "manual",
+      );
+    } catch (err: any) {
+      setError(err.message || "שמירת תזמון נכשלה");
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
+  const handleScheduleMessage = async () => {
+    if (!editedMessage.trim()) {
+      setError("אין הודעה לתזמון");
+      return;
+    }
+
+    if (!scheduledAt) {
+      setError("צריך לבחור זמן שליחה");
+      return;
+    }
+
+    const iso = fromDatetimeLocalValue(scheduledAt);
+    if (!iso) {
+      setError("זמן השליחה לא תקין");
+      return;
+    }
+
+    try {
+      setSchedulingMessage(true);
+      setError(null);
+      await persistSuggestedSchedule(
+        iso,
+        scheduleReason || "תזמון מתוך ה-CRM",
+        scheduleConfidence || "manual",
+        editedMessage,
+      );
+      alert("✅ ההודעה תוזמנה בהצלחה");
+    } catch (err: any) {
+      setError(err.message || "תזמון השליחה נכשל");
+    } finally {
+      setSchedulingMessage(false);
     }
   };
 
@@ -265,7 +423,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
       )}
 
       <div className="space-y-3">
-        {/* Fetch WhatsApp History */}
         <div className="flex items-center gap-3">
           <button
             onClick={handleFetchHistory}
@@ -286,7 +443,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           )}
         </div>
 
-        {/* Conversation Summary */}
         {conversationSummary && (
           <div className="p-4 bg-white border border-green-200 rounded-lg space-y-3">
             <div>
@@ -296,7 +452,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
               </div>
             </div>
 
-            {/* Recent Messages */}
             {recentMessages.length > 0 && (
               <div className="pt-3 border-t border-gray-200">
                 <h4 className="font-bold text-sm text-gray-900 mb-2">💬 5 הודעות אחרונות:</h4>
@@ -305,7 +460,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
                     const date = new Date(msg.timestamp * 1000);
                     const isFromCustomer = msg.from === 'customer';
                     const sender = isFromCustomer ? customerName : 'אני (בן)';
-                    
+
                     return (
                       <div
                         key={i}
@@ -327,7 +482,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           </div>
         )}
 
-        {/* Generate AI Message */}
         <div className="flex items-center gap-3">
           <button
             onClick={handleGenerateMessage}
@@ -343,7 +497,6 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
           </button>
         </div>
 
-        {/* Message Editor */}
         {suggestedMessage && (
           <div className="mt-4 space-y-3">
             <label className="block text-sm font-medium text-gray-700">
@@ -356,18 +509,65 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
               rows={8}
               dir="rtl"
             />
-            <button
-              onClick={handleSendMessage}
-              disabled={sendingMessage || !editedMessage.trim()}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {sendingMessage ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                <Clock3 className="w-4 h-4" />
+                תזמון שליחה
+                {savingSchedule && <Loader2 className="w-4 h-4 animate-spin" />}
+              </div>
+
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => handleScheduleChange(e.target.value)}
+                className="w-full rounded-lg border border-amber-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+
+              {scheduleReason && (
+                <div className="text-xs text-amber-900" dir="rtl">
+                  <span className="font-semibold">ברירת מחדל חכמה:</span> {scheduleReason}
+                  {scheduleConfidence ? ` (${scheduleConfidence})` : ""}
+                </div>
               )}
-              {sendingMessage ? "שולח..." : "שלח הודעה"}
-            </button>
+
+              {(scheduledAt || localScheduledStatus === "PENDING") && (
+                <div className="flex items-center gap-2 text-xs text-gray-700" dir="rtl">
+                  <CalendarClock className="w-4 h-4" />
+                  {localScheduledStatus === "PENDING"
+                    ? "יש כרגע שליחה מתוזמנת פעילה למשימה הזאת."
+                    : "ההודעה מוכנה לתזמון."}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={handleSendMessage}
+                disabled={sendingMessage || !editedMessage.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {sendingMessage ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                {sendingMessage ? "שולח..." : "שלח עכשיו"}
+              </button>
+
+              <button
+                onClick={handleScheduleMessage}
+                disabled={schedulingMessage || !editedMessage.trim() || !scheduledAt}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {schedulingMessage ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CalendarClock className="w-4 h-4" />
+                )}
+                {schedulingMessage ? "מתזמן..." : "תזמן שליחה"}
+              </button>
+            </div>
           </div>
         )}
       </div>

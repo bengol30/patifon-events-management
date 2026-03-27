@@ -18,6 +18,7 @@ export default function CronScheduler() {
                     fetch("/api/cron/run-scheduled-tasks"),
                     fetch("/api/cron/run-whatsapp-campaigns"),
                     fetch("/api/cron/dispatch-agent-triggers"),
+                    fetch("/api/imagine/send-scheduled"),
                 ]);
             } catch (e) {
                 console.error("Cron trigger failed", e);
