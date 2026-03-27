@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { listLydiaLeads } from '@/lib/lydia';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,29 +21,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Fetch all leads from Lydia
-    const supabaseUrl = process.env.SUPABASE_LYDIA_URL;
-    const supabaseKey = process.env.SUPABASE_LYDIA_KEY;
-
-    if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json({ ok: false, error: 'Lydia credentials not configured' }, { status: 500 });
-    }
-
-    const supabaseRes = await fetch(`${supabaseUrl}/rest/v1/leads?order=created_at.desc&limit=50`, {
-      headers: {
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-    });
-
-    if (!supabaseRes.ok) {
-      return NextResponse.json(
-        { ok: false, error: 'Failed to fetch leads from Lydia' },
-        { status: supabaseRes.status }
-      );
-    }
-
-    const allLeads = await supabaseRes.json();
+    const allLeads = await listLydiaLeads(200);
 
     // Get already imported lydia IDs from PATIFON
     if (!adminDb) {

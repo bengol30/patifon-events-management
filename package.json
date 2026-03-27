@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.100.1",
     "@vercel/blob": "^2.0.0",
     "date-fns": "^4.1.0",
     "firebase": "^12.6.0",

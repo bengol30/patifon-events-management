@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { getLydiaLeadById } from '@/lib/lydia';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,35 +25,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'lydiaId required' }, { status: 400 });
     }
 
-    // Fetch lead from Lydia (Supabase)
-    const supabaseUrl = process.env.SUPABASE_LYDIA_URL;
-    const supabaseKey = process.env.SUPABASE_LYDIA_KEY;
+    const lead = await getLydiaLeadById(lydiaId);
 
-    if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json({ ok: false, error: 'Lydia credentials not configured' }, { status: 500 });
-    }
-
-    const supabaseRes = await fetch(`${supabaseUrl}/rest/v1/leads?id=eq.${lydiaId}`, {
-      headers: {
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-    });
-
-    if (!supabaseRes.ok) {
-      return NextResponse.json(
-        { ok: false, error: 'Failed to fetch lead from Lydia' },
-        { status: supabaseRes.status }
-      );
-    }
-
-    const leads = await supabaseRes.json();
-
-    if (!leads || leads.length === 0) {
+    if (!lead) {
       return NextResponse.json({ ok: false, error: 'Lead not found in Lydia' }, { status: 404 });
     }
-
-    const lead = leads[0];
 
     // Check if already imported
     if (!adminDb) {
