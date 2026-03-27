@@ -4,6 +4,7 @@ import { adminDb } from "../firebase-admin.ts";
 import { formatLocalDateTime } from "./builder.ts";
 import { sendWhatsappFileToChat, sendWhatsappTextToChat } from "./sender.ts";
 import type { WhatsappCampaignPayload, WhatsappCampaignSendStep, WhatsappCampaignTaskLike } from "./types.ts";
+import { shouldAllowCampaignStepExecution } from "@/lib/marketing-campaign-controls";
 
 const clean = (value: unknown) => String(value || "").trim();
 
@@ -35,16 +36,19 @@ export const assertRunnableCampaignStep = (task: WhatsappCampaignTaskLike, stepN
 
 const buildProgressDescription = (task: WhatsappCampaignTaskLike, note: string) => {
   const base = clean(task.description);
-  return [base, note].filter(Boolean).join("\n").trim();
+  return [base, "", note].filter(Boolean).join("\n").trim();
 };
 
-export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber }: { eventId: string; taskId: string; stepNumber: number }) => {
+export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber, ignoreCampaignControls = false }: { eventId: string; taskId: string; stepNumber: number; ignoreCampaignControls?: boolean }) => {
   if (!adminDb) throw new Error("Firebase Admin is not configured");
   const taskRef = getTaskRef(eventId, taskId);
   if (!taskRef) throw new Error("Task ref unavailable");
   const snap = await taskRef.get();
   if (!snap.exists) throw new Error("Campaign task was deleted from PATIFON");
-  const task = { id: snap.id, ...(snap.data() as Record<string, unknown>) } as unknown as WhatsappCampaignTaskLike;
+  const task = { id: snap.id, ...(snap.data() as Record<string, unknown>) } as unknown as WhatsappCampaignTaskLike & Record<string, unknown>;
+  if (!ignoreCampaignControls && !shouldAllowCampaignStepExecution(task, `wa-${stepNumber}`)) {
+    throw new Error(`Campaign window wa-${stepNumber} is paused or blocked`);
+  }
   const step = assertRunnableCampaignStep(task, stepNumber);
   const payload = asPayload(task);
   const sentAt = new Date().toISOString();
@@ -76,6 +80,7 @@ export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber }: {
       currentStatus: `שליחה ${stepNumber} נכשלה`,
       nextStep: `נדרש טיפול בשליחה ${stepNumber}`,
       description: buildProgressDescription(task, `תקלה: שליחה ${stepNumber} נכשלה — ${message}`),
+      startedAt: task.startedAt || FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
     throw error;
@@ -90,7 +95,12 @@ export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber }: {
   const remaining = Math.max(0, totalCount - completedCount);
   const nextPending = sendPlan.find((item) => item.status === "PENDING");
   const nextStatus = remaining === 0 ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
-  const note = `בוצע: שליחה ${stepNumber}/${totalCount} נשלחה ב-${formatLocalDateTime(sentAt)} אל ${step.targetGroups.map((group) => group.name).join(", ")}`;
+  const note = [
+    `בוצע: שליחה ${stepNumber} — ${formatLocalDateTime(sentAt)}`,
+    `  → נשלח אל: ${step.targetGroups.map((group) => group.name).join(", ")}`,
+    `  → סטטוס נוכחי: ${completedCount} מתוך ${totalCount} הושלמו`,
+    `  → השלב הבא: ${nextPending ? (nextPending.scheduledLabel || `שליחה ${nextPending.step} — ${nextPending.scheduledAt}`) : "הקמפיין הושלם ✅"}`,
+  ].join("\n");
 
   await taskRef.update({
     payload: {
@@ -103,8 +113,10 @@ export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber }: {
     scheduledAt: nextPending ? (nextPending.scheduledAt || null) : null,
     scheduleStatus: remaining === 0 ? "DONE" : "PENDING",
     currentStatus: `${completedCount} מתוך ${totalCount} הושלמו`,
-    nextStep: nextPending ? (nextPending.scheduledLabel || `שליחה ${nextPending.step} מתוזמנת ל-${nextPending.scheduledAt}`) : "הקמפיין הושלם",
+    nextStep: nextPending ? (nextPending.scheduledLabel || `שליחה ${nextPending.step} מתוזמנת ל-${nextPending.scheduledAt}`) : "הושלם ✅",
     description: buildProgressDescription(task, note),
+    startedAt: (task as any).startedAt || FieldValue.serverTimestamp(),
+    ...(remaining === 0 ? { completedAt: FieldValue.serverTimestamp() } : {}),
     updatedAt: FieldValue.serverTimestamp(),
   });
 

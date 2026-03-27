@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { syncCampaignControlsWithTask } from '@/lib/marketing-campaign-controls';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,29 @@ export async function GET() {
           status: clean(task.status),
         };
 
+        const syncedControls = syncCampaignControlsWithTask(task, (task.campaignControls || {}) as Record<string, unknown>);
+        const rawControls = (task.campaignControls || {}) as Record<string, unknown>;
+        if (!task.campaignControls) {
+          issues.push({ ...base, severity: 'medium', type: 'missing_campaign_controls', message: 'Campaign task has no campaignControls yet' });
+        }
+        if ((clean(task.status) === 'IN_PROGRESS' || clean(task.status) === 'DONE') && !task.startedAt) {
+          issues.push({ ...base, severity: 'medium', type: 'missing_started_at', message: 'Campaign task progressed but startedAt is missing' });
+        }
+        if (clean(task.status) === 'DONE' && !task.completedAt) {
+          issues.push({ ...base, severity: 'medium', type: 'missing_completed_at', message: 'Campaign task is DONE but completedAt is missing' });
+        }
+        const rawWindows = Array.isArray(rawControls.windows) ? rawControls.windows as Record<string, unknown>[] : [];
+        if (rawWindows.length !== syncedControls.windows.length) {
+          issues.push({ ...base, severity: 'medium', type: 'campaign_controls_drift', message: 'campaignControls windows count does not match current plan' });
+        }
+        const hasTimeDrift = rawWindows.some((window, index) => clean(window.scheduledAt) !== clean(syncedControls.windows[index]?.scheduledAt));
+        if (hasTimeDrift) {
+          issues.push({ ...base, severity: 'medium', type: 'campaign_window_time_drift', message: 'campaignControls scheduled times drift from task plan' });
+        }
+        if (clean(rawControls.status) === 'PAUSED') {
+          checked.push({ ...base, note: 'campaign paused' });
+        }
+
         if (specialType === 'whatsapp_campaign_patifon') {
           const payload = (task.payload || {}) as Record<string, unknown>;
           const sendPlan = Array.isArray(payload.sendPlan) ? payload.sendPlan as Record<string, unknown>[] : [];
@@ -62,6 +86,10 @@ export async function GET() {
           if (clean(task.executionMode) !== 'AUTOMATED') {
             issues.push({ ...base, severity: 'medium', type: 'non_automated_execution_mode', message: 'WhatsApp campaign is not marked AUTOMATED' });
           }
+          const disabledSteps = syncedControls.windows.filter((window) => !window.enabled).length;
+          if (disabledSteps > 0) {
+            checked.push({ ...base, note: `${disabledSteps} whatsapp windows blocked` });
+          }
           checked.push(base);
           continue;
         }
@@ -72,6 +100,10 @@ export async function GET() {
 
         const payload = (task.payload || {}) as Record<string, unknown>;
         const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
+        const disabledStorySteps = syncedControls.windows.filter((window) => !window.enabled).length;
+        if (disabledStorySteps > 0) {
+          checked.push({ ...base, note: `${disabledStorySteps} instagram windows blocked` });
+        }
         if (!storyPlan.length) {
           issues.push({ ...base, severity: 'high', type: 'missing_story_plan', message: 'Instagram story campaign has no storyPlan' });
           continue;

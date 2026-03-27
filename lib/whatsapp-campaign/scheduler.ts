@@ -2,6 +2,7 @@ import { adminDb } from "../firebase-admin.ts";
 import { parseScheduledAt } from "../task-scheduler/normalize.ts";
 import { runWhatsappCampaignStep } from "./runner.ts";
 import type { WhatsappCampaignTaskLike } from "./types.ts";
+import { shouldAllowCampaignStepExecution } from "@/lib/marketing-campaign-controls";
 
 export const runDueWhatsappCampaignSteps = async () => {
   if (!adminDb) {
@@ -20,9 +21,11 @@ export const runDueWhatsappCampaignSteps = async () => {
       .get();
 
     for (const taskDoc of tasksSnap.docs) {
-      const task = { id: taskDoc.id, ...(taskDoc.data() as Record<string, unknown>) } as WhatsappCampaignTaskLike;
+      const task = { id: taskDoc.id, ...(taskDoc.data() as Record<string, unknown>) } as WhatsappCampaignTaskLike & Record<string, unknown>;
       const sendPlan = Array.isArray(task.payload?.sendPlan) ? task.payload?.sendPlan : [];
       const dueSteps = sendPlan.filter((step) => step?.status === "PENDING" && (() => {
+        const stepNumber = Number(step?.step || 0);
+        if (!stepNumber || !shouldAllowCampaignStepExecution(task, `wa-${stepNumber}`)) return false;
         const scheduledAt = parseScheduledAt(step?.scheduledAt);
         return !!scheduledAt && scheduledAt.getTime() <= now.getTime();
       })());

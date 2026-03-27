@@ -15,6 +15,14 @@ import {
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+const toLocalInputValue = (value?: string) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 interface TaskProps {
     id: string;
     title: string;
@@ -24,6 +32,11 @@ interface TaskProps {
     status: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     dueDate: string;
     priority: "NORMAL" | "HIGH" | "CRITICAL";
+    campaignControls?: {
+        status?: "ACTIVE" | "PAUSED" | "WINDOW_BLOCKED";
+        windows?: { stepKey: string; enabled: boolean; scheduledAt: string; label: string }[];
+    } | null;
+    onCampaignControlAction?: (action: "pause" | "resume" | "run_now" | "toggle_window" | "update_time", stepKey?: string, scheduledAt?: string) => void;
     isSelected?: boolean;
     onSelect?: (selected: boolean) => void;
     onDelete?: () => void;
@@ -80,12 +93,16 @@ export default function TaskCard({
     onOpen,
     scope,
     specialType,
+    campaignControls,
+    onCampaignControlAction,
     requiredCompletions,
     remainingCompletions,
     onUpdateCompletions,
 }: TaskProps) {
     const router = useRouter();
     const [isExpanded, setIsExpanded] = useState(false);
+    const [editingWindow, setEditingWindow] = useState<string | null>(null);
+    const [editingTime, setEditingTime] = useState<string>("");
 
     const getStatusMeta = () => {
         switch (status) {
@@ -143,6 +160,14 @@ export default function TaskCard({
     const completionRemaining = Math.max(remainingCompletions ?? requiredCompletions ?? 0, 0);
     const showCompletionCounter = completionRequired > 1;
     const summaryCount = [description, currentStatus, nextStep].filter(Boolean).length;
+    const isMarketingCampaign = specialType === "whatsapp_campaign_patifon" || specialType === "instagram_story_campaign_patifon";
+    const campaignStatusLabel = campaignControls?.status === "PAUSED"
+        ? "מושהה"
+        : campaignControls?.status === "WINDOW_BLOCKED"
+            ? "חלונות חלקיים"
+            : isMarketingCampaign
+                ? "פעיל"
+                : null;
 
     const handleStatusClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -255,6 +280,17 @@ export default function TaskCard({
                         </div>
 
                         <div className="mt-3 space-y-2">
+                            {campaignStatusLabel && (
+                                <div className="flex justify-end">
+                                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${campaignControls?.status === "PAUSED"
+                                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                                        : campaignControls?.status === "WINDOW_BLOCKED"
+                                            ? "border-violet-200 bg-violet-50 text-violet-700"
+                                            : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                                        קמפיין: {campaignStatusLabel}
+                                    </span>
+                                </div>
+                            )}
                             <div className="flex items-start justify-between gap-2">
                                 {isExpanded ? (
                                     <ChevronUp size={20} className="mt-1 shrink-0 text-indigo-500 transition" />
@@ -332,7 +368,7 @@ export default function TaskCard({
                             </div>
                         </div>
 
-                        {(currentStatus || nextStep || showCompletionCounter) && (
+                        {(currentStatus || nextStep || showCompletionCounter || isMarketingCampaign) && (
                             <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
                                 <div className="mb-3 flex items-center justify-between gap-2 text-right">
                                     <div className="flex items-center gap-2">
@@ -387,6 +423,117 @@ export default function TaskCard({
                                         </div>
                                     </div>
                                 )}
+
+                                {isMarketingCampaign && campaignControls?.windows?.length ? (
+                                    <div className="mt-3 rounded-2xl border border-fuchsia-200 bg-white p-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onCampaignControlAction?.(campaignControls?.status === "PAUSED" ? "resume" : "pause");
+                                                    }}
+                                                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${campaignControls?.status === "PAUSED" ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"}`}
+                                                >
+                                                    {campaignControls?.status === "PAUSED" ? "הפעל קמפיין" : "השהה קמפיין"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onCampaignControlAction?.("run_now");
+                                                    }}
+                                                    className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                                                >
+                                                    הפעל עכשיו
+                                                </button>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">חלונות פרסום</p>
+                                                <p className="mt-1 text-xs text-slate-600">הכול נשען על זמני המשימה שנקבעו מראש</p>
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 flex flex-col gap-2">
+                                            {campaignControls.windows.map((window) => (
+                                                <div key={window.stepKey} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onCampaignControlAction?.("toggle_window", window.stepKey);
+                                                            }}
+                                                            className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${window.enabled ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border border-slate-200 bg-white text-slate-500 hover:bg-slate-100"}`}
+                                                        >
+                                                            {window.enabled ? "מאופשר" : "חסום"}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onCampaignControlAction?.("run_now", window.stepKey);
+                                                            }}
+                                                            className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                                                        >
+                                                            הפעל עכשיו
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setEditingWindow(window.stepKey);
+                                                                setEditingTime(toLocalInputValue(window.scheduledAt));
+                                                            }}
+                                                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-100"
+                                                        >
+                                                            ערוך זמן
+                                                        </button>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-sm font-semibold text-slate-900">{window.label}</p>
+                                                        <p className="text-xs text-slate-500">{window.scheduledAt.replace("T", " ").slice(0, 16)}</p>
+                                                        {editingWindow === window.stepKey && (
+                                                            <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                                                                <input
+                                                                    type="datetime-local"
+                                                                    value={editingTime}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    onChange={(e) => setEditingTime(e.target.value)}
+                                                                    className="rounded-xl border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        if (!editingTime) return;
+                                                                        onCampaignControlAction?.("update_time", window.stepKey, new Date(editingTime).toISOString());
+                                                                        setEditingWindow(null);
+                                                                        setEditingTime("");
+                                                                    }}
+                                                                    className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                                                                >
+                                                                    שמור
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setEditingWindow(null);
+                                                                        setEditingTime("");
+                                                                    }}
+                                                                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100"
+                                                                >
+                                                                    ביטול
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
                         )}
 

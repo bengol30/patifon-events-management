@@ -2,16 +2,35 @@ import { FieldValue } from 'firebase-admin/firestore';
 import admin, { adminDb } from '@/lib/firebase-admin';
 import { resolveInstagramAccountToken } from './scheduler';
 import { convertImageUrlToStoryBuffer } from './convert';
+import { shouldAllowCampaignStepExecution } from '@/lib/marketing-campaign-controls';
 
 const clean = (value: unknown) => String(value || '').trim();
 
-export async function publishInstagramStoryCampaignStep(args: { eventId: string; taskId: string; stepIndex: number }) {
+const formatLocalDateTime = (value: string | Date) => new Intl.DateTimeFormat('he-IL', {
+  timeZone: 'Asia/Jerusalem',
+  weekday: 'short',
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+}).format(value instanceof Date ? value : new Date(value));
+
+const buildProgressDescription = (task: Record<string, unknown>, note: string) => {
+  const base = clean(task.description);
+  return [base, '', note].filter(Boolean).join('\n').trim();
+};
+
+export async function publishInstagramStoryCampaignStep(args: { eventId: string; taskId: string; stepIndex: number; ignoreCampaignControls?: boolean }) {
   if (!adminDb) throw new Error('Firebase Admin not initialized');
-  const { eventId, taskId, stepIndex } = args;
+  const { eventId, taskId, stepIndex, ignoreCampaignControls = false } = args;
   const taskRef = adminDb.collection('events').doc(eventId).collection('tasks').doc(taskId);
   const snap = await taskRef.get();
   if (!snap.exists) throw new Error('Task not found');
   const task = (snap.data() || {}) as Record<string, unknown>;
+  if (!ignoreCampaignControls && !shouldAllowCampaignStepExecution(task, `ig-${stepIndex}`)) {
+    throw new Error(`Campaign window ig-${stepIndex} is paused or blocked`);
+  }
   const payload = (task.payload || {}) as Record<string, unknown>;
   const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
   const step = storyPlan.find((item) => Number(item.stepIndex || 0) === stepIndex);
@@ -86,6 +105,14 @@ export async function publishInstagramStoryCampaignStep(args: { eventId: string;
   const total = nextPlan.length;
   const remaining = Math.max(0, total - completed);
   const nextPending = nextPlan.find((item) => !clean((item as Record<string, unknown>).status) || clean((item as Record<string, unknown>).status) === 'PENDING') as Record<string, unknown> | undefined;
+  const note = [
+    `בוצע: סטורי ${stepIndex} — ${clean(step.contentType) || 'story'} — ${formatLocalDateTime(new Date())}`,
+    `  → פורסם ל-bengolano`,
+    `  → Instagram Story ID: ${publishData.id}`,
+    ``,
+    `סטטוס נוכחי: ${completed} מתוך ${total} הושלמו`,
+    `השלב הבא: ${nextPending ? `סטורי ${nextPending.stepIndex} — ${clean(nextPending.scheduledTime)}` : 'כל הסטוריז הושלמו ✅'}`,
+  ].join('\n');
 
   await taskRef.update({
     payload: {
@@ -96,7 +123,10 @@ export async function publishInstagramStoryCampaignStep(args: { eventId: string;
     remainingCompletions: remaining,
     status: remaining === 0 ? 'DONE' : completed > 0 ? 'IN_PROGRESS' : 'TODO',
     currentStatus: `${completed} מתוך ${total} הושלמו`,
-    nextStep: nextPending ? `סטורי ${nextPending.stepIndex} — ${clean(nextPending.scheduledTime)}` : 'הקמפיין הושלם',
+    nextStep: nextPending ? `סטורי ${nextPending.stepIndex} — ${clean(nextPending.scheduledTime)}` : 'הושלם ✅',
+    description: buildProgressDescription(task, note),
+    startedAt: (task as any).startedAt || FieldValue.serverTimestamp(),
+    ...(remaining === 0 ? { completedAt: FieldValue.serverTimestamp() } : {}),
     updatedAt: FieldValue.serverTimestamp(),
   });
 

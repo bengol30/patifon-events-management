@@ -4,6 +4,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { buildInstagramStoryCampaignDraft, buildWhatsappCampaignDraft } from "@/lib/marketing-suggestions";
 import { syncInstagramStoryScheduledPosts } from "@/lib/instagram-story-campaign/scheduler";
+import { buildDefaultCampaignControls, syncCampaignControlsWithTask } from "@/lib/marketing-campaign-controls";
 import type { WhatsappCampaignGroup } from "@/lib/whatsapp-campaign/types";
 
 export async function POST(req: NextRequest) {
@@ -104,6 +105,7 @@ export async function POST(req: NextRequest) {
       updatedAt: FieldValue.serverTimestamp(),
       currentStatus: isWhatsappCampaign ? "0 מתוך " + String(draft.requiredCompletions || 0) + " הושלמו" : "משימה חדשה נוצרה ממערכת ההצעות",
       nextStep: isWhatsappCampaign ? String(((draft.payload as any)?.sendPlan?.[0]?.scheduledLabel) || "ממתין לשליחה הראשונה") : "סקור את הפרטים ובצע לפי התוכנית",
+      campaignControls: syncCampaignControlsWithTask({ specialType: draft.specialType, payload: draft.payload }, buildDefaultCampaignControls({ specialType: draft.specialType, payload: draft.payload })),
     };
 
     const taskRef = await eventRef.collection("tasks").add(taskPayload);

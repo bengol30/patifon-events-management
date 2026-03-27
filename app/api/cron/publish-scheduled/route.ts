@@ -4,6 +4,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { publishInstagramStoryCampaignStep } from "@/lib/instagram-story-campaign/publish-step";
 import { resolveInstagramAccountToken } from "@/lib/instagram-story-campaign/scheduler";
+import { shouldAllowCampaignStepExecution } from "@/lib/marketing-campaign-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,13 @@ export async function GET() {
           const taskId = clean(post.taskId);
           const stepIndex = Number(post.stepIndex || 0);
           if (!eventId || !taskId || !stepIndex) throw new Error("Missing eventId/taskId/stepIndex for story campaign post");
+          const taskSnap = await adminDb.collection("events").doc(eventId).collection("tasks").doc(taskId).get();
+          if (!taskSnap.exists) throw new Error("Story campaign task not found");
+          const taskData = taskSnap.data() as Record<string, unknown>;
+          if (!shouldAllowCampaignStepExecution(taskData, `ig-${stepIndex}`)) {
+            results.push({ id: postId, status: "skipped_blocked", stepIndex });
+            continue;
+          }
           const publishResult = await publishInstagramStoryCampaignStep({ eventId, taskId, stepIndex });
           await docSnap.ref.delete();
           results.push({ id: postId, status: "published_via_internal_convert", stepIndex, ...publishResult });

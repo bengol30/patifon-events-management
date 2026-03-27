@@ -111,6 +111,12 @@ interface Task {
     executionMode?: "NOTIFY_ONLY" | "AGENT_ACTION" | "EXTERNAL_ACTION";
     agentInstruction?: string;
     payload?: Record<string, any>;
+    campaignControls?: {
+        status?: "ACTIVE" | "PAUSED" | "WINDOW_BLOCKED";
+        windows?: { stepKey: string; enabled: boolean; scheduledAt: string; label: string }[];
+        lastManualRunAt?: string | null;
+        lastManualRunStepKey?: string | null;
+    };
     executionResult?: string;
     lastTriggeredAt?: any;
 }
@@ -2154,6 +2160,21 @@ export default function EventDetailsPage() {
             });
         } catch (err) {
             console.error("Error updating status:", err);
+        }
+    };
+
+    const handleCampaignControlAction = async (task: Task, action: "pause" | "resume" | "run_now" | "toggle_window" | "update_time", stepKey?: string, scheduledAt?: string) => {
+        try {
+            const res = await fetch("/api/marketing/campaign-controls", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ eventId: id, taskId: task.id, action, stepKey, scheduledAt }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data?.error || "שגיאה בעדכון שליטת הקמפיין");
+        } catch (err) {
+            console.error("Error updating campaign controls:", err);
+            alert(err instanceof Error ? err.message : "שגיאה בעדכון שליטת הקמפיין");
         }
     };
 
@@ -4825,6 +4846,8 @@ export default function EventDetailsPage() {
                                                         eventTitle={event?.title}
                                                         scope={task.scope}
                                                         specialType={(task as any).specialType}
+                                                        campaignControls={(task as any).campaignControls}
+                                                        onCampaignControlAction={(action, stepKey, scheduledAt) => handleCampaignControlAction(task, action, stepKey, scheduledAt)}
                                                         requiredCompletions={(task as any).requiredCompletions}
                                                         remainingCompletions={(task as any).remainingCompletions}
                                                         onUpdateCompletions={() => handleUpdateCompletions(task)}
@@ -4883,6 +4906,8 @@ export default function EventDetailsPage() {
                                                         eventTitle={event?.title}
                                                         scope={task.scope}
                                                         specialType={(task as any).specialType}
+                                                        campaignControls={(task as any).campaignControls}
+                                                        onCampaignControlAction={(action, stepKey, scheduledAt) => handleCampaignControlAction(task, action, stepKey, scheduledAt)}
                                                         requiredCompletions={(task as any).requiredCompletions}
                                                         remainingCompletions={(task as any).remainingCompletions}
                                                         onUpdateCompletions={() => handleUpdateCompletions(task)}
