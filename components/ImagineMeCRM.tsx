@@ -123,19 +123,12 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
           if (analyzeData.ok) {
             console.log('Task status updated based on conversation:', analyzeData.updated);
-            
-            // Show update notification
+
             alert(
               `📊 הסטטוס עודכן אוטומטית!\n\n` +
               `${analyzeData.updated.currentStatus}\n\n` +
-              `שלב הבא: ${analyzeData.updated.nextStep}\n\n` +
-              `הדף יתרענן כדי להציג את העדכון...`
+              `שלב הבא: ${analyzeData.updated.nextStep}`
             );
-            
-            // Hard reload to bypass cache
-            setTimeout(() => {
-              window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
-            }, 1000);
           }
         } else {
           setError(`Summary failed: ${summaryData.error || 'Unknown error'}`);
@@ -243,14 +236,8 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
         alert(
           `✅ ההודעה נשלחה!\n\n` +
           `סטטוס: ${updateData.updated.currentStatus}\n` +
-          `שלב הבא: ${updateData.updated.nextStep}\n\n` +
-          `הדף יתרענן כדי להציג את העדכון...`
+          `שלב הבא: ${updateData.updated.nextStep}`
         );
-        
-        // Hard reload to bypass cache
-        setTimeout(() => {
-          window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
-        }, 1000);
       } else {
         alert("ההודעה נשלחה, אך העדכון נכשל");
       }
