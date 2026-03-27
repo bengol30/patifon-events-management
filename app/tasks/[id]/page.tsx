@@ -1742,7 +1742,7 @@ export default function TaskDetailPage() {
 
                                 {/* Imagine Me CRM Component - Only shows for Imagine Me project */}
                                 <ImagineMeCRM 
-                                    projectId={task.eventId} 
+                                    projectId={(task as any).projectId || ""} 
                                     taskId={task.id} 
                                     taskData={task as any}
                                 />

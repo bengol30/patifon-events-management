@@ -98,6 +98,8 @@ Respond ONLY with valid JSON:
       followUpStatus: analysis.followUpStatus || 'contacted',
       lastContactDate: new Date().toISOString(),
       lastMessageSent: messageSent,
+      recentMessages: Array.isArray(recentMessages) ? recentMessages : [],
+      conversationSummary: conversationSummary || existingData?.customData?.conversationSummary || '',
     };
 
     await taskRef.update({

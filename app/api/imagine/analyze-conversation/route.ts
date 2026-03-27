@@ -124,6 +124,7 @@ Respond ONLY with valid JSON:
       followUpStatus: analysis.followUpStatus || 'contacted',
       whatsappHistoryFetched: true,
       lastHistoryFetch: new Date().toISOString(),
+      recentMessages: Array.isArray(recentMessages) ? recentMessages : [],
     };
 
     await taskRef.update({

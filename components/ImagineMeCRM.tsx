@@ -20,6 +20,7 @@ interface ImagineMeCRMProps {
       aiSuggestionGenerated?: boolean;
       conversationSummary?: string;
       lastSummaryUpdate?: string;
+      recentMessages?: any[];
     };
   };
 }
@@ -52,6 +53,10 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
     if (taskData.customData?.conversationSummary) {
       setConversationSummary(taskData.customData.conversationSummary);
       console.log('Loaded existing summary');
+    }
+    if (taskData.customData?.recentMessages && Array.isArray(taskData.customData.recentMessages)) {
+      setRecentMessages(taskData.customData.recentMessages);
+      console.log('Loaded existing recent messages');
     }
   }, [taskData, taskId, projectId]);
 
