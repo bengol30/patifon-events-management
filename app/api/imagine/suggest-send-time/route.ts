@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+type RecentMessage = {
+  from?: string;
+  text?: string;
+  timestamp?: number;
+};
+
 const clampToBusinessHours = (date: Date) => {
   const next = new Date(date);
   const hour = next.getHours();
@@ -33,37 +39,71 @@ const roundToQuarterHour = (date: Date) => {
   return next;
 };
 
-const buildFallbackSuggestion = (recentMessages?: any[]) => {
-  const mostRecent = Array.isArray(recentMessages) && recentMessages.length > 0 ? recentMessages[0] : null;
+const extractCadenceHours = (recentMessages: RecentMessage[]) => {
+  const sorted = [...recentMessages]
+    .filter((msg) => Number.isFinite(Number(msg?.timestamp)))
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+
+  const diffs: number[] = [];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = Number(sorted[i - 1].timestamp || 0) * 1000;
+    const curr = Number(sorted[i].timestamp || 0) * 1000;
+    const diffHours = (curr - prev) / (1000 * 60 * 60);
+    if (diffHours > 2) {
+      diffs.push(diffHours);
+    }
+  }
+
+  if (!diffs.length) return null;
+  const avg = diffs.reduce((sum, value) => sum + value, 0) / diffs.length;
+  return Math.max(24, avg);
+};
+
+const buildFallbackSuggestion = (recentMessages?: RecentMessage[], conversationSummary?: string) => {
+  const messages = Array.isArray(recentMessages) ? recentMessages : [];
+  const mostRecent = messages.length > 0 ? messages[0] : null;
   const now = new Date();
-  let suggestion = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  let reason = 'ברירת מחדל: חלון עדין של כשעתיים קדימה בשעות סבירות.';
+  const summaryText = String(conversationSummary || '').toLowerCase();
+  const cadenceHours = extractCadenceHours(messages);
+
+  let suggestion = new Date(now.getTime() + 72 * 60 * 60 * 1000);
+  let reason = 'ברירת מחדל: להשאיר מרווח טבעי של כמה ימים, אלא אם השיחה מרמזת על מועד קרוב יותר.';
+
+  if (/מחר|tomorrow/.test(summaryText)) {
+    suggestion = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    reason = 'בסיכום השיחה יש רמז למחר, אז ההמלצה נשארת קרובה יחסית.';
+  } else if (/יומיים|עוד יומיים|48 שעות|two days/.test(summaryText)) {
+    suggestion = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    reason = 'בסיכום השיחה יש רמז לעוד יומיים, אז ההמלצה מותאמת לזה.';
+  } else if (/שבוע הבא|next week|אחרי החג|after the holiday/.test(summaryText)) {
+    suggestion = new Date(now.getTime() + 6 * 24 * 60 * 60 * 1000);
+    reason = 'בסיכום השיחה יש רמז למועד רחב יותר, לכן ההמלצה נדחית בכמה ימים.';
+  } else if (cadenceHours) {
+    if (cadenceHours >= 96) {
+      suggestion = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+      reason = 'קצב ההתכתבות בפועל מרווח, אז עדיף follow-up בעוד כמה ימים ולא מהר מדי.';
+    } else if (cadenceHours >= 48) {
+      suggestion = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      reason = 'קצב ההתכתבות הוא בערך כל יומיים-שלושה, אז זו ברירת מחדל טבעית יותר.';
+    } else {
+      suggestion = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+      reason = 'גם בשיחה יחסית צפופה עדיף לא להציק, אז ברירת המחדל היא סביב יומיים קדימה.';
+    }
+  }
 
   if (mostRecent?.timestamp) {
     const lastDate = new Date(Number(mostRecent.timestamp) * 1000);
     const hoursSinceLast = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60);
-    const lastHour = lastDate.getHours();
     const lastFrom = String(mostRecent.from || '');
 
-    if (lastFrom === 'customer') {
-      if (lastHour >= 20 || lastHour < 8) {
-        suggestion = new Date(now);
-        suggestion.setDate(suggestion.getDate() + 1);
-        suggestion.setHours(10, 0, 0, 0);
-        reason = 'הלקוח כתב בשעות ערב/לילה — עדיף לענות מחר בבוקר.';
-      } else {
-        suggestion = new Date(now.getTime() + 60 * 60 * 1000);
-        reason = 'הלקוח כתב לאחרונה — עדיף לחזור יחסית מהר אבל לא מיידית.';
-      }
-    } else if (hoursSinceLast < 24) {
-      suggestion = new Date(lastDate.getTime() + 24 * 60 * 60 * 1000);
-      reason = 'בן היה האחרון שכתב לאחרונה — עדיף לתת לשיחה לנשום בערך יום.';
-    } else if (hoursSinceLast < 72) {
-      suggestion = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      reason = 'עבר מעט זמן מההודעה האחרונה — עדיף follow-up עדין מחר.';
-    } else {
-      suggestion = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-      reason = 'עבר זמן מהשיחה — אפשר לקבוע חלון קרוב וסביר.';
+    if (lastFrom === 'customer' && hoursSinceLast < 12 && !/מחר|יומיים|שבוע הבא|אחרי החג/.test(summaryText)) {
+      suggestion = new Date(now.getTime() + 36 * 60 * 60 * 1000);
+      reason = 'הלקוח כתב לאחרונה, אבל בלי רמז ללחץ מיידי — עדיף מרווח עדין של בערך יום וחצי.';
+    }
+
+    if (lastFrom !== 'customer' && hoursSinceLast < 48 && !/מחר|יומיים/.test(summaryText)) {
+      suggestion = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000);
+      reason = 'בן היה האחרון שכתב לא מזמן, אז עדיף לתת עוד אוויר לפני follow-up נוסף.';
     }
   }
 
@@ -99,23 +139,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Customer name required' }, { status: 400 });
     }
 
-    const fallback = buildFallbackSuggestion(recentMessages);
+    const messages = Array.isArray(recentMessages) ? recentMessages : [];
+    const fallback = buildFallbackSuggestion(messages, conversationSummary);
 
     const systemPrompt = `You are an AI sales assistant for Imagine Me.
 
 Your job: suggest the BEST default WhatsApp send time for Ben's follow-up message.
+
+Critical behavior:
+- Default to a SPACED-OUT follow-up, not a close one.
+- Do NOT suggest tomorrow just because it's possible.
+- Use the real cadence of the conversation and what was actually said.
+- If the conversation clearly implies tomorrow / in two days / next week / after the holiday, follow that.
+- Otherwise prefer a calmer delay: usually 2-5 days, sometimes more.
+- If Ben was the last sender, wait even longer.
+- If the customer explicitly asked for a quick reply, you may shorten the window.
 
 Rules:
 - Output JSON only.
 - suggestedSendAt must be an ISO datetime string.
 - Timezone is Asia/Jerusalem.
 - Prefer reasonable send windows: 09:00-20:00 local time.
-- Avoid sending immediately unless clearly urgent.
-- Use the conversation summary and most recent messages first.
-- If the customer wrote something like "tomorrow", "in the evening", "next week", "after the holiday", align to that.
-- If Ben was the last sender very recently, wait longer.
-- If customer asked something and is waiting, suggest a sooner time.
-- If confidence is low, still give the best practical default.
+- Base your answer first on the actual wording of the conversation, then on cadence.
+- Avoid pushy timing.
 
 Return shape:
 {
@@ -131,14 +177,13 @@ Return shape:
       eventType: eventType || null,
       eventDate: eventDate || null,
       draftMessage: draftMessage || null,
-      recentMessages: Array.isArray(recentMessages)
-        ? recentMessages.slice(0, 5).map((m: any) => ({
-            from: m.from,
-            timestamp: m.timestamp,
-            localTime: m.timestamp ? new Date(Number(m.timestamp) * 1000).toLocaleString('sv-SE', { timeZone: 'Asia/Jerusalem' }) : null,
-            text: String(m.text || '').slice(0, 500),
-          }))
-        : [],
+      cadenceHintHours: extractCadenceHours(messages),
+      recentMessages: messages.slice(0, 5).map((m: any) => ({
+        from: m.from,
+        timestamp: m.timestamp,
+        localTime: m.timestamp ? new Date(Number(m.timestamp) * 1000).toLocaleString('sv-SE', { timeZone: 'Asia/Jerusalem' }) : null,
+        text: String(m.text || '').slice(0, 500),
+      })),
       conversationSummary: conversationSummary || null,
       fallback,
     };
@@ -156,7 +201,7 @@ Return shape:
           { role: 'user', content: JSON.stringify(userPrompt) },
         ],
         temperature: 0.2,
-        max_tokens: 220,
+        max_tokens: 260,
         response_format: { type: 'json_object' },
       }),
     });
