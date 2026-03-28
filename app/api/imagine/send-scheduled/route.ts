@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { assertValidGreenApiBaseUrl, DEFAULT_GREEN_API_BASE_URL } from '@/lib/whatsapp-base-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ const readWhatsappConfig = async () => {
     return {
       idInstance: envId,
       apiTokenInstance: envToken,
-      baseUrl: (envBase || 'https://api.green-api.com').replace(/\/$/, ''),
+      baseUrl: assertValidGreenApiBaseUrl(envBase || DEFAULT_GREEN_API_BASE_URL),
     };
   }
 
@@ -33,7 +34,7 @@ const readWhatsappConfig = async () => {
   return {
     idInstance: String(data.idInstance),
     apiTokenInstance: String(data.apiTokenInstance),
-    baseUrl: String(data.baseUrl || 'https://api.green-api.com').replace(/\/$/, ''),
+    baseUrl: assertValidGreenApiBaseUrl(String(data.baseUrl || DEFAULT_GREEN_API_BASE_URL)),
   };
 };
 

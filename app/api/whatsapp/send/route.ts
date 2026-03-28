@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { assertValidGreenApiBaseUrl, DEFAULT_GREEN_API_BASE_URL } from "@/lib/whatsapp-base-url";
 
 const normalizePhoneForWhatsApp = (phone: string) => {
   const digits = (phone || "").replace(/\D/g, "");
@@ -26,7 +27,7 @@ const readConfig = async () => {
     return {
       idInstance: envId,
       apiTokenInstance: envToken,
-      baseUrl: (envBase || "https://api.green-api.com").replace(/\/$/, ""),
+      baseUrl: assertValidGreenApiBaseUrl(envBase || DEFAULT_GREEN_API_BASE_URL),
     };
   }
   try {
@@ -38,7 +39,7 @@ const readConfig = async () => {
     return {
       idInstance: data.idInstance as string,
       apiTokenInstance: data.apiTokenInstance as string,
-      baseUrl: (data.baseUrl as string) || "https://api.green-api.com",
+      baseUrl: assertValidGreenApiBaseUrl((data.baseUrl as string) || DEFAULT_GREEN_API_BASE_URL),
     };
   } catch (err) {
     console.warn("Failed reading whatsapp config", err);
@@ -152,48 +153,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "חסרות הגדרות וואטסאפ (idInstance/apiTokenInstance בסביבה או במסד)" }, { status: 500, headers: corsHeaders });
     }
 
-    const defaultBase = "https://api.green-api.com";
-    const baseCandidates = Array.from(new Set([
-      (cfg.baseUrl || "").includes("green-api.com") ? (cfg.baseUrl || "").replace(/\/$/, "") : "",
-      defaultBase,
-    ].filter(Boolean)));
+    const endpoint = `${cfg.baseUrl}/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
+    console.log(`[API] Sending text to: ${endpoint}`);
 
-    let lastError: { status: number; message: string } | null = null;
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: targetChatId, message }),
+      });
 
-    for (const baseApi of baseCandidates) {
-      const endpoint = `${baseApi}/waInstance${cfg.idInstance}/SendMessage/${cfg.apiTokenInstance}`;
-      console.log(`[API] Sending text to: ${endpoint}`);
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatId: targetChatId, message }),
-        });
-
-        if (res.ok) {
-          return NextResponse.json({ ok: true }, { status: 200, headers: corsHeaders });
-        }
-
-        const text = await res.text();
-        console.error(`[API] Green API error (text): ${text}`);
-        const safe = text?.trim() || `שליחה נכשלה (${res.status})`;
-        lastError = { status: res.status || 500, message: safe };
-
-        if (baseApi === defaultBase) break;
-      } catch (err) {
-        console.error("[API] Fetch error:", err);
-        lastError = {
-          status: 500,
-          message: err instanceof Error ? err.message : "שגיאה בשליחה",
-        };
-        if (baseApi === defaultBase) break;
+      if (res.ok) {
+        return NextResponse.json({ ok: true }, { status: 200, headers: corsHeaders });
       }
-    }
 
-    return NextResponse.json(
-      { error: lastError?.message || "שגיאה בשליחה" },
-      { status: lastError?.status || 500, headers: corsHeaders },
-    );
+      const text = await res.text();
+      console.error(`[API] Green API error (text): ${text}`);
+      const safe = text?.trim() || `שליחה נכשלה (${res.status})`;
+      return NextResponse.json(
+        { error: safe },
+        { status: res.status || 500, headers: corsHeaders },
+      );
+    } catch (err) {
+      console.error("[API] Fetch error:", err);
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "שגיאה בשליחה" },
+        { status: 500, headers: corsHeaders },
+      );
+    }
   } catch (err) {
     console.error("[API] Fatal error:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "שגיאה בשליחה" }, { status: 500, headers: corsHeaders });
