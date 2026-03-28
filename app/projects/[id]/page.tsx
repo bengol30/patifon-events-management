@@ -11,7 +11,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Calendar, CheckCircle2, FolderKanban, Loader2, Pencil, Users, PlusCircle, MapPin, Trash2, MessageCircle, CheckSquare, Clock, X, UserPlus } from "lucide-react";
 import TaskCard from "@/components/TaskCard";
 import ImagineMeCRM from "@/components/ImagineMeCRM";
-import CrmWhatsappSummarizer from "@/components/CrmWhatsappSummarizer";
+import ProjectWhatsappSummarizer from "@/components/ProjectWhatsappSummarizer";
 
 
 interface Project {
@@ -28,6 +28,8 @@ interface Project {
   createdAt?: any;
   updatedAt?: any;
   teamMembers?: { userId: string; fullName?: string; email?: string }[];
+  whatsappGroupId?: string;
+  whatsappGroupName?: string;
   whatsappSummary?: {
     lastSummarizedAt?: any;
     taskIdeas?: string[];
@@ -174,6 +176,8 @@ export default function ProjectDetailsPage() {
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
           teamMembers: Array.isArray(data.teamMembers) ? data.teamMembers : [],
+          whatsappGroupId: data.whatsappGroupId || undefined,
+          whatsappGroupName: data.whatsappGroupName || undefined,
           whatsappSummary: data.whatsappSummary || undefined,
         };
         setProject(proj);
@@ -1173,13 +1177,17 @@ export default function ProjectDetailsPage() {
           </div>
         </div>
         
-        {/* Show WhatsApp Summarizer ONLY for Imagine Me CRM project, otherwise show Team Members */}
-        {project.name?.toLowerCase().includes("imagine") && project.name?.toLowerCase().includes("crm") ? (
-          <CrmWhatsappSummarizer 
-            projectId={project.id} 
-            whatsappSummary={project.whatsappSummary}
-          />
-        ) : (
+        {/* WhatsApp Summarizer for all projects */}
+        <ProjectWhatsappSummarizer 
+          projectId={project.id}
+          projectName={project.name}
+          whatsappGroupId={project.whatsappGroupId}
+          whatsappGroupName={project.whatsappGroupName}
+          whatsappSummary={project.whatsappSummary}
+        />
+
+        {/* Team Members */}
+        {!(project.name?.toLowerCase().includes("imagine") && project.name?.toLowerCase().includes("crm")) && (
           <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
             <div className="flex items-center gap-2 mb-4">
               <Users style={{ color: "var(--patifon-orange)" }} size={20} />
