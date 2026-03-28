@@ -11,6 +11,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Calendar, CheckCircle2, FolderKanban, Loader2, Pencil, Users, PlusCircle, MapPin, Trash2, MessageCircle, CheckSquare, Clock, X, UserPlus } from "lucide-react";
 import TaskCard from "@/components/TaskCard";
 import ImagineMeCRM from "@/components/ImagineMeCRM";
+import CrmWhatsappSummarizer from "@/components/CrmWhatsappSummarizer";
 
 
 interface Project {
@@ -27,6 +28,12 @@ interface Project {
   createdAt?: any;
   updatedAt?: any;
   teamMembers?: { userId: string; fullName?: string; email?: string }[];
+  whatsappSummary?: {
+    lastSummarizedAt?: any;
+    taskIdeas?: string[];
+    importantPoints?: string[];
+    importantDates?: string[];
+  };
 }
 
 interface Volunteer {
@@ -1164,85 +1171,94 @@ export default function ProjectDetailsPage() {
             )}
           </div>
         </div>
-        <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
-          <div className="flex items-center gap-2 mb-4">
-            <Users style={{ color: "var(--patifon-orange)" }} size={20} />
-            <h2 className="text-base sm:text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>צוות הפרויקט</h2>
-            <button
-              type="button"
-              onClick={() => setShowTeamPicker((prev) => !prev)}
-              className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 ml-auto"
-              title="הוסף משתמשים לפרויקט"
-            >
-              <UserPlus size={16} />
-            </button>
-          </div>
-          {project.teamMembers && project.teamMembers.length > 0 ? (
-            <div className="space-y-2">
-              {project.teamMembers.map((m) => (
-                <div key={m.userId} className="flex items-center justify-between border border-gray-100 rounded-lg px-3 py-2 text-sm">
-                  <div className="flex flex-col">
-                    <span className="font-semibold text-gray-900">{m.fullName || "ללא שם"}</span>
-                    <span className="text-xs text-gray-600">{m.email}</span>
+        
+        {/* Show WhatsApp Summarizer ONLY for Imagine Me CRM project, otherwise show Team Members */}
+        {project.name?.toLowerCase().includes("imagine") && project.name?.toLowerCase().includes("crm") ? (
+          <CrmWhatsappSummarizer 
+            projectId={project.id} 
+            whatsappSummary={project.whatsappSummary}
+          />
+        ) : (
+          <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>
+            <div className="flex items-center gap-2 mb-4">
+              <Users style={{ color: "var(--patifon-orange)" }} size={20} />
+              <h2 className="text-base sm:text-lg font-semibold" style={{ color: "var(--patifon-burgundy)" }}>צוות הפרויקט</h2>
+              <button
+                type="button"
+                onClick={() => setShowTeamPicker((prev) => !prev)}
+                className="p-2 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 ml-auto"
+                title="הוסף משתמשים לפרויקט"
+              >
+                <UserPlus size={16} />
+              </button>
+            </div>
+            {project.teamMembers && project.teamMembers.length > 0 ? (
+              <div className="space-y-2">
+                {project.teamMembers.map((m) => (
+                  <div key={m.userId} className="flex items-center justify-between border border-gray-100 rounded-lg px-3 py-2 text-sm">
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-gray-900">{m.fullName || "ללא שם"}</span>
+                      <span className="text-xs text-gray-600">{m.email}</span>
+                    </div>
                   </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-600">לא נבחר צוות לפרויקט.</p>
+            )}
+            {showTeamPicker && (
+              <div className="mt-3 border border-indigo-100 rounded-lg p-3 bg-indigo-50 space-y-2">
+                <input
+                  type="text"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="חפש לפי שם או אימייל"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                />
+                <div className="max-h-48 overflow-auto space-y-1">
+                  {(filteredUsers || []).map((u) => {
+                    const checked = (project.teamMembers || []).some((m) => m.userId === u.id);
+                    return (
+                      <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-white">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 text-indigo-600"
+                          checked={checked}
+                          onChange={async () => {
+                            if (!db || !project) return;
+                            const exists = checked;
+                            const nextMembers = exists
+                              ? (project.teamMembers || []).filter((m) => m.userId !== u.id)
+                              : [...(project.teamMembers || []), { userId: u.id, fullName: u.fullName, email: u.email }];
+                            try {
+                              await updateDoc(doc(db, "projects", project.id), { teamMembers: nextMembers });
+                              setProject({ ...project, teamMembers: nextMembers });
+                            } catch (err) {
+                              console.error("Failed updating team", err);
+                              alert("שגיאה בעדכון צוות");
+                            }
+                          }}
+                        />
+                        <span className="text-gray-800">{u.fullName || "ללא שם"}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </label>
+                    );
+                  })}
+                  {filteredUsers.length === 0 && <p className="text-xs text-gray-600">לא נמצאו משתמשים תואמים.</p>}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-gray-600">לא נבחר צוות לפרויקט.</p>
-          )}
-          {showTeamPicker && (
-            <div className="mt-3 border border-indigo-100 rounded-lg p-3 bg-indigo-50 space-y-2">
-              <input
-                type="text"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="חפש לפי שם או אימייל"
-                value={userSearch}
-                onChange={(e) => setUserSearch(e.target.value)}
-              />
-              <div className="max-h-48 overflow-auto space-y-1">
-                {(filteredUsers || []).map((u) => {
-                  const checked = (project.teamMembers || []).some((m) => m.userId === u.id);
-                  return (
-                    <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-white">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 text-indigo-600"
-                        checked={checked}
-                        onChange={async () => {
-                          if (!db || !project) return;
-                          const exists = checked;
-                          const nextMembers = exists
-                            ? (project.teamMembers || []).filter((m) => m.userId !== u.id)
-                            : [...(project.teamMembers || []), { userId: u.id, fullName: u.fullName, email: u.email }];
-                          try {
-                            await updateDoc(doc(db, "projects", project.id), { teamMembers: nextMembers });
-                            setProject({ ...project, teamMembers: nextMembers });
-                          } catch (err) {
-                            console.error("Failed updating team", err);
-                            alert("שגיאה בעדכון צוות");
-                          }
-                        }}
-                      />
-                      <span className="text-gray-800">{u.fullName || "ללא שם"}</span>
-                      <span className="text-xs text-gray-500">{u.email}</span>
-                    </label>
-                  );
-                })}
-                {filteredUsers.length === 0 && <p className="text-xs text-gray-600">לא נמצאו משתמשים תואמים.</p>}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowTeamPicker(false)}
+                    className="text-xs text-indigo-700 underline"
+                  >
+                    סגור
+                  </button>
+                </div>
               </div>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowTeamPicker(false)}
-                  className="text-xs text-indigo-700 underline"
-                >
-                  סגור
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-4 sm:mt-6 bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>

@@ -43,6 +43,7 @@ export default function CrmWhatsappSummarizer({ projectId, whatsappSummary }: Cr
                 importantDates: data.summary?.importantDates || []
             };
 
+            if (!db) throw new Error("Firebase לא מוגדר");
             await updateDoc(doc(db, "projects", projectId), {
                 whatsappSummary: summaryToSave
             });
