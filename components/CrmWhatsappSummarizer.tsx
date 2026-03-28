@@ -2,8 +2,9 @@
 
 import React, { useState } from "react";
 import { MessageCircle, FileText, Calendar, CheckSquare, Loader2, RefreshCw, Clock } from "lucide-react";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, updateDoc, serverTimestamp, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useRouter } from "next/navigation";
 
 interface CrmWhatsappSummarizerProps {
     projectId: string;
@@ -15,11 +16,13 @@ interface CrmWhatsappSummarizerProps {
     };
 }
 
-export default function CrmWhatsappSummarizer({ projectId, whatsappSummary }: CrmWhatsappSummarizerProps) {
+export default function CrmWhatsappSummarizer({ projectId, whatsappSummary: initialSummary }: CrmWhatsappSummarizerProps) {
+    const router = useRouter();
     const [timeframe, setTimeframe] = useState<"1_day" | "3_days" | "1_week">("1_day");
     const [isExtracting, setIsExtracting] = useState(false);
     const [error, setError] = useState("");
     const [successMsg, setSuccessMsg] = useState("");
+    const [whatsappSummary, setWhatsappSummary] = useState(initialSummary);
 
     const handleExtract = async () => {
         setIsExtracting(true);
@@ -48,12 +51,9 @@ export default function CrmWhatsappSummarizer({ projectId, whatsappSummary }: Cr
                 whatsappSummary: summaryToSave
             });
 
-            setSuccessMsg("הסיכום בוצע בהצלחה! הדף יתרענן...");
-            
-            // Refresh page after 1 second to show updated data
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
+            // Update local state immediately
+            setWhatsappSummary(summaryToSave);
+            setSuccessMsg("✅ הסיכום בוצע בהצלחה!");
         } catch (err: any) {
             console.error(err);
             setError(err.message || "שגיאה לא צפויה בפנייה לשרת");
