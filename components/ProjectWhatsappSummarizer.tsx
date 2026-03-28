@@ -6,17 +6,20 @@ import { doc, updateDoc, serverTimestamp, getDoc, collection, getDocs } from "fi
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 
+interface GroupSummary {
+    lastSummarizedAt?: any;
+    taskIdeas?: string[];
+    importantPoints?: string[];
+    importantDates?: string[];
+}
+
 interface ProjectWhatsappSummarizerProps {
     projectId: string;
     projectName: string;
     whatsappGroupId?: string;
     whatsappGroupName?: string;
-    whatsappSummary?: {
-        lastSummarizedAt?: any;
-        taskIdeas?: string[];
-        importantPoints?: string[];
-        importantDates?: string[];
-    };
+    whatsappSummary?: GroupSummary;
+    whatsappGroups?: { chatId: string; name: string; summary?: GroupSummary }[];
 }
 
 interface WhatsAppGroup {
@@ -31,18 +34,21 @@ export default function ProjectWhatsappSummarizer({
     projectName,
     whatsappGroupId: initialGroupId,
     whatsappGroupName: initialGroupName,
-    whatsappSummary: initialSummary 
+    whatsappSummary: initialSummary,
+    whatsappGroups: initialGroups
 }: ProjectWhatsappSummarizerProps) {
     const router = useRouter();
     const [timeframe, setTimeframe] = useState<"1_day" | "3_days" | "1_week">("1_day");
     const [isExtracting, setIsExtracting] = useState(false);
     const [error, setError] = useState("");
     const [successMsg, setSuccessMsg] = useState("");
-    const [whatsappSummary, setWhatsappSummary] = useState(initialSummary);
+    const normalizedInitialGroups = (initialGroups && initialGroups.length > 0)
+        ? initialGroups
+        : (initialGroupId && initialGroupName ? [{ chatId: initialGroupId, name: initialGroupName, summary: initialSummary }] : []);
+    const [projectGroups, setProjectGroups] = useState(normalizedInitialGroups);
+    const [activeGroupId, setActiveGroupId] = useState(normalizedInitialGroups[0]?.chatId || initialGroupId || "");
     const [showGroupPicker, setShowGroupPicker] = useState(false);
     const [availableGroups, setAvailableGroups] = useState<WhatsAppGroup[]>([]);
-    const [selectedGroupId, setSelectedGroupId] = useState(initialGroupId);
-    const [selectedGroupName, setSelectedGroupName] = useState(initialGroupName);
     const [loadingGroups, setLoadingGroups] = useState(false);
     const [groupSearchQuery, setGroupSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<WhatsAppGroup[]>([]);
@@ -101,21 +107,46 @@ export default function ProjectWhatsappSummarizer({
         }
     };
 
-    // Save selected group to project
-    const handleSaveGroup = async (groupId: string, groupName: string, chatId: string) => {
+    const activeGroup = projectGroups.find((g) => g.chatId === activeGroupId);
+    const whatsappSummary = activeGroup?.summary;
+
+    // Save/add selected group to project
+    const handleSaveGroup = async (_groupId: string, groupName: string, chatId: string) => {
         if (!db) return;
         try {
+            const nextGroups = projectGroups.some((g) => g.chatId === chatId)
+                ? projectGroups
+                : [...projectGroups, { chatId, name: groupName, summary: undefined }];
             await updateDoc(doc(db, "projects", projectId), {
+                whatsappGroups: nextGroups,
                 whatsappGroupId: chatId,
                 whatsappGroupName: groupName,
             });
-            setSelectedGroupId(chatId);
-            setSelectedGroupName(groupName);
+            setProjectGroups(nextGroups);
+            setActiveGroupId(chatId);
             setShowGroupPicker(false);
-            setSuccessMsg("✅ קבוצה נבחרה בהצלחה!");
+            setSuccessMsg("✅ קבוצה נוספה לפרויקט בהצלחה!");
             setTimeout(() => setSuccessMsg(""), 3000);
         } catch (err: any) {
             setError(err.message || "שגיאה בשמירת הקבוצה");
+        }
+    };
+
+    const handleRemoveGroup = async (chatId: string) => {
+        if (!db) return;
+        try {
+            const nextGroups = projectGroups.filter((g) => g.chatId !== chatId);
+            await updateDoc(doc(db, "projects", projectId), {
+                whatsappGroups: nextGroups,
+                whatsappGroupId: nextGroups[0]?.chatId || null,
+                whatsappGroupName: nextGroups[0]?.name || null,
+            });
+            setProjectGroups(nextGroups);
+            if (activeGroupId === chatId) setActiveGroupId(nextGroups[0]?.chatId || "");
+            setSuccessMsg("✅ קבוצה הוסרה מהפרויקט");
+            setTimeout(() => setSuccessMsg(""), 3000);
+        } catch (err: any) {
+            setError(err.message || "שגיאה בהסרת הקבוצה");
         }
     };
 
@@ -128,7 +159,7 @@ export default function ProjectWhatsappSummarizer({
             const res = await fetch("/api/ai/summarize-crm-chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ projectId, timeframe }),
+                body: JSON.stringify({ projectId, timeframe, chatId: activeGroupId }),
             });
 
             const data = await res.json();
@@ -142,12 +173,15 @@ export default function ProjectWhatsappSummarizer({
             };
 
             if (!db) throw new Error("Firebase לא מוגדר");
+            const nextGroups = projectGroups.map((g) => g.chatId === activeGroupId ? { ...g, summary: summaryToSave } : g);
             await updateDoc(doc(db, "projects", projectId), {
-                whatsappSummary: summaryToSave
+                whatsappGroups: nextGroups,
+                whatsappSummary: summaryToSave,
+                whatsappGroupId: activeGroupId,
+                whatsappGroupName: activeGroup?.name || null,
             });
 
-            // Update local state immediately
-            setWhatsappSummary(summaryToSave);
+            setProjectGroups(nextGroups);
             setSuccessMsg("✅ הסיכום בוצע בהצלחה!");
         } catch (err: any) {
             console.error(err);
@@ -190,14 +224,14 @@ export default function ProjectWhatsappSummarizer({
                         title="בחר קבוצת WhatsApp"
                     >
                         <Settings size={14} />
-                        {selectedGroupName || "בחר קבוצה"}
+                        {activeGroup?.name || "הוסף/בחר קבוצה"}
                     </button>
                     <select
                         value={timeframe}
                         onChange={(e) => setTimeframe(e.target.value as any)}
                         className="text-sm border border-emerald-200 bg-emerald-50 text-emerald-800 rounded-lg px-3 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         dir="rtl"
-                        disabled={!selectedGroupId}
+                        disabled={!activeGroupId}
                     >
                         <option value="1_day">היום האחרון</option>
                         <option value="3_days">3 ימים אחרונים</option>
@@ -205,9 +239,9 @@ export default function ProjectWhatsappSummarizer({
                     </select>
                     <button
                         onClick={handleExtract}
-                        disabled={isExtracting || !selectedGroupId}
+                        disabled={isExtracting || !activeGroupId}
                         className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition disabled:opacity-70 disabled:cursor-not-allowed shadow-sm"
-                        title={!selectedGroupId ? "יש לבחור קבוצה קודם" : ""}
+                        title={!activeGroupId ? "יש לבחור קבוצה קודם" : ""}
                     >
                         {isExtracting ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         חלץ וסכם
@@ -255,7 +289,7 @@ export default function ProjectWhatsappSummarizer({
                                         setSearchResults([]);
                                     }}
                                     className={`w-full text-right p-3 rounded-lg border transition ${
-                                        selectedGroupId === group.chatId
+                                        activeGroupId === group.chatId
                                             ? "border-emerald-500 bg-emerald-50 text-emerald-900"
                                             : "border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
                                     }`}
@@ -288,10 +322,36 @@ export default function ProjectWhatsappSummarizer({
                 </div>
             )}
 
+            {/* Group Tabs */}
+            {projectGroups.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                    {projectGroups.map((group) => (
+                        <div key={group.chatId} className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                onClick={() => setActiveGroupId(group.chatId)}
+                                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${activeGroupId === group.chatId ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+                            >
+                                {group.name}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleRemoveGroup(group.chatId)}
+                                className="rounded-full px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                                title="הסר קבוצה מהפרויקט"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 px-1 mb-2">
                 <Clock size={12} />
                 <span>עודכן לאחרונה: {formattedDate}</span>
-                {!selectedGroupId && <span className="text-amber-600 mr-2">⚠️ לא נבחרה קבוצה</span>}
+                {!activeGroupId && <span className="text-amber-600 mr-2">⚠️ לא נבחרה קבוצה</span>}
+                {activeGroup?.name && <span className="text-indigo-600 mr-2">קבוצה פעילה: {activeGroup.name}</span>}
                 {error && <span className="text-red-500 mr-2">{error}</span>}
                 {successMsg && <span className="text-emerald-500 mr-2">{successMsg}</span>}
             </div>

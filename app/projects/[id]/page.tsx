@@ -30,6 +30,7 @@ interface Project {
   teamMembers?: { userId: string; fullName?: string; email?: string }[];
   whatsappGroupId?: string;
   whatsappGroupName?: string;
+  whatsappGroups?: { chatId: string; name: string; summary?: { lastSummarizedAt?: any; taskIdeas?: string[]; importantPoints?: string[]; importantDates?: string[] } }[];
   whatsappSummary?: {
     lastSummarizedAt?: any;
     taskIdeas?: string[];
@@ -178,6 +179,7 @@ export default function ProjectDetailsPage() {
           teamMembers: Array.isArray(data.teamMembers) ? data.teamMembers : [],
           whatsappGroupId: data.whatsappGroupId || undefined,
           whatsappGroupName: data.whatsappGroupName || undefined,
+          whatsappGroups: Array.isArray(data.whatsappGroups) ? data.whatsappGroups : undefined,
           whatsappSummary: data.whatsappSummary || undefined,
         };
         setProject(proj);
@@ -1183,6 +1185,7 @@ export default function ProjectDetailsPage() {
           projectName={project.name}
           whatsappGroupId={project.whatsappGroupId}
           whatsappGroupName={project.whatsappGroupName}
+          whatsappGroups={project.whatsappGroups}
           whatsappSummary={project.whatsappSummary}
         />
 

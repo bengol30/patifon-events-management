@@ -3,7 +3,7 @@ import { adminDb } from "@/lib/firebase-admin";
 
 export async function POST(request: Request) {
     try {
-        const { projectId, timeframe } = await request.json();
+        const { projectId, timeframe, chatId } = await request.json();
         if (!projectId) {
             return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
         }
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
         }
 
         const project = projectSnap.data();
-        const whatsappGroupId = project?.whatsappGroupId;
+        const whatsappGroupId = chatId || project?.whatsappGroupId;
 
         if (!whatsappGroupId) {
             return NextResponse.json({ error: "קבוצת WhatsApp לא מוגדרת לפרויקט זה" }, { status: 400 });
