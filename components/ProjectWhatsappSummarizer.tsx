@@ -44,8 +44,40 @@ export default function ProjectWhatsappSummarizer({
     const [selectedGroupId, setSelectedGroupId] = useState(initialGroupId);
     const [selectedGroupName, setSelectedGroupName] = useState(initialGroupName);
     const [loadingGroups, setLoadingGroups] = useState(false);
+    const [groupSearchQuery, setGroupSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState<WhatsAppGroup[]>([]);
 
-    // Load available WhatsApp groups
+    // Search WhatsApp groups from Green API (all groups, not just saved ones)
+    const searchGroups = async (query: string) => {
+        if (!query || query.length < 2) {
+            setSearchResults([]);
+            return;
+        }
+
+        setLoadingGroups(true);
+        try {
+            // Call our backend to fetch from Green API
+            const res = await fetch("/api/whatsapp/search-groups", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query }),
+            });
+
+            const data = await res.json();
+            if (data.ok && Array.isArray(data.groups)) {
+                setSearchResults(data.groups);
+            } else {
+                setSearchResults([]);
+            }
+        } catch (err) {
+            console.error("Error searching groups:", err);
+            setSearchResults([]);
+        } finally {
+            setLoadingGroups(false);
+        }
+    };
+
+    // Load available WhatsApp groups from system (only for reference)
     const loadGroups = async () => {
         if (!db) return;
         setLoadingGroups(true);
@@ -187,19 +219,41 @@ export default function ProjectWhatsappSummarizer({
             {showGroupPicker && (
                 <div className="border border-indigo-200 rounded-lg bg-indigo-50 p-4">
                     <h3 className="text-sm font-bold text-indigo-900 mb-3">בחר קבוצת WhatsApp לפרויקט</h3>
+                    
+                    {/* Search Input */}
+                    <div className="mb-3">
+                        <input
+                            type="text"
+                            placeholder="חפש קבוצה לפי שם..."
+                            value={groupSearchQuery}
+                            onChange={(e) => {
+                                setGroupSearchQuery(e.target.value);
+                                searchGroups(e.target.value);
+                            }}
+                            className="w-full px-3 py-2 border border-indigo-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            dir="rtl"
+                        />
+                        <p className="text-xs text-slate-600 mt-1">
+                            הקלד לפחות 2 תווים כדי לחפש בכל הקבוצות שלך ב-WhatsApp
+                        </p>
+                    </div>
+
                     {loadingGroups ? (
                         <div className="flex items-center gap-2 text-slate-600">
                             <Loader2 size={14} className="animate-spin" />
-                            <span className="text-xs">טוען קבוצות...</span>
+                            <span className="text-xs">מחפש קבוצות...</span>
                         </div>
-                    ) : availableGroups.length === 0 ? (
-                        <p className="text-xs text-slate-600">לא נמצאו קבוצות במערכת</p>
-                    ) : (
+                    ) : searchResults.length > 0 ? (
                         <div className="space-y-2 max-h-64 overflow-y-auto">
-                            {availableGroups.map(group => (
+                            <p className="text-xs font-bold text-indigo-900 mb-2">תוצאות חיפוש:</p>
+                            {searchResults.map(group => (
                                 <button
-                                    key={group.id}
-                                    onClick={() => handleSaveGroup(group.id, group.name, group.chatId)}
+                                    key={group.chatId}
+                                    onClick={() => {
+                                        handleSaveGroup(group.chatId, group.name, group.chatId);
+                                        setGroupSearchQuery("");
+                                        setSearchResults([]);
+                                    }}
                                     className={`w-full text-right p-3 rounded-lg border transition ${
                                         selectedGroupId === group.chatId
                                             ? "border-emerald-500 bg-emerald-50 text-emerald-900"
@@ -207,13 +261,30 @@ export default function ProjectWhatsappSummarizer({
                                     }`}
                                 >
                                     <div className="font-semibold text-sm">{group.name}</div>
-                                    {group.description && (
-                                        <div className="text-xs text-slate-500 mt-1">{group.description}</div>
-                                    )}
+                                    <div className="text-xs text-slate-500 mt-1">{group.chatId}</div>
                                 </button>
                             ))}
                         </div>
-                    )}
+                    ) : groupSearchQuery.length >= 2 ? (
+                        <p className="text-xs text-amber-600">לא נמצאו קבוצות התואמות לחיפוש</p>
+                    ) : availableGroups.length > 0 ? (
+                        <>
+                            <p className="text-xs font-bold text-slate-600 mb-2">קבוצות שמורות במערכת (לעיון):</p>
+                            <div className="space-y-2 max-h-64 overflow-y-auto">
+                                {availableGroups.map(group => (
+                                    <div
+                                        key={group.id}
+                                        className="w-full text-right p-2 rounded-lg border border-slate-100 bg-slate-50 text-slate-600"
+                                    >
+                                        <div className="text-sm">{group.name}</div>
+                                        <div className="text-xs text-slate-400 mt-1">
+                                            (שמור בהגדרות - לא לבחירה כאן)
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    ) : null}
                 </div>
             )}
 
