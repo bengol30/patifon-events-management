@@ -93,7 +93,7 @@ export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber, ign
   const completedCount = sendPlan.filter((item) => item.status === "SENT").length;
   const totalCount = sendPlan.length || Math.max(1, Number(task.requiredCompletions) || 1);
   const remaining = Math.max(0, totalCount - completedCount);
-  const nextPending = sendPlan.find((item) => item.status === "PENDING");
+  const nextPending = sendPlan.find((item) => item.status === "PENDING" && shouldAllowCampaignStepExecution(task as Record<string, unknown>, `wa-${item.step}`)) || sendPlan.find((item) => item.status === "PENDING");
   const nextStatus = remaining === 0 ? "DONE" : completedCount > 0 ? "IN_PROGRESS" : "TODO";
   const note = [
     `בוצע: שליחה ${stepNumber} — ${formatLocalDateTime(sentAt)}`,

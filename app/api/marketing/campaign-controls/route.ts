@@ -7,6 +7,13 @@ import { publishInstagramStoryCampaignStep } from "@/lib/instagram-story-campaig
 
 const clean = (value: unknown) => String(value || "").trim();
 
+const currentWindowEnabled = (taskOrPlan: Record<string, unknown>[] | Record<string, unknown>, stepKey: string) => {
+  if (Array.isArray(taskOrPlan)) return true;
+  const controls = syncCampaignControlsWithTask(taskOrPlan, normalizeCampaignControls(taskOrPlan));
+  const found = controls.windows.find((window) => window.stepKey === stepKey);
+  return found ? found.enabled : true;
+};
+
 export async function POST(req: NextRequest) {
   try {
     if (!adminDb) return NextResponse.json({ ok: false, error: "Firebase Admin לא מוגדר" }, { status: 500 });
@@ -33,6 +40,12 @@ export async function POST(req: NextRequest) {
 
     if (action === "toggle_window") {
       if (!stepKey) return NextResponse.json({ ok: false, error: "stepKey חסר" }, { status: 400 });
+      const taskRef = adminDb.collection("events").doc(eventId).collection("tasks").doc(taskId);
+      const snap = await taskRef.get();
+      if (!snap.exists) return NextResponse.json({ ok: false, error: "המשימה לא נמצאה" }, { status: 404 });
+      const task = { id: snap.id, ...(snap.data() as Record<string, unknown>) } as Record<string, unknown> & { specialType?: unknown; nextStep?: unknown };
+      const specialType = clean(task.specialType);
+      const payload = (task.payload || {}) as Record<string, unknown>;
       const controls = await updateCampaignTaskControls({
         eventId,
         taskId,
@@ -49,8 +62,22 @@ export async function POST(req: NextRequest) {
       const nextStatus: CampaignControlStatus = controls.windows.some((window) => window.enabled)
         ? (controls.status === "PAUSED" ? "PAUSED" : "ACTIVE")
         : "WINDOW_BLOCKED";
+      const nextEnabledWindow = controls.windows.find((window) => window.enabled);
+      if (specialType === 'whatsapp_campaign_patifon') {
+        const sendPlan = Array.isArray(payload.sendPlan) ? payload.sendPlan as Record<string, unknown>[] : [];
+        const nextPending = sendPlan.find((step) => clean(step.status) === 'PENDING' && controls.windows.some((window) => window.enabled && window.stepKey === `wa-${Number(step.step || 0)}`));
+        await taskRef.update({ nextStep: nextPending ? clean(nextPending.scheduledLabel) || clean(nextPending.scheduledAt) : clean(task.nextStep) });
+      }
+      if (specialType === 'instagram_story_campaign_patifon') {
+        const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
+        const nextPending = storyPlan.find((step) => {
+          const status = clean(step.status);
+          return (status === 'PENDING' || !status) && controls.windows.some((window) => window.enabled && window.stepKey === `ig-${Number(step.stepIndex || 0)}`);
+        });
+        await taskRef.update({ nextStep: nextPending ? `סטורי ${nextPending.stepIndex} — ${clean(nextPending.scheduledTime)}` : clean(task.nextStep) });
+      }
       const normalized = { ...controls, status: nextStatus };
-      return NextResponse.json({ ok: true, controls: normalized });
+      return NextResponse.json({ ok: true, controls: normalized, nextEnabledWindow: nextEnabledWindow?.stepKey || null });
     }
 
     if (action === "update_time") {
@@ -82,7 +109,7 @@ export async function POST(req: NextRequest) {
             scheduledLabel: formatCampaignWindowLabel(specialType, stepKey, normalizedIso),
           };
         });
-        const nextPending = nextPlan.find((step) => clean(step.status) === "PENDING") || nextPlan.find((step) => Number(step.step || 0) === stepNumber);
+        const nextPending = nextPlan.find((step) => clean(step.status) === "PENDING" && clean(step.scheduledAt) !== normalizedIso) || nextPlan.find((step) => clean(step.status) === "PENDING") || nextPlan.find((step) => Number(step.step || 0) === stepNumber);
         await taskRef.update({
           payload: { ...payload, sendPlan: nextPlan, messageVariants: nextPlan.map((step) => step.messageText) },
           nextStep: nextPending ? clean(nextPending.scheduledLabel) || clean(nextPending.scheduledAt) : clean(task.nextStep),
@@ -106,7 +133,7 @@ export async function POST(req: NextRequest) {
           if (currentStep !== stepIndex) return step;
           return { ...step, scheduledTime: normalizedIso };
         });
-        const nextPending = nextPlan.find((step) => clean(step.status) === "PENDING") || nextPlan.find((step) => Number(step.stepIndex || 0) === stepIndex);
+        const nextPending = nextPlan.find((step) => clean(step.status) === "PENDING" && clean(step.scheduledTime) !== normalizedIso) || nextPlan.find((step) => clean(step.status) === "PENDING") || nextPlan.find((step) => Number(step.stepIndex || 0) === stepIndex);
         const scheduleTime = Math.floor(scheduledDate.getTime() / 1000);
         const scheduledPostId = `ig-story-${eventId}-${taskId}-step${stepIndex}`;
         const scheduledPostRef = adminDb.collection("scheduled_posts").doc(scheduledPostId);

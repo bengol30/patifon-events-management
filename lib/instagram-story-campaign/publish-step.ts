@@ -104,7 +104,11 @@ export async function publishInstagramStoryCampaignStep(args: { eventId: string;
   const completed = nextPlan.filter((item) => clean(item.status) === 'POSTED').length;
   const total = nextPlan.length;
   const remaining = Math.max(0, total - completed);
-  const nextPending = nextPlan.find((item) => !clean((item as Record<string, unknown>).status) || clean((item as Record<string, unknown>).status) === 'PENDING') as Record<string, unknown> | undefined;
+  const nextPending = (nextPlan.find((item) => {
+    const status = clean((item as Record<string, unknown>).status);
+    const step = Number((item as Record<string, unknown>).stepIndex || 0);
+    return (!status || status === 'PENDING') && shouldAllowCampaignStepExecution({ ...(task as Record<string, unknown>), payload: { ...payload, storyPlan: nextPlan } }, `ig-${step}`);
+  }) || nextPlan.find((item) => !clean((item as Record<string, unknown>).status) || clean((item as Record<string, unknown>).status) === 'PENDING')) as Record<string, unknown> | undefined;
   const note = [
     `בוצע: סטורי ${stepIndex} — ${clean(step.contentType) || 'story'} — ${formatLocalDateTime(new Date())}`,
     `  → פורסם ל-bengolano`,

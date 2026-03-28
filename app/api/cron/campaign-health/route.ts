@@ -68,6 +68,11 @@ export async function GET() {
         if (hasTimeDrift) {
           issues.push({ ...base, severity: 'medium', type: 'campaign_window_time_drift', message: 'campaignControls scheduled times drift from task plan' });
         }
+        const nextStepText = clean(task.nextStep);
+        const blockedWindowMentioned = syncedControls.windows.find((window) => !window.enabled && nextStepText.includes(window.scheduledAt));
+        if (blockedWindowMentioned) {
+          issues.push({ ...base, severity: 'low', type: 'next_step_points_to_blocked_window', message: 'nextStep points to a blocked campaign window' });
+        }
         if (clean(rawControls.status) === 'PAUSED') {
           checked.push({ ...base, note: 'campaign paused' });
         }
@@ -100,6 +105,10 @@ export async function GET() {
 
         const payload = (task.payload || {}) as Record<string, unknown>;
         const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
+        const postedCount = storyPlan.filter((step) => clean(step.status) === 'POSTED').length;
+        if (clean(task.status) === 'DONE' && postedCount !== storyPlan.length) {
+          issues.push({ ...base, severity: 'high', type: 'done_without_all_posts_completed', message: 'Instagram story task is DONE but not all story steps are POSTED' });
+        }
         const disabledStorySteps = syncedControls.windows.filter((window) => !window.enabled).length;
         if (disabledStorySteps > 0) {
           checked.push({ ...base, note: `${disabledStorySteps} instagram windows blocked` });
@@ -136,6 +145,9 @@ export async function GET() {
           }
           if (status === 'FAILED') {
             issues.push({ ...base, severity: 'medium', type: 'story_step_failed', stepIndex, message: clean((step as Record<string, unknown>).error) || 'Story step marked FAILED' });
+          }
+          if (status === 'FAILED' && clean(task.status) === 'DONE') {
+            issues.push({ ...base, severity: 'high', type: 'done_with_failed_story_step', stepIndex, message: 'Task is DONE but a story step is FAILED' });
           }
         }
         checked.push(base);
