@@ -1441,19 +1441,31 @@ export default function EventDetailsPage() {
             alert("רק החשבון המורשה יכול לשייך אירועים לפרויקטים.");
             return;
         }
-        if (!db || !selectedProject) return;
-        const chosen = projectOptions.find(p => p.id === selectedProject);
+        if (!db) return;
+
+        const isRemoving = !selectedProject;
+        const chosen = isRemoving ? null : projectOptions.find(p => p.id === selectedProject);
+
         setLinkingProject(true);
         try {
-            await updateDoc(doc(db, "events", id), {
-                projectId: selectedProject,
-                projectName: chosen?.name || "",
-                updatedAt: serverTimestamp(),
-            });
-            setEvent(prev => prev ? { ...prev, projectId: selectedProject, projectName: chosen?.name || "" } : prev);
+            if (isRemoving) {
+                await updateDoc(doc(db, "events", id), {
+                    projectId: null,
+                    projectName: null,
+                    updatedAt: serverTimestamp(),
+                });
+                setEvent(prev => prev ? { ...prev, projectId: null, projectName: null } as any : prev);
+            } else {
+                await updateDoc(doc(db, "events", id), {
+                    projectId: selectedProject,
+                    projectName: chosen?.name || "",
+                    updatedAt: serverTimestamp(),
+                });
+                setEvent(prev => prev ? { ...prev, projectId: selectedProject, projectName: chosen?.name || "" } : prev);
+            }
         } catch (err) {
-            console.error("Failed to link project", err);
-            alert("לא הצלחנו לשייך את האירוע לפרויקט");
+            console.error("Failed to link/unlink project", err);
+            alert("לא הצלחנו ליישם את השינוי בפרויקט");
         } finally {
             setLinkingProject(false);
         }
@@ -4132,12 +4144,8 @@ export default function EventDetailsPage() {
                             {/* Right Side: Event Core */}
                             <div className="space-y-4 text-right flex-1">
                                 <div className="flex flex-wrap justify-end items-center gap-2">
-                                    <span className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-bold text-white shadow-sm border border-white/20 tracking-wide uppercase">דף ניהול אירוע</span>
                                     {event.status && (
                                         <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold text-white shadow-sm border tracking-wide uppercase ${event.status === 'DONE' ? 'bg-emerald-500/20 border-emerald-300/50 text-emerald-100' : 'bg-white/10 border-white/20'}`}>סטטוס: {event.status}</span>
-                                    )}
-                                    {overdueTasksCount > 0 && (
-                                        <span className="rounded-full border border-red-300 bg-red-500/80 px-3 py-1.5 text-xs font-bold text-white shadow-sm animate-pulse">{overdueTasksCount} משימות באיחור</span>
                                     )}
                                 </div>
                                 <div className="space-y-1">
@@ -4186,18 +4194,37 @@ export default function EventDetailsPage() {
                                     </div>
 
                                     {/* Link & Go to assigned project */}
-                                    {event.projectId ? (
+                                    {isProjectLinker && projectOptions.length > 0 ? (
+                                        <div className="flex flex-col gap-2">
+                                            {event.projectId && (
+                                                <div className="flex items-center justify-between gap-2 p-1.5 bg-white/5 rounded-xl border border-white/10">
+                                                    <button onClick={() => router.push(`/projects/${event.projectId}`)} className="bg-white text-indigo-900 hover:bg-white/90 px-3 py-1.5 text-xs font-bold rounded-lg transition shadow-sm shrink-0">מעבר לפרויקט</button>
+                                                    <p className="text-sm font-bold text-white truncate text-right pl-1">{event.projectName || event.projectId}</p>
+                                                </div>
+                                            )}
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={handleLinkProject}
+                                                    disabled={linkingProject || selectedProject === (event.projectId || "")}
+                                                    className="bg-white/20 border border-white/30 text-white hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-bold transition disabled:opacity-50 shrink-0"
+                                                >
+                                                    {selectedProject ? "שייך" : "נתק"}
+                                                </button>
+                                                <select
+                                                    className="flex-1 text-sm bg-white/10 border border-white/20 text-white rounded-lg px-2 py-1.5 focus:outline-none placeholder-white/50 text-right"
+                                                    dir="rtl"
+                                                    value={selectedProject}
+                                                    onChange={e => setSelectedProject(e.target.value)}
+                                                >
+                                                    <option value="" className="text-black text-right">ללא פרויקט אב</option>
+                                                    {projectOptions.map(p => <option key={p.id} value={p.id} className="text-black text-right">{p.name}</option>)}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    ) : event.projectId ? (
                                         <div className="flex items-center justify-between gap-2 p-1.5 bg-white/5 rounded-xl border border-white/10">
                                             <button onClick={() => router.push(`/projects/${event.projectId}`)} className="bg-white text-indigo-900 hover:bg-white/90 px-3 py-1.5 text-xs font-bold rounded-lg transition shadow-sm shrink-0">לפרויקט</button>
                                             <p className="text-sm font-bold text-white truncate text-right pl-1">{event.projectName || event.projectId}</p>
-                                        </div>
-                                    ) : isProjectLinker && projectOptions.length > 0 ? (
-                                        <div className="flex gap-2">
-                                            <button onClick={handleLinkProject} disabled={!selectedProject || linkingProject} className="bg-white/20 border border-white/30 text-white hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-bold transition disabled:opacity-50 shrink-0">שייך</button>
-                                            <select className="flex-1 text-sm bg-white/10 border border-white/20 text-white rounded-lg px-2 py-1.5 focus:outline-none placeholder-white/50 text-right" dir="rtl" value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
-                                                <option value="" className="text-black text-right">בחר פרויקט לחיבור</option>
-                                                {projectOptions.map(p => <option key={p.id} value={p.id} className="text-black text-right">{p.name}</option>)}
-                                            </select>
                                         </div>
                                     ) : (
                                         <p className="text-xs font-medium text-white/70">אירוע עצמאי (ללא פרויקט אב)</p>
@@ -4524,13 +4551,7 @@ export default function EventDetailsPage() {
                             <div className="bg-gradient-to-l from-[rgba(255,184,76,0.22)] via-white to-[rgba(74,26,44,0.06)] p-4 sm:p-5">
                                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                                     <div className="space-y-3 text-right">
-                                        <div className="flex flex-wrap items-center justify-end gap-2">
-                                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">{openTasksCount} פתוחות עכשיו</span>
-                                            {overdueTasksCount > 0 && (
-                                                <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">{overdueTasksCount} באיחור</span>
-                                            )}
-                                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{doneTasksCount} הושלמו</span>
-                                        </div>
+
                                         <div>
                                             <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--patifon-burgundy)' }}>משימות לביצוע</h2>
                                             <p className="mt-1 text-sm text-gray-600">חלוקה ברורה יותר בין סיכום, רשימות ופעולות — כדי לעבוד מהר יותר גם במובייל.</p>
@@ -4826,14 +4847,10 @@ export default function EventDetailsPage() {
                                 <>
                                     <div ref={teamTasksRef} className="rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)] overflow-hidden">
                                         <div className="border-b border-slate-200 bg-gradient-to-l from-slate-100 to-white px-4 py-4 sm:px-5">
-                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
                                                 <div className="text-right">
                                                     <h3 className="text-lg font-black text-slate-900">משימות צוות</h3>
                                                     <p className="mt-1 text-sm text-slate-600">עבודה שוטפת של הצוות, עם דגש על עדכונים, דד ליינים ופעולות מיידיות.</p>
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">{teamTasks.length} משימות</span>
-                                                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{teamTasks.filter((task) => task.status !== 'DONE').length} פתוחות</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -4886,14 +4903,10 @@ export default function EventDetailsPage() {
 
                                     <div ref={volunteerTasksRef} className="rounded-[28px] border border-amber-200 bg-white shadow-[0_16px_40px_rgba(245,158,11,0.10)] overflow-hidden">
                                         <div className="border-b border-amber-200 bg-gradient-to-l from-amber-100/90 to-white px-4 py-4 sm:px-5">
-                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
                                                 <div className="text-right">
                                                     <h3 className="text-lg font-black text-amber-950">משימות למתנדבים</h3>
                                                     <p className="mt-1 text-sm text-amber-900/80">משימות גמישות יותר, עם דגש על הקצאות, כמות ביצועים ושיתוף ברור מול המתנדבים.</p>
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <span className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-900">{volunteerTasks.length} משימות</span>
-                                                    <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">{volunteerTasks.filter((task) => task.status !== 'DONE').length} פעילות</span>
                                                 </div>
                                             </div>
                                         </div>

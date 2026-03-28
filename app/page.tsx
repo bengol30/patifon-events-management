@@ -26,6 +26,8 @@ interface Event {
   partners?: string | string[];
   members?: string[];
   team?: { name: string; role: string; email?: string; userId?: string }[];
+  projectId?: string | null;
+  projectName?: string | null;
   volunteerTasksPaused?: boolean;
   teamTasksPaused?: boolean;
 }
@@ -379,8 +381,29 @@ export default function Dashboard() {
   }, [registrantSearch, registrantsList]);
 
   // Filter State
-  const [filterEvent, setFilterEvent] = useState<string>("all");
+  const [filterEvent, setFilterEventState] = useState<string>("all");
+  const [filterProject, setFilterProjectState] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("none");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedEv = localStorage.getItem("patifon_filterEvent");
+      if (savedEv) setFilterEventState(savedEv);
+      const savedPr = localStorage.getItem("patifon_filterProject");
+      if (savedPr) setFilterProjectState(savedPr);
+    }
+  }, []);
+
+  const setFilterEvent = (val: string) => {
+    setFilterEventState(val);
+    if (typeof window !== "undefined") localStorage.setItem("patifon_filterEvent", val);
+  };
+
+  const setFilterProject = (val: string) => {
+    setFilterProjectState(val);
+    if (typeof window !== "undefined") localStorage.setItem("patifon_filterProject", val);
+  };
+
   const tasksSectionRef = useRef<HTMLElement | null>(null);
 
   const scrollToTasksSection = () => {
@@ -1759,6 +1782,15 @@ export default function Dashboard() {
   // Filter and sort tasks
   let filteredTasks = myTasks.filter(task => {
     if (filterEvent !== "all" && task.eventId !== filterEvent) return false;
+    if (filterProject !== "all") {
+      // Direct project task
+      if (task.eventId === filterProject) return true;
+      // Task belonging to an event of this project
+      const parentEvent = events.find(e => e.id === task.eventId);
+      if (parentEvent && parentEvent.projectId === filterProject) return true;
+
+      return false;
+    }
     return true;
   });
 
@@ -3631,12 +3663,26 @@ export default function Dashboard() {
                     <Filter size={16} className="text-gray-400" />
                     <select
                       value={filterEvent}
-                      onChange={(e) => setFilterEvent(e.target.value)}
-                      className="min-h-[42px] rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      onChange={(e) => { setFilterEvent(e.target.value); setFilterProject("all"); }}
+                      className="min-h-[42px] max-w-[200px] truncate rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                       <option value="all">כל האירועים</option>
                       {events.map(event => (
                         <option key={event.id} value={event.id}>{event.title}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <FolderKanban size={16} className="text-gray-400" />
+                    <select
+                      value={filterProject}
+                      onChange={(e) => { setFilterProject(e.target.value); setFilterEvent("all"); }}
+                      className="min-h-[42px] max-w-[200px] truncate rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="all">כל הפרויקטים</option>
+                      {projects.map(project => (
+                        <option key={project.id} value={project.id}>{project.name}</option>
                       ))}
                     </select>
                   </div>

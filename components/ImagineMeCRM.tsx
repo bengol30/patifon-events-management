@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { MessageCircle, Sparkles, Send, Loader2, Clock3, CalendarClock } from "lucide-react";
+import { MessageCircle, Sparkles, Send, Loader2, Clock3, CalendarClock, ChevronDown, ChevronUp } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { doc, updateDoc } from "firebase/firestore";
 
@@ -70,6 +70,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
     return null;
   }
 
+  const [isExpanded, setIsExpanded] = useState(false);
   const [fetchingHistory, setFetchingHistory] = useState(false);
   const [generatingMessage, setGeneratingMessage] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -231,9 +232,9 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
     try {
       const historyContext = conversationSummary || (whatsappHistory
         ? whatsappHistory.messages
-            .slice(0, 10)
-            .map((m: any) => `${m.from}: ${m.text}`)
-            .join("\n")
+          .slice(0, 10)
+          .map((m: any) => `${m.from}: ${m.text}`)
+          .join("\n")
         : "");
 
       const res = await fetch("/api/imagine/generate-followup-message", {
@@ -411,166 +412,147 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
   return (
     <div className="mt-6 p-6 border-2 border-blue-200 rounded-lg bg-blue-50">
-      <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-        <Sparkles className="w-5 h-5" />
-        Imagine Me CRM
-      </h3>
+      <div
+        className="flex items-center justify-between cursor-pointer select-none"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <h3 className="text-lg font-bold text-blue-900 flex items-center gap-2">
+          <Sparkles className="w-5 h-5" />
+          Imagine Me CRM
+        </h3>
+        {isExpanded ? <ChevronUp className="w-5 h-5 text-blue-700" /> : <ChevronDown className="w-5 h-5 text-blue-700" />}
+      </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded text-red-800 text-sm">
+        <div className="mt-4 p-3 bg-red-100 border border-red-300 rounded text-red-800 text-sm">
           {error}
         </div>
       )}
 
-      <div className="space-y-3">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleFetchHistory}
-            disabled={fetchingHistory || !phone}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {fetchingHistory ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <MessageCircle className="w-4 h-4" />
-            )}
-            {fetchingHistory ? "מחלץ..." : "חלץ היסטוריה"}
-          </button>
-          {whatsappHistory && (
-            <span className="text-sm text-green-700">
-              ✓ {whatsappHistory.messageCount} הודעות נמצאו
-            </span>
-          )}
-        </div>
-
-        {conversationSummary && (
-          <div className="p-4 bg-white border border-green-200 rounded-lg space-y-3">
-            <div>
-              <h4 className="font-bold text-sm text-gray-900 mb-2">📋 סיכום השיחה:</h4>
-              <div className="text-sm text-gray-700 whitespace-pre-wrap" dir="rtl">
-                {conversationSummary}
-              </div>
-            </div>
-
-            {recentMessages.length > 0 && (
-              <div className="pt-3 border-t border-gray-200">
-                <h4 className="font-bold text-sm text-gray-900 mb-2">💬 5 הודעות אחרונות:</h4>
-                <div className="space-y-2">
-                  {recentMessages.map((msg: any, i: number) => {
-                    const date = new Date(msg.timestamp * 1000);
-                    const isFromCustomer = msg.from === 'customer';
-                    const sender = isFromCustomer ? customerName : 'אני (בן)';
-
-                    return (
-                      <div
-                        key={i}
-                        className={`p-2 rounded text-xs ${
-                          isFromCustomer ? 'bg-gray-100' : 'bg-blue-50'
-                        }`}
-                        dir="rtl"
-                      >
-                        <div className="font-semibold text-gray-900 mb-1">
-                          {sender} • {date.toLocaleDateString('he-IL')} {date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                        <div className="text-gray-700">{msg.text}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+      {isExpanded && (
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleFetchHistory}
+              disabled={fetchingHistory || !phone}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {fetchingHistory ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <MessageCircle className="w-4 h-4" />
+              )}
+              {fetchingHistory ? "מחלץ..." : "חלץ היסטוריה"}
+            </button>
+            {whatsappHistory && (
+              <span className="text-sm text-green-700">
+                ✓ {whatsappHistory.messageCount} הודעות נמצאו
+              </span>
             )}
           </div>
-        )}
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleGenerateMessage}
-            disabled={generatingMessage}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {generatingMessage ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Sparkles className="w-4 h-4" />
-            )}
-            {generatingMessage ? "יוצר..." : "הצע הודעה"}
-          </button>
-        </div>
-
-        {suggestedMessage && (
-          <div className="mt-4 space-y-3">
-            <label className="block text-sm font-medium text-gray-700">
-              הודעת Follow-up (ניתן לערוך):
-            </label>
-            <textarea
-              value={editedMessage}
-              onChange={(e) => setEditedMessage(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              rows={8}
-              dir="rtl"
-            />
-
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
-                <Clock3 className="w-4 h-4" />
-                תזמון שליחה
-                {savingSchedule && <Loader2 className="w-4 h-4 animate-spin" />}
+          {conversationSummary && (
+            <div className="p-4 bg-white border border-green-200 rounded-lg space-y-3">
+              <div>
+                <h4 className="font-bold text-sm text-gray-900 mb-2">📋 סיכום השיחה:</h4>
+                <div className="text-sm text-gray-700 whitespace-pre-wrap" dir="rtl">
+                  {conversationSummary}
+                </div>
               </div>
 
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(e) => handleScheduleChange(e.target.value)}
-                className="w-full rounded-lg border border-amber-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              {recentMessages.length > 0 && (
+                <div className="pt-3 border-t border-gray-200">
+                  <h4 className="font-bold text-sm text-gray-900 mb-2">💬 5 הודעות אחרונות:</h4>
+                  <div className="space-y-2">
+                    {recentMessages.map((msg: any, i: number) => {
+                      const date = new Date(msg.timestamp * 1000);
+                      const isFromCustomer = msg.from === 'customer';
+                      const sender = isFromCustomer ? customerName : 'אני (בן)';
+
+                      return (
+                        <div
+                          key={i}
+                          className={`p-2 rounded text-xs ${isFromCustomer ? 'bg-gray-100' : 'bg-blue-50'
+                            }`}
+                          dir="rtl"
+                        >
+                          <div className="font-semibold text-gray-900 mb-1">
+                            {sender} • {date.toLocaleDateString('he-IL')} {date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          <div className="text-gray-700">{msg.text}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleGenerateMessage}
+              disabled={generatingMessage}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {generatingMessage ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
+              {generatingMessage ? "יוצר..." : "הצע הודעה"}
+            </button>
+          </div>
+
+          {suggestedMessage && (
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm font-medium text-gray-700">
+                הודעת Follow-up (ניתן לערוך):
+              </label>
+              <textarea
+                value={editedMessage}
+                onChange={(e) => setEditedMessage(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                rows={8}
+                dir="rtl"
               />
 
-              {scheduleReason && (
-                <div className="text-xs text-amber-900" dir="rtl">
-                  <span className="font-semibold">ברירת מחדל חכמה:</span> {scheduleReason}
-                  {scheduleConfidence ? ` (${scheduleConfidence})` : ""}
+              <div className="flex flex-col sm:flex-row gap-3 items-center pt-2">
+                <div className="w-full sm:w-auto relative">
+                  <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                    <Clock3 className="w-4 h-4 text-amber-600" />
+                  </div>
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(e) => handleScheduleChange(e.target.value)}
+                    className="w-full pl-3 pr-9 py-2 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-900 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    title="תזמון שליחה"
+                  />
                 </div>
-              )}
-
-              {(scheduledAt || localScheduledStatus === "PENDING") && (
-                <div className="flex items-center gap-2 text-xs text-gray-700" dir="rtl">
-                  <CalendarClock className="w-4 h-4" />
-                  {localScheduledStatus === "PENDING"
-                    ? "יש כרגע שליחה מתוזמנת פעילה למשימה הזאת."
-                    : "ההודעה מוכנה לתזמון."}
+                <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto sm:mr-auto">
+                  <button
+                    onClick={handleScheduleMessage}
+                    disabled={schedulingMessage || !editedMessage.trim() || !scheduledAt}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {schedulingMessage ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4" />}
+                    תזמן שליחה
+                  </button>
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={sendingMessage || !editedMessage.trim()}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {sendingMessage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    שלח עכשיו
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={handleSendMessage}
-                disabled={sendingMessage || !editedMessage.trim()}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {sendingMessage ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-                {sendingMessage ? "שולח..." : "שלח עכשיו"}
-              </button>
-
-              <button
-                onClick={handleScheduleMessage}
-                disabled={schedulingMessage || !editedMessage.trim() || !scheduledAt}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {schedulingMessage ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <CalendarClock className="w-4 h-4" />
-                )}
-                {schedulingMessage ? "מתזמן..." : "תזמן שליחה"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

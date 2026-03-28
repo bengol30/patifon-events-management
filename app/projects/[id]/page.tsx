@@ -11,7 +11,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Calendar, CheckCircle2, FolderKanban, Loader2, Pencil, Users, PlusCircle, MapPin, Trash2, MessageCircle, CheckSquare, Clock, X, UserPlus } from "lucide-react";
 import TaskCard from "@/components/TaskCard";
 import ImagineMeCRM from "@/components/ImagineMeCRM";
-import ImportLeadButton from "@/components/ImportLeadButton";
+
 
 interface Project {
   id: string;
@@ -253,7 +253,7 @@ export default function ProjectDetailsPage() {
           const pTasksSnap = await getDocs(collection(db, "projects", projectId, "tasks"));
           pTasksSnap.forEach((t) => {
             const d = t.data() as any;
-            
+
             // Debug log for Imagine Me tasks
             if (projectId === 'yed4WRBzsXrdGzousyq0') {
               console.log(`Loading task: ${d.title}`, {
@@ -263,7 +263,7 @@ export default function ProjectDetailsPage() {
                 followUpStatus: d.customData?.followUpStatus,
               });
             }
-            
+
             tasks.push({
               id: t.id,
               title: d.title || "משימה",
@@ -1077,10 +1077,7 @@ export default function ProjectDetailsPage() {
                 <p className="mt-1 text-sm text-gray-600">כל המשימות של הפרויקט והאירועים המשויכים, עם היררכיה ברורה יותר ופעולות נגישות במובייל.</p>
               </div>
               <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                <ImportLeadButton 
-                  projectId={projectId} 
-                  onLeadImported={() => window.location.reload()}
-                />
+
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">בתהליך</p>
@@ -1107,64 +1104,64 @@ export default function ProjectDetailsPage() {
             </div>
           </div>
           <div className="p-4 sm:p-6">
-          {loadingProjectTasks ? (
-            <div className="flex items-center gap-2 text-gray-600 py-4">
-              <Loader2 size={16} className="animate-spin" />
-              טוען משימות...
-            </div>
-          ) : projectTasks.length === 0 ? (
-            <div className="text-gray-600 text-sm">אין משימות לאירועים המשויכים לפרויקט.</div>
-          ) : (
-            <div className="space-y-3">
-              {projectTasks.map((t) => (
-                <div key={t.id}>
-                  <TaskCard
-                    id={t.id}
-                    title={t.title}
-                    description={t.description}
-                    assignee={t.assignee || "לא משויך"}
-                    assignees={t.assignees}
-                    status={t.status}
-                    dueDate={t.dueDate || ""}
-                    priority={t.priority || "NORMAL"}
-                    currentStatus={t.currentStatus}
-                    nextStep={t.nextStep}
-                    eventId={t.eventId}
-                    eventTitle={t.eventTitle}
-                    scope={t.scope}
-                    previewImage={t.previewImage}
-                    customData={t.customData}
-                    onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
-                    onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
-                    onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
-                    onManageAssignees={t.scope === "event"
-                      ? () => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)
-                      : undefined}
-                    onDelete={() => {
-                      if (!db) return;
-                      if (confirm("למחוק משימה זו?")) {
-                        const ref = t.scope === "project"
-                          ? doc(db, "projects", projectId, "tasks", t.id)
-                          : doc(db, "events", t.eventId, "tasks", t.id);
-                        deleteDoc(ref).then(() => {
-                          setProjectTasks(prev => prev.filter(pt => pt.id !== t.id));
-                        }).catch(err => {
-                          console.error("Failed deleting task", err);
-                          alert("שגיאה במחיקת משימה");
-                        });
-                      }
-                    }}
-                    onChat={() => router.push(`/tasks/${t.id}?eventId=${t.eventId}`)}
-                  />
-                  <ImagineMeCRM 
-                    projectId={projectId} 
-                    taskId={t.id} 
-                    taskData={t as any}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+            {loadingProjectTasks ? (
+              <div className="flex items-center gap-2 text-gray-600 py-4">
+                <Loader2 size={16} className="animate-spin" />
+                טוען משימות...
+              </div>
+            ) : projectTasks.length === 0 ? (
+              <div className="text-gray-600 text-sm">אין משימות לאירועים המשויכים לפרויקט.</div>
+            ) : (
+              <div className="space-y-3">
+                {projectTasks.map((t) => (
+                  <div key={t.id}>
+                    <TaskCard
+                      id={t.id}
+                      title={t.title}
+                      description={t.description}
+                      assignee={t.assignee || "לא משויך"}
+                      assignees={t.assignees}
+                      status={t.status}
+                      dueDate={t.dueDate || ""}
+                      priority={t.priority || "NORMAL"}
+                      currentStatus={t.currentStatus}
+                      nextStep={t.nextStep}
+                      eventId={t.eventId}
+                      eventTitle={t.eventTitle}
+                      scope={t.scope}
+                      previewImage={t.previewImage}
+                      customData={t.customData}
+                      onStatusChange={(newStatus) => handleProjectTaskStatus(t, newStatus)}
+                      onEditStatus={(task) => setEditingStatusTask({ ...t, currentStatus: task.currentStatus, nextStep: task.nextStep })}
+                      onEditDate={(task) => setEditingDateTask({ ...t, dueDate: task.dueDate, eventId: t.eventId })}
+                      onManageAssignees={t.scope === "event"
+                        ? () => router.push(`/tasks/${t.id}?eventId=${t.eventId}&focus=assignees`)
+                        : undefined}
+                      onDelete={() => {
+                        if (!db) return;
+                        if (confirm("למחוק משימה זו?")) {
+                          const ref = t.scope === "project"
+                            ? doc(db, "projects", projectId, "tasks", t.id)
+                            : doc(db, "events", t.eventId, "tasks", t.id);
+                          deleteDoc(ref).then(() => {
+                            setProjectTasks(prev => prev.filter(pt => pt.id !== t.id));
+                          }).catch(err => {
+                            console.error("Failed deleting task", err);
+                            alert("שגיאה במחיקת משימה");
+                          });
+                        }
+                      }}
+                      onChat={() => router.push(`/tasks/${t.id}?eventId=${t.eventId}`)}
+                    />
+                    <ImagineMeCRM
+                      projectId={projectId}
+                      taskId={t.id}
+                      taskData={t as any}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="bg-white p-4 sm:p-6 rounded-xl vinyl-shadow" style={{ border: "2px solid var(--patifon-cream-dark)" }}>

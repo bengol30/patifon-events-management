@@ -15,6 +15,11 @@ import {
     Clapperboard,
     Trash2,
     UserPlus,
+    Play,
+    Pause,
+    Zap,
+    RefreshCw,
+    Ban,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -299,9 +304,6 @@ export default function TaskCard({
                             <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${priorityMeta.chip}`}>
                                 {priorityMeta.label}
                             </span>
-                            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusMeta.chip}`}>
-                                {statusMeta.label}
-                            </span>
                             {hasUnreadMessages && (
                                 <span className="inline-flex items-center rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-1 text-[11px] font-semibold text-fuchsia-700">
                                     הודעה חדשה
@@ -476,122 +478,130 @@ export default function TaskCard({
 
                                 {isMarketingCampaign && campaignControls?.windows?.length ? (
                                     <div className="mt-3 rounded-2xl border border-fuchsia-200 bg-white p-3">
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="flex flex-wrap gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onCampaignControlAction?.(campaignControls?.status === "PAUSED" ? "resume" : "pause");
-                                                    }}
-                                                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${campaignControls?.status === "PAUSED" ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"}`}
-                                                >
-                                                    {campaignControls?.status === "PAUSED" ? "הפעל קמפיין" : "השהה קמפיין"}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onCampaignControlAction?.("run_now");
-                                                    }}
-                                                    className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                                                >
-                                                    הפעל עכשיו
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onCampaignControlAction?.("refresh_content");
-                                                    }}
-                                                    className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
-                                                    title="רענן תוכן ומדיה מהאירוע"
-                                                >
-                                                    🔄 רענן תוכן
-                                                </button>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">חלונות פרסום</p>
-                                                <p className="mt-1 text-xs text-slate-600">הכול נשען על זמני המשימה שנקבעו מראש</p>
-                                            </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onCampaignControlAction?.(campaignControls?.status === "PAUSED" ? "resume" : "pause");
+                                                }}
+                                                className={`flex items-center justify-center p-2 rounded-full border transition ${campaignControls?.status === "PAUSED" ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"}`}
+                                                title={campaignControls?.status === "PAUSED" ? "הפעל קמפיין" : "השהה קמפיין"}
+                                            >
+                                                {campaignControls?.status === "PAUSED" ? <Play size={16} /> : <Pause size={16} />}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onCampaignControlAction?.("run_now");
+                                                }}
+                                                className="flex items-center justify-center p-2 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 transition hover:bg-indigo-100"
+                                                title="הפעל עכשיו"
+                                            >
+                                                <Zap size={16} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onCampaignControlAction?.("refresh_content");
+                                                }}
+                                                className="flex items-center justify-center p-2 rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:bg-violet-100"
+                                                title="רענן תוכן ומדיה מהאירוע"
+                                            >
+                                                <RefreshCw size={16} />
+                                            </button>
                                         </div>
                                         <div className="mt-3 flex flex-col gap-2">
-                                            {campaignControls.windows.map((window) => (
-                                                <div key={window.stepKey} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                                                    <div className="flex flex-wrap gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                onCampaignControlAction?.("toggle_window", window.stepKey);
-                                                            }}
-                                                            className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${window.enabled ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border border-slate-200 bg-white text-slate-500 hover:bg-slate-100"}`}
-                                                        >
-                                                            {window.enabled ? "מאופשר" : "חסום"}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                onCampaignControlAction?.("run_now", window.stepKey);
-                                                            }}
-                                                            className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                                                        >
-                                                            הפעל עכשיו
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setEditingWindow(window.stepKey);
-                                                                setEditingTime(toLocalInputValue(window.scheduledAt));
-                                                            }}
-                                                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-100"
-                                                        >
-                                                            ערוך זמן
-                                                        </button>
+                                            {campaignControls.windows.map((window) => {
+                                                const windowDate = new Date(window.scheduledAt);
+                                                const formattedDateTime = !Number.isNaN(windowDate.getTime())
+                                                    ? `${windowDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })} • ${windowDate.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`
+                                                    : window.scheduledAt.slice(0, 16).replace("T", " ");
+
+                                                const displayLabel = window.label && window.label.includes("T") && window.label.length >= 20 ? "מועד פרסום" : window.label;
+
+                                                return (
+                                                    <div key={window.stepKey} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    onCampaignControlAction?.("toggle_window", window.stepKey);
+                                                                }}
+                                                                className={`flex items-center justify-center p-2 rounded-full border transition ${window.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border-slate-300 bg-white text-slate-400 hover:bg-slate-100"}`}
+                                                                title={window.enabled ? "מאופשר" : "חסום"}
+                                                            >
+                                                                {window.enabled ? <CheckCircle size={15} /> : <Ban size={15} />}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    onCampaignControlAction?.("run_now", window.stepKey);
+                                                                }}
+                                                                className="flex items-center justify-center p-2 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 transition hover:bg-indigo-100"
+                                                                title="הפעל עכשיו"
+                                                            >
+                                                                <Zap size={15} />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setEditingWindow(window.stepKey);
+                                                                    setEditingTime(toLocalInputValue(window.scheduledAt));
+                                                                }}
+                                                                className="flex items-center justify-center p-2 rounded-full border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"
+                                                                title="ערוך זמן"
+                                                            >
+                                                                <Clock size={15} />
+                                                            </button>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-[13px] font-bold text-slate-900">{displayLabel}</p>
+                                                            <p className="mt-0.5 text-xs font-semibold tracking-wide text-slate-500" dir="ltr">{formattedDateTime}</p>
+                                                            {editingWindow === window.stepKey && (
+                                                                <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                                                                    <input
+                                                                        type="datetime-local"
+                                                                        value={editingTime}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        onChange={(e) => setEditingTime(e.target.value)}
+                                                                        className="rounded-xl border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            if (!editingTime) return;
+                                                                            onCampaignControlAction?.("update_time", window.stepKey, new Date(editingTime).toISOString());
+                                                                            setEditingWindow(null);
+                                                                            setEditingTime("");
+                                                                        }}
+                                                                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                                                                    >
+                                                                        שמור
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setEditingWindow(null);
+                                                                            setEditingTime("");
+                                                                        }}
+                                                                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100"
+                                                                    >
+                                                                        ביטול
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                    <div className="text-right">
-                                                        <p className="text-sm font-semibold text-slate-900">{window.label}</p>
-                                                        <p className="text-xs text-slate-500">{window.scheduledAt.replace("T", " ").slice(0, 16)}</p>
-                                                        {editingWindow === window.stepKey && (
-                                                            <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-                                                                <input
-                                                                    type="datetime-local"
-                                                                    value={editingTime}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    onChange={(e) => setEditingTime(e.target.value)}
-                                                                    className="rounded-xl border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        if (!editingTime) return;
-                                                                        onCampaignControlAction?.("update_time", window.stepKey, new Date(editingTime).toISOString());
-                                                                        setEditingWindow(null);
-                                                                        setEditingTime("");
-                                                                    }}
-                                                                    className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
-                                                                >
-                                                                    שמור
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setEditingWindow(null);
-                                                                        setEditingTime("");
-                                                                    }}
-                                                                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100"
-                                                                >
-                                                                    ביטול
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                )
+                                            })}
                                         </div>
                                     </div>
                                 ) : null}
