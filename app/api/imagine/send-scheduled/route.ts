@@ -114,10 +114,22 @@ export async function POST() {
       try {
         await sendWhatsappText(phone, messageText);
 
-        const currentStatus = 'הודעת follow-up נשלחה אוטומטית';
-        const nextStep = 'להמתין לתגובה ולעדכן היסטוריה אם צריך';
+        const nowIso = new Date().toISOString();
+        const sentTimestamp = Math.floor(Date.now() / 1000);
+        const currentStatus = 'הודעת follow-up אחרונה נשלחה אוטומטית';
+        const nextStep = 'להמתין לתגובה מהלקוחה ולעקוב אחר ההמשך';
+        const recentMessages = [
+          {
+            from: 'us',
+            type: 'outgoing',
+            text: messageText,
+            timestamp: sentTimestamp,
+          },
+          ...(Array.isArray(customData?.recentMessages) ? customData.recentMessages : []),
+        ].slice(0, 5);
 
         await taskDoc.ref.update({
+          status: 'IN_PROGRESS',
           scheduleStatus: 'DONE',
           executionMode: 'EXTERNAL_ACTION',
           executionResult: 'Imagine Me scheduled follow-up sent',
@@ -128,9 +140,10 @@ export async function POST() {
           customData: {
             ...customData,
             followUpStatus: 'awaiting_response',
-            lastContactDate: new Date().toISOString(),
+            lastContactDate: nowIso,
             lastMessageSent: messageText,
             lastScheduledSendAt: data?.scheduledAt || customData?.suggestedSendAt || null,
+            recentMessages,
             pendingFollowupMessage: '',
             crmActionType: 'send_followup_message',
           },

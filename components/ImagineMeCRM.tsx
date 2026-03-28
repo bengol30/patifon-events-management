@@ -376,17 +376,21 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
       const updateData = await updateRes.json();
 
       if (updateData.ok) {
+        const nextRecentMessages = Array.isArray(updateData.updated?.recentMessages)
+          ? updateData.updated.recentMessages
+          : recentMessages;
+        setRecentMessages(nextRecentMessages);
         onTaskUpdated?.({
-          status: updateData.updated.status || "DONE",
+          status: updateData.updated.status || "IN_PROGRESS",
           currentStatus: updateData.updated.currentStatus,
           nextStep: updateData.updated.nextStep,
-          customData: {
+          customData: updateData.updated?.customData || {
             ...(taskData.customData || {}),
             conversationSummary,
-            recentMessages,
+            recentMessages: nextRecentMessages,
             pendingFollowupMessage: "",
           },
-          scheduleStatus: "",
+          scheduleStatus: updateData.updated?.scheduleStatus || "DONE",
           scheduledAt: null,
         });
         alert(

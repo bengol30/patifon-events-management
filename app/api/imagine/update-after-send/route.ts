@@ -93,16 +93,35 @@ Respond ONLY with valid JSON:
     }
 
     const existingData = taskDoc.data();
+    const nowIso = new Date().toISOString();
+    const sentTimestamp = Math.floor(Date.now() / 1000);
+    const existingRecentMessages = Array.isArray(recentMessages) && recentMessages.length > 0
+      ? recentMessages
+      : (Array.isArray(existingData?.customData?.recentMessages) ? existingData.customData.recentMessages : []);
+
+    const recentMessagesWithSent = [
+      {
+        from: 'us',
+        type: 'outgoing',
+        text: messageSent,
+        timestamp: sentTimestamp,
+      },
+      ...existingRecentMessages,
+    ].slice(0, 5);
+
     const updatedCustomData = {
       ...(existingData?.customData || {}),
       followUpStatus: analysis.followUpStatus || 'contacted',
-      lastContactDate: new Date().toISOString(),
+      lastContactDate: nowIso,
       lastMessageSent: messageSent,
-      recentMessages: Array.isArray(recentMessages) ? recentMessages : [],
+      recentMessages: recentMessagesWithSent,
       conversationSummary: conversationSummary || existingData?.customData?.conversationSummary || '',
+      pendingFollowupMessage: '',
     };
 
     await taskRef.update({
+      status: 'IN_PROGRESS',
+      scheduleStatus: 'DONE',
       currentStatus: analysis.currentStatus || 'נשלחה הודעת follow-up',
       nextStep: analysis.nextStep || 'המתנה לתגובה',
       priority: analysis.priority || 'NORMAL',
@@ -113,10 +132,14 @@ Respond ONLY with valid JSON:
       ok: true,
       analysis,
       updated: {
+        status: 'IN_PROGRESS',
+        scheduleStatus: 'DONE',
         currentStatus: analysis.currentStatus,
         nextStep: analysis.nextStep,
         priority: analysis.priority,
         followUpStatus: analysis.followUpStatus,
+        recentMessages: recentMessagesWithSent,
+        customData: updatedCustomData,
       },
     });
   } catch (error: any) {
