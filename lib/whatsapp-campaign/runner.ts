@@ -5,6 +5,7 @@ import { formatLocalDateTime } from "./builder.ts";
 import { sendWhatsappFileToChat, sendWhatsappTextToChat } from "./sender.ts";
 import type { WhatsappCampaignPayload, WhatsappCampaignSendStep, WhatsappCampaignTaskLike } from "./types.ts";
 import { shouldAllowCampaignStepExecution } from "@/lib/marketing-campaign-controls";
+import { fetchEventContent } from "@/lib/event-content-fetcher";
 
 const clean = (value: unknown) => String(value || "").trim();
 
@@ -52,7 +53,11 @@ export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber, ign
   const step = assertRunnableCampaignStep(task, stepNumber);
   const payload = asPayload(task);
   const sentAt = new Date().toISOString();
-  const firstMediaUrl = Array.isArray(payload.mediaUrls) ? payload.mediaUrls.map(clean).find(Boolean) : "";
+  
+  // 🔄 DYNAMIC CONTENT: Always fetch latest from event, not payload snapshot
+  const eventContent = await fetchEventContent(eventId);
+  const firstMediaUrl = eventContent.mediaUrls[0] || "";
+  const messageText = step.messageText || eventContent.text;
 
   try {
     for (const group of step.targetGroups) {
@@ -60,9 +65,9 @@ export const runWhatsappCampaignStep = async ({ eventId, taskId, stepNumber, ign
         throw new Error(`Invalid group chatId for ${group.name || group.id}`);
       }
       if (firstMediaUrl) {
-        await sendWhatsappFileToChat(group.chatId, firstMediaUrl, step.messageText);
+        await sendWhatsappFileToChat(group.chatId, firstMediaUrl, messageText);
       } else {
-        await sendWhatsappTextToChat(group.chatId, step.messageText);
+        await sendWhatsappTextToChat(group.chatId, messageText);
       }
     }
   } catch (error) {

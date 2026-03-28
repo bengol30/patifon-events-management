@@ -3,6 +3,7 @@ import admin, { adminDb } from '@/lib/firebase-admin';
 import { resolveInstagramAccountToken } from './scheduler';
 import { convertImageUrlToStoryBuffer } from './convert';
 import { shouldAllowCampaignStepExecution } from '@/lib/marketing-campaign-controls';
+import { fetchEventContent } from '@/lib/event-content-fetcher';
 
 const clean = (value: unknown) => String(value || '').trim();
 
@@ -36,7 +37,11 @@ export async function publishInstagramStoryCampaignStep(args: { eventId: string;
   const step = storyPlan.find((item) => Number(item.stepIndex || 0) === stepIndex);
   if (!step) throw new Error(`Step ${stepIndex} not found`);
 
-  const mediaUrls = Array.isArray(step.mediaUrls) ? step.mediaUrls.map(clean).filter(Boolean) : [];
+  // 🔄 DYNAMIC CONTENT: Always fetch latest from event, not payload snapshot
+  const eventContent = await fetchEventContent(eventId);
+  const mediaUrls = eventContent.mediaUrls.length > 0 
+    ? eventContent.mediaUrls 
+    : (Array.isArray(step.mediaUrls) ? step.mediaUrls.map(clean).filter(Boolean) : []);
   const originalImageUrl = mediaUrls[0];
   if (!originalImageUrl) throw new Error('No media URL for story step');
 

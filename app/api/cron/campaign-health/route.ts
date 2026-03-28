@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 import { syncCampaignControlsWithTask } from '@/lib/marketing-campaign-controls';
+import { detectEventContentDrift } from '@/lib/event-content-fetcher';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,6 +76,29 @@ export async function GET() {
         }
         if (clean(rawControls.status) === 'PAUSED') {
           checked.push({ ...base, note: 'campaign paused' });
+        }
+
+        // 🔍 Check for content drift (payload vs current event)
+        try {
+          const payload = (task.payload || {}) as Record<string, unknown>;
+          const payloadText = clean(payload.messageText);
+          const payloadMediaUrls = Array.isArray(payload.mediaUrls) ? payload.mediaUrls.map(clean).filter(Boolean) : [];
+          
+          const drift = await detectEventContentDrift(eventDoc.id, payloadText, payloadMediaUrls);
+          if (drift) {
+            issues.push({
+              ...base,
+              severity: 'medium',
+              type: 'content_drift',
+              message: 'Campaign content differs from current event text/media - consider refreshing',
+              driftDetails: {
+                textChanged: drift.text !== payloadText,
+                mediaChanged: JSON.stringify(drift.mediaUrls.sort()) !== JSON.stringify(payloadMediaUrls.sort()),
+              },
+            });
+          }
+        } catch (driftError) {
+          // Silently skip drift check if it fails (don't break the whole health check)
         }
 
         if (specialType === 'whatsapp_campaign_patifon') {
