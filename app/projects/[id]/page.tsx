@@ -174,6 +174,7 @@ export default function ProjectDetailsPage() {
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
           teamMembers: Array.isArray(data.teamMembers) ? data.teamMembers : [],
+          whatsappSummary: data.whatsappSummary || undefined,
         };
         setProject(proj);
         setForm({
