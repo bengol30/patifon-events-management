@@ -48,7 +48,12 @@ export default function CrmWhatsappSummarizer({ projectId, whatsappSummary }: Cr
                 whatsappSummary: summaryToSave
             });
 
-            setSuccessMsg("הסיכום בוצע בהצלחה! הנתונים נשמרו.");
+            setSuccessMsg("הסיכום בוצע בהצלחה! הדף יתרענן...");
+            
+            // Refresh page after 1 second to show updated data
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
         } catch (err: any) {
             console.error(err);
             setError(err.message || "שגיאה לא צפויה בפנייה לשרת");
