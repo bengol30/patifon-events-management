@@ -2163,15 +2163,26 @@ export default function EventDetailsPage() {
         }
     };
 
-    const handleCampaignControlAction = async (task: Task, action: "pause" | "resume" | "run_now" | "toggle_window" | "update_time", stepKey?: string, scheduledAt?: string) => {
+    const handleCampaignControlAction = async (task: Task, action: "pause" | "resume" | "run_now" | "toggle_window" | "update_time" | "refresh_content", stepKey?: string, scheduledAt?: string) => {
         try {
-            const res = await fetch("/api/marketing/campaign-controls", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ eventId: id, taskId: task.id, action, stepKey, scheduledAt }),
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data?.error || "שגיאה בעדכון שליטת הקמפיין");
+            if (action === "refresh_content") {
+                const res = await fetch("/api/marketing/refresh-content", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ eventId: id, taskId: task.id }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data?.error || "שגיאה ברענון התוכן");
+                alert("✅ התוכן עודכן מהאירוע בהצלחה!");
+            } else {
+                const res = await fetch("/api/marketing/campaign-controls", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ eventId: id, taskId: task.id, action, stepKey, scheduledAt }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data?.error || "שגיאה בעדכון שליטת הקמפיין");
+            }
         } catch (err) {
             console.error("Error updating campaign controls:", err);
             alert(err instanceof Error ? err.message : "שגיאה בעדכון שליטת הקמפיין");

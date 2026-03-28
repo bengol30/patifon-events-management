@@ -36,7 +36,7 @@ interface TaskProps {
         status?: "ACTIVE" | "PAUSED" | "WINDOW_BLOCKED";
         windows?: { stepKey: string; enabled: boolean; scheduledAt: string; label: string }[];
     } | null;
-    onCampaignControlAction?: (action: "pause" | "resume" | "run_now" | "toggle_window" | "update_time", stepKey?: string, scheduledAt?: string) => void;
+    onCampaignControlAction?: (action: "pause" | "resume" | "run_now" | "toggle_window" | "update_time" | "refresh_content", stepKey?: string, scheduledAt?: string) => void;
     isSelected?: boolean;
     onSelect?: (selected: boolean) => void;
     onDelete?: () => void;
@@ -447,6 +447,17 @@ export default function TaskCard({
                                                     className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
                                                 >
                                                     הפעל עכשיו
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onCampaignControlAction?.("refresh_content");
+                                                    }}
+                                                    className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
+                                                    title="רענן תוכן ומדיה מהאירוע"
+                                                >
+                                                    🔄 רענן תוכן
                                                 </button>
                                             </div>
                                             <div className="text-right">
