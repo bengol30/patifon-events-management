@@ -90,6 +90,20 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
   const phone = taskData.customData?.phone;
   const customerName = taskData.title.split(" - ")[0];
 
+  const normalizePhoneForWhatsAppLink = (rawPhone?: string) => {
+    if (!rawPhone) return "";
+    let digits = String(rawPhone).replace(/\D/g, "");
+    if (!digits) return "";
+    if (digits.startsWith("00")) digits = digits.slice(2);
+    if (digits.startsWith("0")) digits = `972${digits.slice(1)}`;
+    return digits;
+  };
+
+  const whatsappDirectLink = (() => {
+    const normalizedPhone = normalizePhoneForWhatsAppLink(phone);
+    return normalizedPhone ? `https://wa.me/${normalizedPhone}` : "";
+  })();
+
   useEffect(() => {
     console.log('ImagineMeCRM mounted for task:', taskId, 'projectId:', projectId);
     if (taskData.customData?.conversationSummary) {
@@ -431,7 +445,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
 
       {isExpanded && (
         <div className="mt-4 space-y-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <button
               onClick={handleFetchHistory}
               disabled={fetchingHistory || !phone}
@@ -444,6 +458,19 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
               )}
               {fetchingHistory ? "מחלץ..." : "חלץ היסטוריה"}
             </button>
+            <a
+              href={whatsappDirectLink || undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-disabled={!whatsappDirectLink}
+              className={`flex items-center justify-center w-10 h-10 rounded-full transition ${whatsappDirectLink
+                ? "bg-[#25D366] text-white hover:scale-105 shadow"
+                : "bg-gray-200 text-gray-400 cursor-not-allowed pointer-events-none"
+                }`}
+              title={whatsappDirectLink ? "פתח ווצאפ של הלקוח" : "אין מספר ווצאפ תקין"}
+            >
+              <MessageCircle className="w-5 h-5" />
+            </a>
             {whatsappHistory && (
               <span className="text-sm text-green-700">
                 ✓ {whatsappHistory.messageCount} הודעות נמצאו
