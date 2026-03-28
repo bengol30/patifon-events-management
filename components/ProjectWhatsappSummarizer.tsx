@@ -180,7 +180,7 @@ export default function ProjectWhatsappSummarizer({
             if (!res.ok) throw new Error(data.error || "שגיאה בחילוץ נתונים");
 
             const summaryToSave = {
-                lastSummarizedAt: serverTimestamp(),
+                lastSummarizedAt: new Date().toISOString(),
                 taskIdeas: data.summary?.taskIdeas || [],
                 importantPoints: data.summary?.importantPoints || [],
                 importantDates: data.summary?.importantDates || []
