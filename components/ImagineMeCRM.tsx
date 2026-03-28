@@ -28,6 +28,8 @@ interface ImagineMeCRMProps {
       eventDate?: string;
       eventType?: string;
       eventLocation?: string;
+      estimatedValue?: number;
+      lydiaStatus?: string;
       followUpStatus?: string;
       whatsappHistoryFetched?: boolean;
       aiSuggestionGenerated?: boolean;
@@ -286,6 +288,9 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
           eventType: taskData.customData?.eventType,
           eventDate: taskData.customData?.eventDate,
           eventLocation: taskData.customData?.eventLocation,
+          lydiaId: taskData.customData?.lydiaId,
+          lydiaStatus: taskData.customData?.lydiaStatus,
+          estimatedValue: taskData.customData?.estimatedValue,
           whatsappHistory: historyContext,
           recentMessages,
         }),

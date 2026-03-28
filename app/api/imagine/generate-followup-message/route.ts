@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getLydiaLeadById } from '@/lib/lydia';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,9 @@ export async function POST(request: Request) {
       whatsappHistory,
       recentMessages,
       projectId,
+      lydiaId,
+      lydiaStatus,
+      estimatedValue,
     } = await request.json();
 
     // Safety: only allow for Imagine Me project
@@ -35,12 +39,40 @@ export async function POST(request: Request) {
     // Calculate time since last message
     let daysSinceLastMessage = null;
     let lastMessageDate = null;
-    if (recentMessages && recentMessages.length > 0) {
+    const hasRecentMessages = Array.isArray(recentMessages) && recentMessages.length > 0;
+    const hasWhatsappHistory = Boolean(String(whatsappHistory || '').trim());
+    const hasConversationHistory = hasRecentMessages || hasWhatsappHistory;
+
+    if (hasRecentMessages) {
       const lastMsg = recentMessages[0]; // Most recent
       lastMessageDate = new Date(lastMsg.timestamp * 1000);
       const now = new Date();
       daysSinceLastMessage = Math.floor((now.getTime() - lastMessageDate.getTime()) / (1000 * 60 * 60 * 24));
     }
+
+    let lydiaLead: any = null;
+    if (!hasConversationHistory && lydiaId) {
+      try {
+        lydiaLead = await getLydiaLeadById(String(lydiaId));
+      } catch (error) {
+        console.error('generate-followup-message Lydia fetch failed:', error);
+      }
+    }
+
+    const resolvedCompany = company || lydiaLead?.company || null;
+    const resolvedEventType = eventType || lydiaLead?.event_type || null;
+    const resolvedEventDate = eventDate || lydiaLead?.event_date || null;
+    const resolvedEventLocation = eventLocation || lydiaLead?.event_location || null;
+    const resolvedLydiaStatus = lydiaStatus || lydiaLead?.status || null;
+    const resolvedEstimatedValue = estimatedValue ?? lydiaLead?.estimated_value ?? null;
+
+    const lydiaContextBlock = !hasConversationHistory ? `
+**Lydia lead data (primary source for this message):**
+- Customer: ${customerName}${resolvedCompany ? ` from ${resolvedCompany}` : ''}
+- Past event: ${resolvedEventType || 'אירוע'}${resolvedEventDate ? ` (${resolvedEventDate})` : ''}${resolvedEventLocation ? ` at ${resolvedEventLocation}` : ''}
+- Lead status in Lydia: ${resolvedLydiaStatus || 'unknown'}
+${resolvedEstimatedValue ? `- Estimated value: ${resolvedEstimatedValue}` : ''}
+` : '';
 
     const systemPrompt = `You are Ben from Imagine Me, writing a personal WhatsApp message to a past client.
 
@@ -56,19 +88,20 @@ export async function POST(request: Request) {
 - Maximum 2-3 sentences
 
 **Context:**
-- Customer: ${customerName}${company ? ` from ${company}` : ''}
-- Past event: ${eventType || 'אירוע'} ${eventDate ? `(${eventDate})` : ''}
+- Customer: ${customerName}${resolvedCompany ? ` from ${resolvedCompany}` : ''}
+- Past event: ${resolvedEventType || 'אירוע'} ${resolvedEventDate ? `(${resolvedEventDate})` : ''}${resolvedEventLocation ? ` | ${resolvedEventLocation}` : ''}
 ${daysSinceLastMessage !== null ? `- Days since last contact: ${daysSinceLastMessage}` : ''}
+${lydiaContextBlock}
 
 **Recent messages (last 5):**
-${recentMessages && recentMessages.length > 0 ? recentMessages.map((m: any) => {
+${hasRecentMessages ? recentMessages.map((m: any) => {
   const date = new Date(m.timestamp * 1000);
   const sender = m.from === 'customer' ? customerName : 'אני (בן)';
   return `${sender} (${date.toLocaleDateString('he-IL')}): ${m.text.substring(0, 80)}`;
-}).join('\n') : 'אין היסטוריה'}
+}).join('\n') : 'אין היסטוריית שיחה זמינה'}
 
 **Your message strategy:**
-${daysSinceLastMessage && daysSinceLastMessage > 7 ? `
+${hasConversationHistory ? (daysSinceLastMessage && daysSinceLastMessage > 7 ? `
 - It's been ${daysSinceLastMessage} days - send a GENTLE reminder
 - Don't pressure, just check in
 - Ask if they have upcoming events
@@ -76,6 +109,16 @@ ${daysSinceLastMessage && daysSinceLastMessage > 7 ? `
 - Continue the conversation naturally
 - Reference the last exchange if relevant
 - Offer help or ask about future events
+`) : `
+- There is NO conversation history available.
+- Base the message PRIMARILY on the imported Lydia lead data.
+- Open naturally with: "היי ${customerName}".
+- If you have event details, reference them naturally, like: "דיברנו בעבר על ה${resolvedEventType || 'אירוע'}" and optionally mention date/location if it flows.
+- Then transition to offering a NEW product called "תמונה בהזמנה".
+- Describe it as a special gift/product that was born from real experience working with the current event setup.
+- Keep it warm, personal and non-salesy.
+- Do NOT claim there was a WhatsApp conversation if none exists; only say "דיברנו" based on prior lead/event context.
+- Keep it to 3-5 short lines, still WhatsApp-natural.
 `}
 
 ${whatsappHistory ? `\n**Conversation summary:**\n${whatsappHistory}` : ''}
