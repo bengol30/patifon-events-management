@@ -115,8 +115,16 @@ export default function ProjectWhatsappSummarizer({
         if (!db) return;
         try {
             const nextGroups = projectGroups.some((g) => g.chatId === chatId)
-                ? projectGroups
-                : [...projectGroups, { chatId, name: groupName, summary: undefined }];
+                ? projectGroups.map((g) => ({
+                    chatId: g.chatId,
+                    name: g.name,
+                    ...(g.summary ? { summary: g.summary } : {}),
+                }))
+                : [...projectGroups.map((g) => ({
+                    chatId: g.chatId,
+                    name: g.name,
+                    ...(g.summary ? { summary: g.summary } : {}),
+                })), { chatId, name: groupName }];
             await updateDoc(doc(db, "projects", projectId), {
                 whatsappGroups: nextGroups,
                 whatsappGroupId: chatId,
@@ -135,7 +143,13 @@ export default function ProjectWhatsappSummarizer({
     const handleRemoveGroup = async (chatId: string) => {
         if (!db) return;
         try {
-            const nextGroups = projectGroups.filter((g) => g.chatId !== chatId);
+            const nextGroups = projectGroups
+                .filter((g) => g.chatId !== chatId)
+                .map((g) => ({
+                    chatId: g.chatId,
+                    name: g.name,
+                    ...(g.summary ? { summary: g.summary } : {}),
+                }));
             await updateDoc(doc(db, "projects", projectId), {
                 whatsappGroups: nextGroups,
                 whatsappGroupId: nextGroups[0]?.chatId || null,
@@ -173,7 +187,10 @@ export default function ProjectWhatsappSummarizer({
             };
 
             if (!db) throw new Error("Firebase לא מוגדר");
-            const nextGroups = projectGroups.map((g) => g.chatId === activeGroupId ? { ...g, summary: summaryToSave } : g);
+            const nextGroups = projectGroups.map((g) => g.chatId === activeGroupId
+                ? { chatId: g.chatId, name: g.name, summary: summaryToSave }
+                : { chatId: g.chatId, name: g.name, ...(g.summary ? { summary: g.summary } : {}) }
+            );
             await updateDoc(doc(db, "projects", projectId), {
                 whatsappGroups: nextGroups,
                 whatsappSummary: summaryToSave,
