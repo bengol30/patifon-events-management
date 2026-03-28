@@ -9,6 +9,10 @@ import {
     Clock,
     ExternalLink,
     MessageCircle,
+    Megaphone,
+    Camera,
+    Send,
+    Clapperboard,
     Trash2,
     UserPlus,
 } from "lucide-react";
@@ -103,6 +107,7 @@ export default function TaskCard({
     const [isExpanded, setIsExpanded] = useState(false);
     const [editingWindow, setEditingWindow] = useState<string | null>(null);
     const [editingTime, setEditingTime] = useState<string>("");
+    const [campaignExpanded, setCampaignExpanded] = useState(false);
 
     const getStatusMeta = () => {
         switch (status) {
@@ -169,6 +174,46 @@ export default function TaskCard({
                 ? "פעיל"
                 : null;
 
+    const getSpecialTypeMeta = () => {
+        switch (specialType) {
+            case "whatsapp_event_distribution":
+                return {
+                    icon: <Send size={13} />,
+                    label: "וואטסאפ אוטומטי",
+                    chip: "bg-emerald-100 text-emerald-800 border-emerald-200",
+                    dot: "bg-emerald-500",
+                    accent: "border-l-emerald-400",
+                };
+            case "instagram_story_campaign_patifon":
+                return {
+                    icon: <Camera size={13} />,
+                    label: "סטורי אינסטגרם",
+                    chip: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200",
+                    dot: "bg-fuchsia-500",
+                    accent: "border-l-fuchsia-400",
+                };
+            case "marketing_distribution":
+                return {
+                    icon: <Megaphone size={13} />,
+                    label: "שיווק קבוצות",
+                    chip: "bg-indigo-100 text-indigo-800 border-indigo-200",
+                    dot: "bg-indigo-500",
+                    accent: "border-l-indigo-400",
+                };
+            case "story_tag":
+                return {
+                    icon: <Clapperboard size={13} />,
+                    label: "סטורי ותיוג",
+                    chip: "bg-amber-100 text-amber-800 border-amber-200",
+                    dot: "bg-amber-500",
+                    accent: "border-l-amber-400",
+                };
+            default:
+                return null;
+        }
+    };
+    const specialMeta = getSpecialTypeMeta();
+
     const handleStatusClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
@@ -233,7 +278,7 @@ export default function TaskCard({
             onKeyDown={handleKeyActivate}
             role="button"
             tabIndex={0}
-            className={`group relative overflow-hidden rounded-3xl border bg-white shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(15,23,42,0.10)] ${isSelected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200/80"
+            className={`group relative overflow-hidden rounded-3xl border bg-white shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(15,23,42,0.10)] ${isSelected ? "border-indigo-500 ring-2 ring-indigo-200" : specialMeta ? "border-slate-200/80 border-l-4 " + specialMeta.accent : "border-slate-200/80"
                 }`}
         >
             <div className={`pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b ${statusMeta.accent}`} />
@@ -263,18 +308,17 @@ export default function TaskCard({
                                 </span>
                             )}
                             {customData?.followUpStatus && (
-                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                                    customData.followUpStatus === 'interested' ? 'bg-green-50 text-green-700 border-green-200' :
+                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${customData.followUpStatus === 'interested' ? 'bg-green-50 text-green-700 border-green-200' :
                                     customData.followUpStatus === 'negotiating' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                    customData.followUpStatus === 'awaiting_response' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                    customData.followUpStatus === 'not_interested' ? 'bg-gray-50 text-gray-700 border-gray-200' :
-                                    'bg-purple-50 text-purple-700 border-purple-200'
-                                }`}>
+                                        customData.followUpStatus === 'awaiting_response' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                                            customData.followUpStatus === 'not_interested' ? 'bg-gray-50 text-gray-700 border-gray-200' :
+                                                'bg-purple-50 text-purple-700 border-purple-200'
+                                    }`}>
                                     {customData.followUpStatus === 'interested' ? '🟢 מעוניין' :
-                                     customData.followUpStatus === 'negotiating' ? '🔵 במשא ומתן' :
-                                     customData.followUpStatus === 'awaiting_response' ? '🟡 ממתין לתגובה' :
-                                     customData.followUpStatus === 'not_interested' ? '⚫ לא מעוניין' :
-                                     '🟣 יצר קשר'}
+                                        customData.followUpStatus === 'negotiating' ? '🔵 במשא ומתן' :
+                                            customData.followUpStatus === 'awaiting_response' ? '🟡 ממתין לתגובה' :
+                                                customData.followUpStatus === 'not_interested' ? '⚫ לא מעוניין' :
+                                                    '🟣 יצר קשר'}
                                 </span>
                             )}
                         </div>
@@ -301,6 +345,12 @@ export default function TaskCard({
                                     <h3 className={`text-base font-bold leading-tight text-slate-900 sm:text-lg ${status === "DONE" ? "line-through text-slate-400" : ""}`}>
                                         {title}
                                     </h3>
+                                    {specialMeta && (
+                                        <span className={`mt-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${specialMeta.chip}`}>
+                                            {specialMeta.icon}
+                                            {specialMeta.label}
+                                        </span>
+                                    )}
                                     {eventId && eventTitle && (
                                         <button
                                             type="button"
@@ -628,6 +678,51 @@ export default function TaskCard({
                                 </button>
                             </div>
                         </div>
+
+                        {/* Campaign accordion — only for special tasks */}
+                        {specialMeta && (
+                            <div className="rounded-[22px] border border-slate-200 bg-white overflow-hidden">
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCampaignExpanded(p => !p);
+                                    }}
+                                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-right"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className={`flex h-6 w-6 items-center justify-center rounded-full border ${specialMeta.chip}`}>
+                                            {specialMeta.icon}
+                                        </span>
+                                        <span className="text-sm font-semibold text-slate-800">פרטי קמפיין</span>
+                                    </div>
+                                    <ChevronDown
+                                        size={16}
+                                        className={`shrink-0 text-slate-400 transition-transform duration-200 ${campaignExpanded ? "rotate-180" : ""}`}
+                                    />
+                                </button>
+                                {campaignExpanded && (
+                                    <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3 animate-in fade-in slide-in-from-top-1 duration-150">
+                                        {showCompletionCounter && (
+                                            <div className="flex items-center justify-end gap-2">
+                                                <span className="text-xs text-slate-500">התקדמות:</span>
+                                                <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${specialMeta.chip}`}>
+                                                    נותרו {completionRemaining} מתוך {completionRequired}
+                                                </span>
+                                            </div>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={handleNavigate}
+                                            className={`flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${specialMeta.chip} hover:opacity-80`}
+                                        >
+                                            <ExternalLink size={14} />
+                                            פתח משימה
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

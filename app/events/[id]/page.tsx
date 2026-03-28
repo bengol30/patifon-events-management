@@ -5989,7 +5989,7 @@ export default function EventDetailsPage() {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => loadWhatsappGroups()}
-                                                                className="px-2 py-1 rounded-md border border-emerald-200 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                                                className="min-h-[36px] px-3 py-2 rounded-lg border border-emerald-200 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition"
                                                             >
                                                                 רענן
                                                             </button>
@@ -6002,17 +6002,14 @@ export default function EventDetailsPage() {
                                                             ) : availableWhatsappGroups.map((group) => {
                                                                 const checked = selectedWhatsappGroupIds.includes(group.id);
                                                                 return (
-                                                                    <label key={group.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition ${checked ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                                                                    <label key={group.id} className={`flex items-center gap-3 rounded-lg border px-3 py-3 cursor-pointer transition ${checked ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white hover:border-emerald-200"}`}>
                                                                         <input
                                                                             type="checkbox"
-                                                                            className="mt-1 h-4 w-4 accent-emerald-600"
+                                                                            className="h-4 w-4 shrink-0 accent-emerald-600"
                                                                             checked={checked}
                                                                             onChange={() => setSelectedWhatsappGroupIds((prev) => checked ? prev.filter(id => id !== group.id) : [...prev, group.id])}
                                                                         />
-                                                                        <div className="min-w-0">
-                                                                            <p className="text-sm font-semibold text-gray-900">{group.name}</p>
-                                                                            <p className="text-[11px] text-gray-500 break-all">{group.chatId || "ללא chatId"}</p>
-                                                                        </div>
+                                                                        <p className="min-w-0 truncate text-sm font-semibold text-gray-900">{group.name}</p>
                                                                     </label>
                                                                 );
                                                             })}
@@ -6058,27 +6055,39 @@ export default function EventDetailsPage() {
                                             <p className="text-xs text-gray-500">אין משימות מיוחדות קיימות כרגע.</p>
                                         ) : (
                                             <div className="space-y-2">
-                                                {specialTasks.map((task) => (
-                                                    <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => router.push(`/tasks/${task.id}?eventId=${id}`)}
-                                                            className="min-w-0 flex-1 text-right"
-                                                        >
-                                                            <p className="text-sm font-semibold text-gray-900 truncate hover:underline">{task.title}</p>
-                                                            <p className="text-xs text-gray-500">
-                                                                סטטוס: {task.status === "DONE" ? "בוצע" : task.status === "IN_PROGRESS" ? "בתהליך" : task.status === "STUCK" ? "תקוע" : "פתוח"}
-                                                            </p>
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => confirmDeleteTask(task.id)}
-                                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
-                                                        >
-                                                            מחק
-                                                        </button>
-                                                    </div>
-                                                ))}
+                                                {specialTasks.map((task) => {
+                                                    const statusChip =
+                                                        task.status === "DONE" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                                            task.status === "IN_PROGRESS" ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
+                                                                task.status === "STUCK" ? "bg-red-50 text-red-700 border-red-200" :
+                                                                    "bg-slate-50 text-slate-600 border-slate-200";
+                                                    const statusLabel =
+                                                        task.status === "DONE" ? "בוצע" :
+                                                            task.status === "IN_PROGRESS" ? "בתהליך" :
+                                                                task.status === "STUCK" ? "תקוע" : "פתוח";
+                                                    return (
+                                                        <div key={task.id} className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => router.push(`/tasks/${task.id}?eventId=${id}`)}
+                                                                className="min-w-0 flex-1 text-right"
+                                                            >
+                                                                <p className="text-sm font-semibold text-gray-900 truncate hover:underline">{task.title}</p>
+                                                                <span className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusChip}`}>
+                                                                    {statusLabel}
+                                                                </span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => confirmDeleteTask(task.id)}
+                                                                className="shrink-0 p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition"
+                                                                title="מחק משימה"
+                                                            >
+                                                                <Trash2 size={15} />
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         )}
                                     </div>
