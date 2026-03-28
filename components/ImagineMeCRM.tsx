@@ -8,6 +8,15 @@ import { doc, updateDoc } from "firebase/firestore";
 interface ImagineMeCRMProps {
   projectId: string;
   taskId: string;
+  onTaskUpdated?: (updates: {
+    status?: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
+    currentStatus?: string;
+    nextStep?: string;
+    dueDate?: string | null;
+    scheduledAt?: string | null;
+    scheduleStatus?: string | null;
+    customData?: Record<string, any>;
+  }) => void;
   taskData: {
     title: string;
     currentStatus?: string;
@@ -62,7 +71,7 @@ const fromDatetimeLocalValue = (value: string) => {
   return parsed.toISOString();
 };
 
-export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeCRMProps) {
+export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdated }: ImagineMeCRMProps) {
   const IMAGINE_ME_PROJECT_ID = "yed4WRBzsXrdGzousyq0";
 
   if (projectId !== IMAGINE_ME_PROJECT_ID) {
@@ -136,28 +145,44 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
   };
 
   const persistSuggestedSchedule = async (nextIso: string, reason?: string, confidence?: string, pendingMessage?: string) => {
+    const nextCurrentStatus = pendingMessage?.trim()
+      ? `הודעת follow-up נוסחה וממתינה לשליחה ב-${new Date(nextIso).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`
+      : (taskData.currentStatus || "הודעת follow-up מוכנה");
+    const nextStepText = `שליחה מתוזמנת ל-${new Date(nextIso).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`;
+    const nextCustomData = {
+      ...(taskData.customData || {}),
+      conversationSummary,
+      recentMessages,
+      suggestedSendAt: nextIso,
+      suggestedSendReason: reason || "",
+      pendingFollowupMessage: pendingMessage ?? editedMessage,
+      crmActionType: "send_followup_message",
+    };
+
     await persistTaskState({
       scheduledAt: nextIso,
       dueDate: nextIso,
       scheduleStatus: "PENDING",
       executionMode: "EXTERNAL_ACTION",
-      currentStatus: taskData.currentStatus || "הודעת follow-up מוכנה",
-      nextStep: `שליחה מתוזמנת ל-${new Date(nextIso).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}`,
-      customData: {
-        ...(taskData.customData || {}),
-        conversationSummary,
-        recentMessages,
-        suggestedSendAt: nextIso,
-        suggestedSendReason: reason || "",
-        pendingFollowupMessage: pendingMessage ?? editedMessage,
-        crmActionType: "send_followup_message",
-      },
+      status: "IN_PROGRESS",
+      currentStatus: nextCurrentStatus,
+      nextStep: nextStepText,
+      customData: nextCustomData,
     });
 
     setScheduledAt(toDatetimeLocalValue(nextIso));
     setScheduleReason(reason || "");
     setScheduleConfidence(confidence || "");
     setLocalScheduledStatus("PENDING");
+    onTaskUpdated?.({
+      status: "IN_PROGRESS",
+      currentStatus: nextCurrentStatus,
+      nextStep: nextStepText,
+      dueDate: nextIso,
+      scheduledAt: nextIso,
+      scheduleStatus: "PENDING",
+      customData: nextCustomData,
+    });
   };
 
   const handleFetchHistory = async () => {
@@ -351,6 +376,19 @@ export default function ImagineMeCRM({ projectId, taskId, taskData }: ImagineMeC
       const updateData = await updateRes.json();
 
       if (updateData.ok) {
+        onTaskUpdated?.({
+          status: updateData.updated.status || "DONE",
+          currentStatus: updateData.updated.currentStatus,
+          nextStep: updateData.updated.nextStep,
+          customData: {
+            ...(taskData.customData || {}),
+            conversationSummary,
+            recentMessages,
+            pendingFollowupMessage: "",
+          },
+          scheduleStatus: "",
+          scheduledAt: null,
+        });
         alert(
           `✅ ההודעה נשלחה!\n\n` +
           `סטטוס: ${updateData.updated.currentStatus}\n` +

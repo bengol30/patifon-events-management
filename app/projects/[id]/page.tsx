@@ -1171,6 +1171,18 @@ export default function ProjectDetailsPage() {
                       projectId={projectId}
                       taskId={t.id}
                       taskData={t as any}
+                      onTaskUpdated={(updates) => {
+                        setProjectTasks(prev => prev.map(task => task.id === t.id ? {
+                          ...task,
+                          ...(updates.status ? { status: updates.status } : {}),
+                          ...(typeof updates.currentStatus !== "undefined" ? { currentStatus: updates.currentStatus } : {}),
+                          ...(typeof updates.nextStep !== "undefined" ? { nextStep: updates.nextStep } : {}),
+                          ...(typeof updates.dueDate !== "undefined" ? { dueDate: updates.dueDate || undefined } : {}),
+                          ...(typeof updates.scheduleStatus !== "undefined" ? { scheduleStatus: updates.scheduleStatus || undefined } : {}),
+                          ...(typeof updates.scheduledAt !== "undefined" ? { scheduledAt: updates.scheduledAt || undefined } : {}),
+                          ...(typeof updates.customData !== "undefined" ? { customData: updates.customData } : {}),
+                        } : task));
+                      }}
                     />
                   </div>
                 ))}
