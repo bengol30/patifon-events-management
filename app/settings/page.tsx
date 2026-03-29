@@ -152,11 +152,12 @@ export default function SettingsPage() {
     const [confirmPassword, setConfirmPassword] = useState("");
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingPassword, setSavingPassword] = useState(false);
-    const [whatsappConfig, setWhatsappConfig] = useState<{ idInstance: string; apiTokenInstance: string; senderPhone?: string; baseUrl?: string }>({
+    const [whatsappConfig, setWhatsappConfig] = useState<{ idInstance: string; apiTokenInstance: string; senderPhone?: string; baseUrl?: string; imagineMeStyleLearningEnabled?: boolean }>({
         idInstance: "",
         apiTokenInstance: "",
         senderPhone: "",
-        baseUrl: ""
+        baseUrl: "",
+        imagineMeStyleLearningEnabled: true
     });
     const [bulkFailures, setBulkFailures] = useState<BulkFailure[]>([]);
     const [checkingConnection, setCheckingConnection] = useState(false);
@@ -324,6 +325,7 @@ export default function SettingsPage() {
                         apiTokenInstance: data.apiTokenInstance || "",
                         senderPhone: data.senderPhone || "",
                         baseUrl: data.baseUrl || "",
+                        imagineMeStyleLearningEnabled: data.imagineMeStyleLearning?.enabled !== false,
                     });
                     setWaRules({
                         notifyOnMention: !!data.rules?.notifyOnMention,
@@ -764,6 +766,10 @@ export default function SettingsPage() {
                     rules: {
                         notifyOnMention: waRules.notifyOnMention,
                         notifyOnVolunteerDone: waRules.notifyOnVolunteerDone,
+                    },
+                    imagineMeStyleLearning: {
+                        enabled: whatsappConfig.imagineMeStyleLearningEnabled !== false,
+                        updatedAt: serverTimestamp(),
                     },
                     updatedAt: serverTimestamp(),
                     updatedBy: user.uid,
@@ -2751,6 +2757,32 @@ export default function SettingsPage() {
                                                 />
                                                 <p className="text-xs text-gray-500">הקישורים בהודעות ייבנו מהכתובת הזו (לא localhost).</p>
                                             </div>
+                                            <div className="rounded-xl border border-violet-200 bg-violet-50 p-4 space-y-3">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div>
+                                                        <div className="flex items-center gap-2 text-sm font-bold text-violet-900">
+                                                            <Brain size={16} className="text-violet-600" />
+                                                            לימוד סגנון Imagine Me
+                                                        </div>
+                                                        <p className="text-xs text-violet-800 mt-1 leading-5">
+                                                            כשהפיצ'ר פעיל, כל שליחה מתוך Imagine Me CRM מנותחת ונשמרות ממנה תובנות כדי לשפר את "הצעת הודעה".
+                                                        </p>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setWhatsappConfig(prev => ({ ...prev, imagineMeStyleLearningEnabled: !(prev.imagineMeStyleLearningEnabled !== false) }))}
+                                                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'bg-violet-600' : 'bg-gray-300'}`}
+                                                        aria-pressed={whatsappConfig.imagineMeStyleLearningEnabled !== false}
+                                                        title="הפעל/כבה לימוד סגנון"
+                                                    >
+                                                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'translate-x-6' : 'translate-x-1'}`} />
+                                                    </button>
+                                                </div>
+                                                <div className="text-xs font-medium text-violet-900">
+                                                    מצב נוכחי: {whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'פעיל' : 'כבוי'}
+                                                </div>
+                                            </div>
+
                                             <div className="flex items-center gap-3">
                                                 <button
                                                     type="submit"
@@ -2865,7 +2897,10 @@ export default function SettingsPage() {
                                     </form>
                                 </div>
 
-                                <ImagineMeStyleInsightsPanel insights={imagineMeStyleInsights} />
+                                <ImagineMeStyleInsightsPanel 
+                                    insights={imagineMeStyleInsights}
+                                    enabled={whatsappConfig.imagineMeStyleLearningEnabled !== false}
+                                />
 
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                                     <div className="flex items-start justify-between gap-3 mb-4">

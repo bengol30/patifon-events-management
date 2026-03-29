@@ -283,6 +283,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
+          taskId,
           customerName,
           company: taskData.customData?.company,
           eventType: taskData.customData?.eventType,

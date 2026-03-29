@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { adminDb } from '@/lib/firebase-admin';
 import { getLydiaLeadById } from '@/lib/lydia';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
       lydiaId,
       lydiaStatus,
       estimatedValue,
+      taskId,
     } = await request.json();
 
     // Safety: only allow for Imagine Me project
@@ -65,6 +67,31 @@ export async function POST(request: Request) {
     const resolvedEventLocation = eventLocation || lydiaLead?.event_location || null;
     const resolvedLydiaStatus = lydiaStatus || lydiaLead?.status || null;
     const resolvedEstimatedValue = estimatedValue ?? lydiaLead?.estimated_value ?? null;
+
+    let styleLearningEnabled = true;
+    let styleInsightsContext = '';
+    if (adminDb) {
+      try {
+        const [settingsSnap, insightsSnap] = await Promise.all([
+          adminDb.collection('integrations').doc('whatsapp').get(),
+          adminDb.collection('integrations').doc('whatsapp').collection('imagine_me_style_insights').orderBy('createdAt', 'desc').limit(8).get(),
+        ]);
+        styleLearningEnabled = settingsSnap.data()?.imagineMeStyleLearning?.enabled !== false;
+        if (styleLearningEnabled && !insightsSnap.empty) {
+          styleInsightsContext = insightsSnap.docs
+            .map((doc, index) => {
+              const data = doc.data() as any;
+              const insights = Array.isArray(data.insights) ? data.insights : [];
+              const lines = insights.map((item: any, insightIndex: number) => `  ${insightIndex + 1}. ${item?.recommendation || item?.insight || ''}`.trim()).filter(Boolean).join('\n');
+              return `דוגמה ${index + 1} (${data.customerName || 'ליד'}):\n${lines}`;
+            })
+            .filter(Boolean)
+            .join('\n\n');
+        }
+      } catch (error) {
+        console.error('generate-followup-message style insights fetch failed:', error);
+      }
+    }
 
     const lydiaContextBlock = !hasConversationHistory ? `
 **Lydia lead data (primary source for this message):**
@@ -122,6 +149,7 @@ ${hasConversationHistory ? (daysSinceLastMessage && daysSinceLastMessage > 7 ? `
 `}
 
 ${whatsappHistory ? `\n**Conversation summary:**\n${whatsappHistory}` : ''}
+${styleLearningEnabled && styleInsightsContext ? `\n**Ben style learning insights collected from real sent messages:**\n${styleInsightsContext}\n\nUse these insights as HIGH priority style guidance so the draft sounds like Ben.` : ''}
 
 Write ONE short WhatsApp message in Hebrew. Natural, human, brief.`;
 

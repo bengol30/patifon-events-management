@@ -42,6 +42,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Database not initialized' }, { status: 500 });
     }
 
+    const settingsRef = adminDb.collection('integrations').doc('whatsapp');
+    const settingsSnap = await settingsRef.get();
+    const styleLearningEnabled = settingsSnap.data()?.imagineMeStyleLearning?.enabled !== false;
+    if (!styleLearningEnabled) {
+      return NextResponse.json({ ok: true, skipped: true, reason: 'style_learning_disabled' });
+    }
+
     const taskRef = adminDb.collection('projects').doc(projectId).collection('tasks').doc(String(taskId));
     const taskSnap = await taskRef.get();
     if (!taskSnap.exists) {

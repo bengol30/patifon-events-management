@@ -22,6 +22,7 @@ type StyleInsight = {
 
 interface Props {
   insights: StyleInsight[];
+  enabled?: boolean;
 }
 
 const formatDate = (value?: string) => {
@@ -31,7 +32,7 @@ const formatDate = (value?: string) => {
   return date.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
 };
 
-export default function ImagineMeStyleInsightsPanel({ insights }: Props) {
+export default function ImagineMeStyleInsightsPanel({ insights, enabled = true }: Props) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
       <div className="flex items-start justify-between gap-3 mb-6">
@@ -49,7 +50,15 @@ export default function ImagineMeStyleInsightsPanel({ insights }: Props) {
         </div>
       </div>
 
-      {insights.length === 0 ? (
+      {!enabled ? (
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center">
+          <Sparkles className="mx-auto mb-3 text-gray-400" size={28} />
+          <div className="text-sm font-semibold text-gray-800">לימוד הסגנון כרגע כבוי</div>
+          <div className="text-sm text-gray-600 mt-1">
+            אפשר להפעיל אותו בכל רגע באזור ההגדרות למעלה, ואז המערכת תחזור לאסוף תובנות אחרי שליחות מתוך Imagine Me CRM.
+          </div>
+        </div>
+      ) : insights.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-violet-200 bg-violet-50/60 p-8 text-center">
           <Sparkles className="mx-auto mb-3 text-violet-500" size={28} />
           <div className="text-sm font-semibold text-violet-900">עוד לא נאספו תובנות</div>
