@@ -7,9 +7,10 @@ import { auth, db, storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc, getDoc, setDoc, getDocs, where, collectionGroup, limit } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar, Brain } from "lucide-react";
 import Link from "next/link";
 import ImportantDocuments from "@/components/ImportantDocuments";
+import ImagineMeStyleInsightsPanel from "@/components/ImagineMeStyleInsightsPanel";
 const ADMIN_EMAIL = "bengo0469@gmail.com";
 
 interface DefaultTask {
@@ -164,6 +165,7 @@ export default function SettingsPage() {
     const [savingWaRules, setSavingWaRules] = useState(false);
     const [loadingWhatsapp, setLoadingWhatsapp] = useState(true);
     const [savingWhatsapp, setSavingWhatsapp] = useState(false);
+    const [imagineMeStyleInsights, setImagineMeStyleInsights] = useState<any[]>([]);
 
     const [metricoolConfig, setMetricoolConfig] = useState<{ userToken: string; userId: string }>({
         userToken: "",
@@ -310,8 +312,11 @@ export default function SettingsPage() {
         }
 
         const ref = doc(db, "integrations", "whatsapp");
-        getDoc(ref)
-            .then((snap) => {
+        Promise.all([
+            getDoc(ref),
+            getDocs(query(collection(db, "integrations", "whatsapp", "imagine_me_style_insights"), orderBy("createdAt", "desc"), limit(50)))
+        ])
+            .then(([snap, insightsSnap]) => {
                 if (snap.exists()) {
                     const data = snap.data() as any;
                     setWhatsappConfig({
@@ -325,6 +330,7 @@ export default function SettingsPage() {
                         notifyOnVolunteerDone: !!data.rules?.notifyOnVolunteerDone,
                     });
                 }
+                setImagineMeStyleInsights(insightsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
             })
             .catch((err) => {
                 console.error("Failed loading WhatsApp config", err);
@@ -2858,6 +2864,8 @@ export default function SettingsPage() {
                                         </div>
                                     </form>
                                 </div>
+
+                                <ImagineMeStyleInsightsPanel insights={imagineMeStyleInsights} />
 
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                                     <div className="flex items-start justify-between gap-3 mb-4">

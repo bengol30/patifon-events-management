@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: Request) {
   try {
-    const { projectId, taskId, messageSent, conversationSummary, recentMessages } = await request.json();
+    const { projectId, taskId, messageSent, conversationSummary, recentMessages, styleInsightsEntry } = await request.json();
 
     // Safety: only allow for Imagine Me project
     const IMAGINE_ME_PROJECT_ID = 'yed4WRBzsXrdGzousyq0';
@@ -109,6 +109,10 @@ Respond ONLY with valid JSON:
       ...existingRecentMessages,
     ].slice(0, 5);
 
+    const existingStyleEntries = Array.isArray(existingData?.customData?.styleInsightsHistory)
+      ? existingData.customData.styleInsightsHistory
+      : [];
+
     const updatedCustomData = {
       ...(existingData?.customData || {}),
       followUpStatus: analysis.followUpStatus || 'contacted',
@@ -117,6 +121,10 @@ Respond ONLY with valid JSON:
       recentMessages: recentMessagesWithSent,
       conversationSummary: conversationSummary || existingData?.customData?.conversationSummary || '',
       pendingFollowupMessage: '',
+      latestStyleInsights: styleInsightsEntry || null,
+      styleInsightsHistory: styleInsightsEntry
+        ? [styleInsightsEntry, ...existingStyleEntries].slice(0, 20)
+        : existingStyleEntries,
     };
 
     await taskRef.update({

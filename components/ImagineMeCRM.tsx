@@ -366,6 +366,28 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
         throw new Error(data.error || "Failed to send message");
       }
 
+      let styleInsightsEntry: any = null;
+      try {
+        const styleRes = await fetch("/api/imagine/analyze-sent-message-style", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            taskId,
+            messageSent: editedMessage,
+            customerName,
+            conversationSummary,
+            recentMessages,
+          }),
+        });
+        const styleData = await styleRes.json();
+        if (styleData?.ok) {
+          styleInsightsEntry = styleData.entry;
+        }
+      } catch (styleErr) {
+        console.error("Style learning analysis failed", styleErr);
+      }
+
       const updateRes = await fetch("/api/imagine/update-after-send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -375,6 +397,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
           messageSent: editedMessage,
           conversationSummary,
           recentMessages,
+          styleInsightsEntry,
         }),
       });
 
