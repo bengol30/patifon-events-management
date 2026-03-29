@@ -516,6 +516,8 @@ export default function TaskCard({
                                         <div className="mt-3 flex flex-col gap-2">
                                             {campaignControls.windows.map((window) => {
                                                 const windowDate = new Date(window.scheduledAt);
+                                                const windowTs = windowDate.getTime();
+                                                const isPastWindow = !Number.isNaN(windowTs) && windowTs < Date.now();
                                                 const formattedDateTime = !Number.isNaN(windowDate.getTime())
                                                     ? `${windowDate.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })} • ${windowDate.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`
                                                     : window.scheduledAt.slice(0, 16).replace("T", " ");
@@ -523,7 +525,7 @@ export default function TaskCard({
                                                 const displayLabel = window.label && window.label.includes("T") && window.label.length >= 20 ? "מועד פרסום" : window.label;
 
                                                 return (
-                                                    <div key={window.stepKey} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                                    <div key={window.stepKey} className={`flex items-center justify-between gap-2 rounded-2xl border px-3 py-2 ${isPastWindow ? "border-slate-200 bg-slate-100/80" : "border-slate-200 bg-slate-50"}`}>
                                                         <div className="flex flex-wrap gap-2">
                                                             <button
                                                                 type="button"
@@ -561,8 +563,9 @@ export default function TaskCard({
                                                             </button>
                                                         </div>
                                                         <div className="text-right">
-                                                            <p className="text-[13px] font-bold text-slate-900">{displayLabel}</p>
-                                                            <p className="mt-0.5 text-xs font-semibold tracking-wide text-slate-500" dir="ltr">{formattedDateTime}</p>
+                                                            <p className={`text-[13px] font-bold ${isPastWindow ? "text-slate-500 line-through" : "text-slate-900"}`}>{displayLabel}</p>
+                                                            <p className={`mt-0.5 text-xs font-semibold tracking-wide ${isPastWindow ? "text-slate-400 line-through" : "text-slate-500"}`} dir="ltr">{formattedDateTime}</p>
+                                                            {isPastWindow ? <p className="mt-1 text-[11px] font-semibold text-slate-400">עבר</p> : null}
                                                             {editingWindow === window.stepKey && (
                                                                 <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
                                                                     <input

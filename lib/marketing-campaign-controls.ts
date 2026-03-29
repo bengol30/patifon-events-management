@@ -152,6 +152,56 @@ export const formatCampaignWindowLabel = (specialType: string, stepKey: string, 
   return `סטורי ${stepIndex} · ${safeDate}`;
 };
 
+export const getNextActiveCampaignWindow = (task: Record<string, unknown>, controlsInput?: Partial<CampaignControls> | null) => {
+  const controls = syncCampaignControlsWithTask(task, controlsInput);
+  const now = Date.now();
+  const enabledWindows = controls.windows.filter((window) => window.enabled);
+  if (!enabledWindows.length) return null;
+
+  const sortedWindows = [...enabledWindows].sort((a, b) => {
+    const aTime = new Date(a.scheduledAt).getTime();
+    const bTime = new Date(b.scheduledAt).getTime();
+    if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+    if (Number.isNaN(aTime)) return 1;
+    if (Number.isNaN(bTime)) return -1;
+    return aTime - bTime;
+  });
+
+  const upcomingWindow = sortedWindows.find((window) => {
+    const ts = new Date(window.scheduledAt).getTime();
+    return !Number.isNaN(ts) && ts >= now;
+  });
+
+  return upcomingWindow || sortedWindows[sortedWindows.length - 1] || null;
+};
+
+export const buildCampaignNextStepText = (task: Record<string, unknown>, controlsInput?: Partial<CampaignControls> | null) => {
+  const specialType = clean(task.specialType);
+  const payload = (task.payload || {}) as Record<string, unknown>;
+  const controls = syncCampaignControlsWithTask(task, controlsInput);
+  const nextWindow = getNextActiveCampaignWindow(task, controls);
+  if (!nextWindow) {
+    return controls.status === 'WINDOW_BLOCKED' ? 'אין מועד פעיל כרגע — כל חלונות הקמפיין חסומים' : clean(task.nextStep);
+  }
+
+  if (specialType === 'whatsapp_campaign_patifon') {
+    const sendPlan = Array.isArray(payload.sendPlan) ? payload.sendPlan as Record<string, unknown>[] : [];
+    const stepNumber = Number(nextWindow.stepKey.replace('wa-', '')) || 0;
+    const step = sendPlan.find((item, index) => Number(item.step || index + 1) === stepNumber);
+    return clean(step?.scheduledLabel) || formatCampaignWindowLabel(specialType, nextWindow.stepKey, nextWindow.scheduledAt);
+  }
+
+  if (specialType === 'instagram_story_campaign_patifon') {
+    const storyPlan = Array.isArray(payload.storyPlan) ? payload.storyPlan as Record<string, unknown>[] : [];
+    const stepIndex = Number(nextWindow.stepKey.replace('ig-', '')) || 0;
+    const step = storyPlan.find((item, index) => Number(item.stepIndex || index + 1) === stepIndex);
+    const scheduledTime = clean(step?.scheduledTime) || nextWindow.scheduledAt;
+    return `סטורי ${stepIndex} — ${scheduledTime}`;
+  }
+
+  return clean(task.nextStep);
+};
+
 export const updateCampaignTaskControls = async (args: {
   eventId: string;
   taskId: string;
