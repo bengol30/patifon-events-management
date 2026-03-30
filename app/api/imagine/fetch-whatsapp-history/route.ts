@@ -119,14 +119,16 @@ export async function POST(request: Request) {
             if (downloadUrl) {
               const extension = String(msg.fileName || '').split('.').pop() || (String(msg.mimeType || '').includes('mpeg') ? 'mp3' : 'ogg');
               const transcriptResult = await transcribeWhatsappVoiceFromUrl(downloadUrl, extension);
-              text = transcriptResult.transcript ? `[הודעה קולית מתומללת] ${transcriptResult.transcript}` : '[הודעה קולית ללא תמלול]';
+              text = transcriptResult.transcript
+                ? `[הודעה קולית מתומללת] ${transcriptResult.transcript}`
+                : `[הודעה קולית ללא תמלול${transcriptResult.error ? ` | ${transcriptResult.error}` : ''}]`;
               (msg as any).__transcriptDebug = transcriptResult;
             } else {
               text = '[הודעה קולית ללא קישור הורדה]';
             }
           } catch (error) {
             console.error('voice transcription failed', { idMessage: msg.idMessage, error, typeMessage: msg.typeMessage, downloadUrl: msg.downloadUrl || null });
-            text = '[הודעה קולית - התמלול נכשל]';
+            text = `[הודעה קולית - התמלול נכשל | ${error instanceof Error ? error.message : 'unknown_error'}]`;
           }
         }
 
