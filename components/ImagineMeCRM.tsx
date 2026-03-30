@@ -230,6 +230,15 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
 
         if (summaryData.ok) {
           setConversationSummary(summaryData.summary);
+          await persistTaskState({
+            customData: {
+              ...(taskData.customData || {}),
+              conversationSummary: summaryData.summary,
+              recentMessages: last5,
+              whatsappHistoryFetched: true,
+              lastSummaryUpdate: new Date().toISOString(),
+            },
+          });
 
           const analyzeRes = await fetch("/api/imagine/analyze-conversation", {
             method: "POST",
@@ -247,6 +256,18 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
 
           if (analyzeData.ok) {
             console.log('Task status updated based on conversation:', analyzeData.updated);
+            onTaskUpdated?.({
+              currentStatus: analyzeData.updated.currentStatus,
+              nextStep: analyzeData.updated.nextStep,
+              customData: {
+                ...(taskData.customData || {}),
+                conversationSummary: summaryData.summary,
+                recentMessages: last5,
+                followUpStatus: analyzeData.updated.followUpStatus,
+                whatsappHistoryFetched: true,
+                lastSummaryUpdate: new Date().toISOString(),
+              },
+            });
 
             alert(
               `📊 הסטטוס עודכן אוטומטית!\n\n` +
