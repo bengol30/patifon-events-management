@@ -9,7 +9,10 @@ const clean = (value: unknown) => String(value || '').trim();
 
 export async function GET() {
   try {
-    if (!adminDb) throw new Error('Firebase Admin not initialized');
+    if (!adminDb) {
+      console.error('❌ campaign-health: adminDb is null/undefined');
+      throw new Error('Firebase Admin not initialized');
+    }
 
     const nowSec = Math.floor(Date.now() / 1000);
     const eventsSnap = await adminDb.collection('events').get();

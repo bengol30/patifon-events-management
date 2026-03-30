@@ -1,8 +1,8 @@
 import admin from 'firebase-admin';
 import fs from 'fs';
 
-let adminDb: admin.firestore.Firestore | null = null;
-let adminAuth: admin.auth.Auth | null = null;
+let adminDb: admin.firestore.Firestore | undefined;
+let adminAuth: admin.auth.Auth | undefined;
 
 const initWithServiceAccount = (serviceAccount: Record<string, string>) => {
     admin.initializeApp({
@@ -46,7 +46,12 @@ if (!admin.apps.length) {
                     initWithServiceAccount(serviceAccount);
                     console.log('Firebase Admin initialized successfully with project local credentials');
                 } else {
-                    console.warn('Firebase Admin credentials not configured - some features may not work');
+                    console.warn('⚠️ Firebase Admin credentials not configured - some features may not work');
+                    console.warn('Attempted paths:');
+                    console.warn('  - FIREBASE_SERVICE_ACCOUNT_BASE64 env var');
+                    console.warn('  - FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY env vars');
+                    console.warn('  - ' + localVaultPath);
+                    console.warn('  - ' + projectLocalPath);
                 }
             }
         }

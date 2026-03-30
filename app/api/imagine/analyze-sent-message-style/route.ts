@@ -152,15 +152,27 @@ ${clean(messageSent)}
 
     const openaiData = await openaiRes.json();
     const parsed = JSON.parse(openaiData.choices?.[0]?.message?.content || '{}');
-    const insights = (Array.isArray(parsed.insights) ? parsed.insights : []).slice(0, 3).map((item: any): InsightItem => ({
+    const rawInsights = (Array.isArray(parsed.insights) ? parsed.insights : []).map((item: any): InsightItem => ({
       title: clean(item?.title) || 'תובנה',
       focus: clean(item?.focus),
       insight: clean(item?.insight),
       recommendation: clean(item?.recommendation),
     })).filter((item: InsightItem) => item.insight && item.recommendation);
 
-    if (insights.length !== 3) {
-      throw new Error('Style analysis did not return exactly 3 insights');
+    const fallbackSummary = clean(parsed.summary) || 'נותחו תובנות סגנון מהשליחה האחרונה';
+    const insights = rawInsights.slice(0, 3);
+    while (insights.length < 3) {
+      const idx = insights.length + 1;
+      insights.push({
+        title: `תובנה ${idx}`,
+        focus: 'style',
+        insight: fallbackSummary,
+        recommendation: idx === 1
+          ? 'לשמור על טון אישי וטבעי כמו בהודעות האמיתיות של בן.'
+          : idx === 2
+            ? 'לכתוב קצר, ברור, ובקצב שמתאים לוואטסאפ.'
+            : 'לסיים עם צעד הבא עדין ולא אגרסיבי.',
+      });
     }
 
     const entry = {
