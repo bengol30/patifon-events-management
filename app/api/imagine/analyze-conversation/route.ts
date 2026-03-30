@@ -75,12 +75,16 @@ Based on the FULL history window, determine:
 **Guidelines:**
 - **CRITICAL**: Check the MOST RECENT message first! It overrides everything else.
 - Base the answer on the latest reality, not on an older negotiation stage.
-- If customer said "לא רלוונטי" / "לא מתאים" / "לא מעוניין" / "ירדנו מזה" → "not_interested" + NORMAL
-- If customer is actively discussing details/pricing → "negotiating" + HIGH priority
-- If customer asked question and waiting for Ben → "awaiting_response" + HIGH
-- If Ben sent message and waiting for customer → "awaiting_response" + NORMAL
-- If customer said they'll check/think about it → "interested" + NORMAL
-- If last contact was >7 days ago → increase priority to HIGH
+- You must identify who currently holds the ball.
+- If the customer asked a question/request and Ben still needs to answer/check/confirm, then this is ALWAYS `awaiting_response` with HIGH priority.
+- If Ben said he will check something and the customer only acknowledged, the ball is still with Ben.
+- If Ben already answered and now waiting for customer decision, then `awaiting_response` + NORMAL.
+- If customer is actively discussing details/pricing/customization → `negotiating` + HIGH priority.
+- If customer said they'll check/think about it → `interested` + NORMAL.
+- If customer said "לא רלוונטי" / "לא מתאים" / "לא מעוניין" / "ירדנו מזה" → `not_interested` + NORMAL.
+- If last contact was >7 days ago → increase priority to HIGH.
+- Prefer concrete statuses like "ממתינה לאישור ממני על לוגו" over vague ones like "בשיח מתקדם".
+- Prefer next steps that mention the exact unresolved item from the newest messages.
 
 **Most Recent Message Priority:**
 The NEWEST message (first in the list) is the current state. If it says "not relevant", that's the status NOW.

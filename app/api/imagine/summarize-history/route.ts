@@ -32,25 +32,47 @@ export async function POST(request: Request) {
       })
       .join('\n');
 
+    const newestMessages = messages.slice(0, 10);
+    const olderMessages = messages.slice(10, 70);
+
     const systemPrompt = `You are analyzing a WhatsApp conversation between Ben (from Imagine Me) and a customer.
 
 Imagine Me is a business that creates AI-generated photos for events.
 
 IMPORTANT:
 - The conversation input contains up to the latest 70 messages.
-- You MUST pay special attention to the newest messages at the top/end of the discussion chronology.
+- The messages are ordered NEWEST FIRST.
+- You MUST give much more weight to the latest 5-10 messages than to older messages.
 - If there is any contradiction between older parts of the conversation and the latest updates, the latest updates win.
 - Your summary must reflect the FINAL current reality of the chat, not just the general theme.
+- You must explicitly determine who currently holds the ball: Ben or the customer.
+- If the customer asked a question and Ben still owes an answer, say that clearly.
+- Do not hide unresolved open items behind a generic summary.
 
-Analyze the conversation and provide:
-1. **Summary** - What was discussed? What happened overall?
-2. **Key Points** - Important decisions, agreements, changes, or concerns
-3. **Tone** - Customer's attitude (positive/neutral/negative/mixed)
-4. **Important Dates/Numbers** - Any dates, prices, quantities mentioned
-5. **Current Status** - Where does the conversation stand NOW based on the latest messages?
-6. **Latest Updates** - Explicitly mention the final recent updates from the newest messages
+Newest messages (highest priority):
+${newestMessages.map((m: any) => {
+  const speaker = m.from === 'customer' ? customerName || 'לקוח' : 'בן (Imagine Me)';
+  return `- ${speaker}: ${m.text}`;
+}).join('\n')}
 
-Respond in Hebrew, be concise and factual.`;
+Older messages (supporting context only):
+${olderMessages.length > 0 ? olderMessages.map((m: any) => {
+  const speaker = m.from === 'customer' ? customerName || 'לקוח' : 'בן (Imagine Me)';
+  return `- ${speaker}: ${m.text}`;
+}).join('\n') : 'אין הודעות ישנות נוספות'}
+
+Write the response in Hebrew, concise and factual, in exactly this structure:
+סיכום כללי: ...
+נקודות חשובות:
+- ...
+- ...
+טון הלקוחה: ...
+תאריכים/מספרים חשובים: ...
+סטטוס נוכחי: ...
+הודעות אחרונות שמשנות את התמונה:
+- ...
+- ...
+אצל מי הכדור עכשיו: ...`;
 
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
