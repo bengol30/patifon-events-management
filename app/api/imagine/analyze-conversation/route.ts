@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: Request) {
   try {
-    const { projectId, taskId, conversationSummary, recentMessages } = await request.json();
+    const { projectId, taskId, conversationSummary, recentMessages, messages } = await request.json();
 
     // Safety: only allow for Imagine Me project
     const IMAGINE_ME_PROJECT_ID = 'yed4WRBzsXrdGzousyq0';
@@ -29,31 +29,52 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Database not initialized' }, { status: 500 });
     }
 
+    const fullMessages = Array.isArray(messages) ? messages : [];
+    const latestWindow = fullMessages.slice(0, 15);
+    const olderWindow = fullMessages.slice(15, 70);
+
     // Analyze conversation to determine status
     const systemPrompt = `You are analyzing a WhatsApp conversation history to determine the current sales status.
 
 **Context:**
 - Business: Imagine Me (AI photo service for events)
 - Just fetched conversation history from WhatsApp
+- IMPORTANT: The source of truth is the full message history window (up to 70 latest messages), with EXTRA WEIGHT to the newest messages.
+- IMPORTANT: If the newest messages contradict older context or the summary, the newest messages win.
 
-**Recent conversation (last 5 messages):**
+**Newest messages (highest priority):**
+${latestWindow.length > 0 ? latestWindow.map((m: any) => {
+  const date = new Date(m.timestamp * 1000);
+  const sender = m.from === 'customer' ? 'Customer' : 'Ben';
+  return `${sender} (${date.toLocaleDateString('he-IL')}): ${(m.text || '').substring(0, 160)}`;
+}).join('\n') : 'No recent messages'}
+
+**Older messages in the same 70-message window:**
+${olderWindow.length > 0 ? olderWindow.map((m: any) => {
+  const date = new Date(m.timestamp * 1000);
+  const sender = m.from === 'customer' ? 'Customer' : 'Ben';
+  return `${sender} (${date.toLocaleDateString('he-IL')}): ${(m.text || '').substring(0, 120)}`;
+}).join('\n') : 'No older messages'}
+
+**Pinned UI preview (last 5 messages):**
 ${recentMessages && recentMessages.length > 0 ? recentMessages.map((m: any) => {
   const date = new Date(m.timestamp * 1000);
   const sender = m.from === 'customer' ? 'Customer' : 'Ben';
-  return `${sender} (${date.toLocaleDateString('he-IL')}): ${m.text.substring(0, 100)}`;
+  return `${sender} (${date.toLocaleDateString('he-IL')}): ${(m.text || '').substring(0, 120)}`;
 }).join('\n') : 'No recent messages'}
 
-${conversationSummary ? `\n**Full Summary:**\n${conversationSummary}` : ''}
+${conversationSummary ? `\n**Existing Summary (supporting context only):**\n${conversationSummary}` : ''}
 
 **Task:**
-Based on the conversation history, determine:
-1. **Current Status** (Hebrew, max 50 chars) - What stage is this lead in?
-2. **Next Step** (Hebrew, max 80 chars) - What should Ben do next?
+Based on the FULL history window, determine:
+1. **Current Status** (Hebrew, max 50 chars) - What stage is this lead in NOW?
+2. **Next Step** (Hebrew, max 80 chars) - What should Ben do next NOW?
 3. **Follow-up Status** - One of: "contacted" | "awaiting_response" | "negotiating" | "interested" | "not_interested"
 4. **Priority** - One of: "NORMAL" | "HIGH" | "CRITICAL"
 
 **Guidelines:**
 - **CRITICAL**: Check the MOST RECENT message first! It overrides everything else.
+- Base the answer on the latest reality, not on an older negotiation stage.
 - If customer said "לא רלוונטי" / "לא מתאים" / "לא מעוניין" / "ירדנו מזה" → "not_interested" + NORMAL
 - If customer is actively discussing details/pricing → "negotiating" + HIGH priority
 - If customer asked question and waiting for Ben → "awaiting_response" + HIGH

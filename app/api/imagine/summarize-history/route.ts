@@ -36,12 +36,19 @@ export async function POST(request: Request) {
 
 Imagine Me is a business that creates AI-generated photos for events.
 
+IMPORTANT:
+- The conversation input contains up to the latest 70 messages.
+- You MUST pay special attention to the newest messages at the top/end of the discussion chronology.
+- If there is any contradiction between older parts of the conversation and the latest updates, the latest updates win.
+- Your summary must reflect the FINAL current reality of the chat, not just the general theme.
+
 Analyze the conversation and provide:
-1. **Summary** - What was discussed? What happened?
-2. **Key Points** - Important decisions, agreements, or concerns
+1. **Summary** - What was discussed? What happened overall?
+2. **Key Points** - Important decisions, agreements, changes, or concerns
 3. **Tone** - Customer's attitude (positive/neutral/negative/mixed)
 4. **Important Dates/Numbers** - Any dates, prices, quantities mentioned
-5. **Current Status** - Where does the conversation stand? What's pending?
+5. **Current Status** - Where does the conversation stand NOW based on the latest messages?
+6. **Latest Updates** - Explicitly mention the final recent updates from the newest messages
 
 Respond in Hebrew, be concise and factual.`;
 

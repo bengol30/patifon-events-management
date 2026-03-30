@@ -239,6 +239,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
               taskId,
               conversationSummary: summaryData.summary,
               recentMessages: last5,
+              messages: data.messages,
             }),
           });
 
