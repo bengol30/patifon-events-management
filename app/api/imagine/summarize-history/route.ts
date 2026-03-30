@@ -50,6 +50,9 @@ CRITICAL RULES:
 - Mention the exact unresolved item from the newest messages.
 - If there are 2 open items in the latest messages (for example logo + free text), mention both and do not collapse them into one.
 - The latestUpdates field must contain the concrete unresolved requests from the newest messages, not general business background.
+- ALL field values must be written in Hebrew only.
+- Do not use English sentences or English descriptions in any value.
+- Only the enum in ballOwnerNow may be Ben or Customer.
 
 Newest messages (highest priority):
 ${newestMessages.map(renderMessage).join('\n')}

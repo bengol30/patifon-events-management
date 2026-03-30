@@ -36,6 +36,9 @@ CRITICAL RULES:
 - If the customer asked a question/request and Ben still owes an answer/check/confirmation, then the ball is with Ben.
 - Do not write a generic sales summary if there is a specific unresolved item in the newest messages.
 - Mention the exact unresolved item from the newest messages.
+- ALL field values must be written in Hebrew only.
+- Do not use English sentences or English descriptions in any value.
+- Only the enum in ballOwnerNow may be Ben or Customer.
 
 Newest messages (highest priority):
 ${newestMessages.map(renderMessage).join('\n')}
