@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 import { assertValidGreenApiBaseUrl, DEFAULT_GREEN_API_BASE_URL } from '@/lib/whatsapp-base-url';
+import { buildConversationSummaryFromRecentMessages } from '@/lib/imagine-followup-state';
 
 export const dynamic = 'force-dynamic';
 
@@ -116,8 +117,6 @@ export async function POST() {
 
         const nowIso = new Date().toISOString();
         const sentTimestamp = Math.floor(Date.now() / 1000);
-        const currentStatus = 'הודעת follow-up אחרונה נשלחה אוטומטית';
-        const nextStep = 'להמתין לתגובה מהלקוחה ולעקוב אחר ההמשך';
         const recentMessages = [
           {
             from: 'us',
@@ -127,23 +126,30 @@ export async function POST() {
           },
           ...(Array.isArray(customData?.recentMessages) ? customData.recentMessages : []),
         ].slice(0, 5);
+        const derived = buildConversationSummaryFromRecentMessages({
+          customerName: String(data?.title || '').split(' - ')[0],
+          existingSummary: customData?.conversationSummary || '',
+          recentMessages,
+          messageSent: messageText,
+        });
 
         await taskDoc.ref.update({
           status: 'IN_PROGRESS',
           scheduleStatus: 'DONE',
           executionMode: 'EXTERNAL_ACTION',
           executionResult: 'Imagine Me scheduled follow-up sent',
-          currentStatus,
-          nextStep,
-          priority: data?.priority || 'NORMAL',
+          currentStatus: derived.currentStatus,
+          nextStep: derived.nextStep,
+          priority: data?.priority || derived.priority || 'NORMAL',
           dueDate: data?.dueDate || data?.scheduledAt || null,
           customData: {
             ...customData,
-            followUpStatus: 'awaiting_response',
+            followUpStatus: derived.followUpStatus,
             lastContactDate: nowIso,
             lastMessageSent: messageText,
             lastScheduledSendAt: data?.scheduledAt || customData?.suggestedSendAt || null,
             recentMessages,
+            conversationSummary: derived.summary,
             pendingFollowupMessage: '',
             crmActionType: 'send_followup_message',
           },

@@ -409,14 +409,16 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
         const nextRecentMessages = Array.isArray(updateData.updated?.recentMessages)
           ? updateData.updated.recentMessages
           : recentMessages;
+        const nextConversationSummary = updateData.updated?.conversationSummary || conversationSummary;
         setRecentMessages(nextRecentMessages);
+        setConversationSummary(nextConversationSummary);
         onTaskUpdated?.({
           status: updateData.updated.status || "IN_PROGRESS",
           currentStatus: updateData.updated.currentStatus,
           nextStep: updateData.updated.nextStep,
           customData: updateData.updated?.customData || {
             ...(taskData.customData || {}),
-            conversationSummary,
+            conversationSummary: nextConversationSummary,
             recentMessages: nextRecentMessages,
             pendingFollowupMessage: "",
           },

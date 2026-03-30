@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { buildConversationSummaryFromRecentMessages } from '@/lib/imagine-followup-state';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,13 +114,20 @@ Respond ONLY with valid JSON:
       ? existingData.customData.styleInsightsHistory
       : [];
 
+    const derived = buildConversationSummaryFromRecentMessages({
+      customerName: existingData?.title ? String(existingData.title).split(' - ')[0] : undefined,
+      existingSummary: conversationSummary || existingData?.customData?.conversationSummary || '',
+      recentMessages: recentMessagesWithSent,
+      messageSent,
+    });
+
     const updatedCustomData = {
       ...(existingData?.customData || {}),
-      followUpStatus: analysis.followUpStatus || 'contacted',
+      followUpStatus: analysis.followUpStatus || derived.followUpStatus || 'contacted',
       lastContactDate: nowIso,
       lastMessageSent: messageSent,
       recentMessages: recentMessagesWithSent,
-      conversationSummary: conversationSummary || existingData?.customData?.conversationSummary || '',
+      conversationSummary: derived.summary,
       pendingFollowupMessage: '',
       latestStyleInsights: styleInsightsEntry || null,
       styleInsightsHistory: styleInsightsEntry
@@ -130,9 +138,9 @@ Respond ONLY with valid JSON:
     await taskRef.update({
       status: 'IN_PROGRESS',
       scheduleStatus: 'DONE',
-      currentStatus: analysis.currentStatus || 'נשלחה הודעת follow-up',
-      nextStep: analysis.nextStep || 'המתנה לתגובה',
-      priority: analysis.priority || 'NORMAL',
+      currentStatus: analysis.currentStatus || derived.currentStatus || 'נשלחה הודעת follow-up',
+      nextStep: analysis.nextStep || derived.nextStep || 'המתנה לתגובה',
+      priority: analysis.priority || derived.priority || 'NORMAL',
       customData: updatedCustomData,
     });
 
@@ -142,11 +150,12 @@ Respond ONLY with valid JSON:
       updated: {
         status: 'IN_PROGRESS',
         scheduleStatus: 'DONE',
-        currentStatus: analysis.currentStatus,
-        nextStep: analysis.nextStep,
-        priority: analysis.priority,
-        followUpStatus: analysis.followUpStatus,
+        currentStatus: analysis.currentStatus || derived.currentStatus,
+        nextStep: analysis.nextStep || derived.nextStep,
+        priority: analysis.priority || derived.priority,
+        followUpStatus: analysis.followUpStatus || derived.followUpStatus,
         recentMessages: recentMessagesWithSent,
+        conversationSummary: derived.summary,
         customData: updatedCustomData,
       },
     });
