@@ -96,12 +96,35 @@ export async function POST(request: Request) {
         const isVoice = typeMessage === 'audioMessage' || typeMessage === 'pttMessage';
         let text = msg.textMessage || msg.extendedTextMessage?.text || '';
 
-        if (!text && isVoice && msg.downloadUrl) {
+        if (!text && isVoice) {
           try {
-            const transcript = await transcribeWhatsappVoiceFromUrl(String(msg.downloadUrl));
-            text = transcript ? `[הודעה קולית מתומללת] ${transcript}` : '[הודעה קולית ללא תמלול]';
+            let downloadUrl = String(msg.downloadUrl || '').trim();
+
+            if (!downloadUrl && msg.idMessage) {
+              const downloadRes = await fetch(`${apiUrl}/downloadFile/${token}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chatId,
+                  idMessage: msg.idMessage,
+                }),
+              });
+
+              if (downloadRes.ok) {
+                const downloadData = await downloadRes.json();
+                downloadUrl = String(downloadData?.downloadUrl || '').trim();
+              }
+            }
+
+            if (downloadUrl) {
+              const extension = String(msg.fileName || '').split('.').pop() || (String(msg.mimeType || '').includes('mpeg') ? 'mp3' : 'ogg');
+              const transcript = await transcribeWhatsappVoiceFromUrl(downloadUrl, extension);
+              text = transcript ? `[הודעה קולית מתומללת] ${transcript}` : '[הודעה קולית ללא תמלול]';
+            } else {
+              text = '[הודעה קולית ללא קישור הורדה]';
+            }
           } catch (error) {
-            console.error('voice transcription failed', { idMessage: msg.idMessage, error });
+            console.error('voice transcription failed', { idMessage: msg.idMessage, error, typeMessage: msg.typeMessage, downloadUrl: msg.downloadUrl || null });
             text = '[הודעה קולית - התמלול נכשל]';
           }
         }

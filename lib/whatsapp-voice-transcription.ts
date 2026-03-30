@@ -7,12 +7,12 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string) {
+export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extension = 'ogg') {
   if (!downloadUrl) return null;
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'patifon-voice-'));
   const baseName = crypto.randomBytes(8).toString('hex');
-  const inputPath = path.join(tempDir, `${baseName}.ogg`);
+  const inputPath = path.join(tempDir, `${baseName}.${extension}`);
 
   try {
     const res = await fetch(downloadUrl);
