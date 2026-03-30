@@ -7,7 +7,9 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-const CACHE_DIR = path.join(process.cwd(), '.cache', 'voice-transcripts');
+const CACHE_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'patifon-voice-transcripts')
+  : path.join(process.cwd(), '.cache', 'voice-transcripts');
 
 export type VoiceTranscriptResult = {
   transcript: string | null;
@@ -43,14 +45,19 @@ const transcribeViaOpenAI = async (wavPath: string) => {
 export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extension = 'ogg'): Promise<VoiceTranscriptResult> {
   if (!downloadUrl) return { transcript: null, source: 'none', error: 'missing_download_url' };
 
-  await fs.mkdir(CACHE_DIR, { recursive: true });
-  const cacheKey = crypto.createHash('sha1').update(`${downloadUrl}|${extension}`).digest('hex');
-  const cachePath = path.join(CACHE_DIR, `${cacheKey}.txt`);
-
+  let cachePath: string | null = null;
   try {
-    const cached = (await fs.readFile(cachePath, 'utf8')).trim();
-    if (cached) return { transcript: cached, source: 'cache', error: null };
-  } catch {}
+    await fs.mkdir(CACHE_DIR, { recursive: true });
+    const cacheKey = crypto.createHash('sha1').update(`${downloadUrl}|${extension}`).digest('hex');
+    cachePath = path.join(CACHE_DIR, `${cacheKey}.txt`);
+
+    try {
+      const cached = (await fs.readFile(cachePath, 'utf8')).trim();
+      if (cached) return { transcript: cached, source: 'cache', error: null };
+    } catch {}
+  } catch (error) {
+    console.error('Voice transcript cache unavailable, continuing without cache', error);
+  }
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'patifon-voice-'));
   const baseName = crypto.randomBytes(8).toString('hex');
@@ -89,7 +96,9 @@ export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extens
       const txtPath = path.join(tempDir, `${baseName}.txt`);
       const transcript = (await fs.readFile(txtPath, 'utf8')).trim();
       if (transcript) {
-        await fs.writeFile(cachePath, transcript, 'utf8').catch(() => {});
+        if (cachePath) {
+          await fs.writeFile(cachePath, transcript, 'utf8').catch(() => {});
+        }
         return { transcript, source: 'whisper', error: null };
       }
     } catch (error: any) {
@@ -99,7 +108,9 @@ export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extens
     try {
       const fallbackTranscript = await transcribeViaOpenAI(wavPath);
       if (fallbackTranscript) {
+        if (cachePath) {
         await fs.writeFile(cachePath, fallbackTranscript, 'utf8').catch(() => {});
+      }
         return { transcript: fallbackTranscript, source: 'openai', error: null };
       }
       return { transcript: null, source: 'none', error: 'empty_fallback_transcript' };
