@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { transcribeWhatsappVoiceFromUrl } from '@/lib/whatsapp-voice-transcription';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,18 +84,41 @@ export async function POST(request: Request) {
     // Filter messages from 10.2.2026 onwards
     const cutoffDate = new Date('2026-02-10T00:00:00Z').getTime() / 1000; // Unix timestamp
 
-    // Format for AI processing
-    const formattedMessages = Array.isArray(messages)
+    const filteredMessages = Array.isArray(messages)
       ? messages
-          .filter((msg: any) => msg.timestamp >= cutoffDate) // Only messages after 10.2.2026
-          .map((msg: any) => ({
-            timestamp: msg.timestamp,
-            from: msg.type === 'incoming' ? 'customer' : 'us',
-            text: msg.textMessage || msg.extendedTextMessage?.text || '[media]',
-            type: msg.type, // Keep type for debugging
-          }))
-          .sort((a, b) => b.timestamp - a.timestamp) // Sort by timestamp DESC (newest first)
+          .filter((msg: any) => msg.timestamp >= cutoffDate)
+          .sort((a, b) => b.timestamp - a.timestamp)
       : [];
+
+    const formattedMessages = await Promise.all(
+      filteredMessages.map(async (msg: any) => {
+        const typeMessage = String(msg.typeMessage || '');
+        const isVoice = typeMessage === 'audioMessage' || typeMessage === 'pttMessage';
+        let text = msg.textMessage || msg.extendedTextMessage?.text || '';
+
+        if (!text && isVoice && msg.downloadUrl) {
+          try {
+            const transcript = await transcribeWhatsappVoiceFromUrl(String(msg.downloadUrl));
+            text = transcript ? `[הודעה קולית מתומללת] ${transcript}` : '[הודעה קולית ללא תמלול]';
+          } catch (error) {
+            console.error('voice transcription failed', { idMessage: msg.idMessage, error });
+            text = '[הודעה קולית - התמלול נכשל]';
+          }
+        }
+
+        if (!text) {
+          text = isVoice ? '[הודעה קולית]' : '[media]';
+        }
+
+        return {
+          timestamp: msg.timestamp,
+          from: msg.type === 'incoming' ? 'customer' : 'us',
+          text,
+          type: msg.type,
+          typeMessage,
+        };
+      })
+    );
 
     return NextResponse.json({
       ok: true,
