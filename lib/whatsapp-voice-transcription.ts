@@ -9,6 +9,12 @@ const execFileAsync = promisify(execFile);
 
 const CACHE_DIR = path.join(process.cwd(), '.cache', 'voice-transcripts');
 
+export type VoiceTranscriptResult = {
+  transcript: string | null;
+  source: 'cache' | 'whisper' | 'openai' | 'none';
+  error?: string | null;
+};
+
 const transcribeViaOpenAI = async (wavPath: string) => {
   if (!process.env.OPENAI_API_KEY) return null;
 
@@ -34,8 +40,8 @@ const transcribeViaOpenAI = async (wavPath: string) => {
   return String(data?.text || '').trim() || null;
 };
 
-export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extension = 'ogg') {
-  if (!downloadUrl) return null;
+export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extension = 'ogg'): Promise<VoiceTranscriptResult> {
+  if (!downloadUrl) return { transcript: null, source: 'none', error: 'missing_download_url' };
 
   await fs.mkdir(CACHE_DIR, { recursive: true });
   const cacheKey = crypto.createHash('sha1').update(`${downloadUrl}|${extension}`).digest('hex');
@@ -43,7 +49,7 @@ export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extens
 
   try {
     const cached = (await fs.readFile(cachePath, 'utf8')).trim();
-    if (cached) return cached;
+    if (cached) return { transcript: cached, source: 'cache', error: null };
   } catch {}
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'patifon-voice-'));
@@ -84,17 +90,22 @@ export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extens
       const transcript = (await fs.readFile(txtPath, 'utf8')).trim();
       if (transcript) {
         await fs.writeFile(cachePath, transcript, 'utf8').catch(() => {});
-        return transcript;
+        return { transcript, source: 'whisper', error: null };
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Local whisper failed, falling back to OpenAI transcription', error);
     }
 
-    const fallbackTranscript = await transcribeViaOpenAI(wavPath);
-    if (fallbackTranscript) {
-      await fs.writeFile(cachePath, fallbackTranscript, 'utf8').catch(() => {});
+    try {
+      const fallbackTranscript = await transcribeViaOpenAI(wavPath);
+      if (fallbackTranscript) {
+        await fs.writeFile(cachePath, fallbackTranscript, 'utf8').catch(() => {});
+        return { transcript: fallbackTranscript, source: 'openai', error: null };
+      }
+      return { transcript: null, source: 'none', error: 'empty_fallback_transcript' };
+    } catch (error: any) {
+      return { transcript: null, source: 'none', error: error?.message || 'openai_fallback_failed' };
     }
-    return fallbackTranscript;
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }

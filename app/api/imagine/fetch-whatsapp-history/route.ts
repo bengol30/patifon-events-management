@@ -118,8 +118,9 @@ export async function POST(request: Request) {
 
             if (downloadUrl) {
               const extension = String(msg.fileName || '').split('.').pop() || (String(msg.mimeType || '').includes('mpeg') ? 'mp3' : 'ogg');
-              const transcript = await transcribeWhatsappVoiceFromUrl(downloadUrl, extension);
-              text = transcript ? `[הודעה קולית מתומללת] ${transcript}` : '[הודעה קולית ללא תמלול]';
+              const transcriptResult = await transcribeWhatsappVoiceFromUrl(downloadUrl, extension);
+              text = transcriptResult.transcript ? `[הודעה קולית מתומללת] ${transcriptResult.transcript}` : '[הודעה קולית ללא תמלול]';
+              (msg as any).__transcriptDebug = transcriptResult;
             } else {
               text = '[הודעה קולית ללא קישור הורדה]';
             }
@@ -139,6 +140,7 @@ export async function POST(request: Request) {
           text,
           type: msg.type,
           typeMessage,
+          transcriptDebug: (msg as any).__transcriptDebug || null,
         };
       })
     );
