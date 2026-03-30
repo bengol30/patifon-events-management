@@ -24,56 +24,49 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Messages array required' }, { status: 400 });
     }
 
-    // Format conversation for AI
-    const conversationText = messages
-      .map((m: any) => {
-        const speaker = m.from === 'customer' ? customerName || 'לקוח' : 'בן (Imagine Me)';
-        return `${speaker}: ${m.text}`;
-      })
-      .join('\n');
-
     const newestMessages = messages.slice(0, 10);
-    const olderMessages = messages.slice(10, 70);
+    const olderMessages = messages.slice(10, 40);
+
+    const renderMessage = (m: any) => {
+      const speaker = m.from === 'customer' ? customerName || 'לקוח' : 'בן (Imagine Me)';
+      const rawText = String(m.text || '').trim();
+      const text = rawText.length > 280 ? `${rawText.slice(0, 280)}...` : rawText;
+      return `- ${speaker}: ${text || '[ללא טקסט]'}`;
+    };
 
     const systemPrompt = `You are analyzing a WhatsApp conversation between Ben (from Imagine Me) and a customer.
 
 Imagine Me is a business that creates AI-generated photos for events.
 
-IMPORTANT:
-- The conversation input contains up to the latest 70 messages.
+CRITICAL RULES:
 - The messages are ordered NEWEST FIRST.
-- You MUST give much more weight to the latest 5-10 messages than to older messages.
-- If there is any contradiction between older parts of the conversation and the latest updates, the latest updates win.
-- Your summary must reflect the FINAL current reality of the chat, not just the general theme.
-- You must explicitly determine who currently holds the ball: Ben or the customer.
-- If the customer asked a question and Ben still owes an answer, say that clearly.
-- Do not hide unresolved open items behind a generic summary.
+- The latest 5-10 messages are the main source of truth.
+- Older messages are background only.
+- If older context conflicts with the latest messages, the latest messages win.
+- You must identify the exact CURRENT state of the conversation now.
+- You must identify who currently holds the ball.
+- If the customer asked a question/request and Ben still owes an answer/check/confirmation, then the ball is with Ben.
+- Do not write a generic sales summary if there is a specific unresolved item in the newest messages.
+- Mention the exact unresolved item from the newest messages.
+- If there are 2 open items in the latest messages (for example logo + free text), mention both and do not collapse them into one.
+- The latestUpdates field must contain the concrete unresolved requests from the newest messages, not general business background.
 
 Newest messages (highest priority):
-${newestMessages.map((m: any) => {
-  const speaker = m.from === 'customer' ? customerName || 'לקוח' : 'בן (Imagine Me)';
-  return `- ${speaker}: ${m.text}`;
-}).join('\n')}
+${newestMessages.map(renderMessage).join('\n')}
 
-Older messages (supporting context only):
-${olderMessages.length > 0 ? olderMessages.map((m: any) => {
-  const speaker = m.from === 'customer' ? customerName || 'לקוח' : 'בן (Imagine Me)';
-  return `- ${speaker}: ${m.text}`;
-}).join('\n') : 'אין הודעות ישנות נוספות'}
+Older messages (background only):
+${olderMessages.length > 0 ? olderMessages.map(renderMessage).join('\n') : 'אין הודעות ישנות נוספות'}
 
-Write the response in Hebrew, concise and factual, in exactly this structure:
-סיכום כללי: ...
-נקודות חשובות:
-- ...
-- ...
-טון הלקוחה: ...
-תאריכים/מספרים חשובים: ...
-סטטוס נוכחי: ...
-הודעות אחרונות שמשנות את התמונה:
-- ...
-- ...
-אצל מי הכדור עכשיו: ...`;
-
+Return ONLY valid JSON with this exact schema:
+{
+  "generalSummary": "string",
+  "keyPoints": ["string", "string"],
+  "customerTone": "string",
+  "importantDatesOrNumbers": ["string"],
+  "currentStatus": "string",
+  "latestUpdates": ["string", "string"],
+  "ballOwnerNow": "Ben|Customer"
+}`;
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -84,13 +77,11 @@ Write the response in Hebrew, concise and factual, in exactly this structure:
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
-          {
-            role: 'user',
-            content: `Analyze this WhatsApp conversation:\n\n${conversationText}`,
-          },
+          { role: 'user', content: 'Analyze the conversation and return JSON only.' },
         ],
-        temperature: 0.3,
-        max_tokens: 800,
+        temperature: 0.1,
+        max_tokens: 500,
+        response_format: { type: 'json_object' },
       }),
     });
 
@@ -99,7 +90,21 @@ Write the response in Hebrew, concise and factual, in exactly this structure:
     }
 
     const openaiData = await openaiRes.json();
-    const summary = openaiData.choices?.[0]?.message?.content || '';
+    const parsed = JSON.parse(openaiData.choices?.[0]?.message?.content || '{}');
+    const keyPoints = Array.isArray(parsed.keyPoints) ? parsed.keyPoints.filter(Boolean) : [];
+    const importantDatesOrNumbers = Array.isArray(parsed.importantDatesOrNumbers) ? parsed.importantDatesOrNumbers.filter(Boolean) : [];
+    const latestUpdates = Array.isArray(parsed.latestUpdates) ? parsed.latestUpdates.filter(Boolean) : [];
+    const ballOwnerNow = parsed.ballOwnerNow === 'Customer' ? 'הלקוחה' : 'בן';
+
+    const summary = [
+      `סיכום כללי: ${parsed.generalSummary || 'לא זוהה סיכום ברור'}`,
+      `נקודות חשובות:\n${keyPoints.length ? keyPoints.map((item: string) => `- ${item}`).join('\n') : '- אין'}`,
+      `טון הלקוחה: ${parsed.customerTone || 'לא זוהה'}`,
+      `תאריכים/מספרים חשובים: ${importantDatesOrNumbers.length ? importantDatesOrNumbers.join(' | ') : 'אין'}`,
+      `סטטוס נוכחי: ${parsed.currentStatus || 'לא זוהה'}`,
+      `הודעות אחרונות שמשנות את התמונה:\n${latestUpdates.length ? latestUpdates.map((item: string) => `- ${item}`).join('\n') : '- אין'}`,
+      `אצל מי הכדור עכשיו: ${ballOwnerNow}`,
+    ].join('\n\n');
 
     // Save summary to Firestore (in task's customData)
     if (taskId && adminDb) {
