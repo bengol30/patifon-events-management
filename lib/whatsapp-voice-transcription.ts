@@ -17,12 +17,20 @@ export type VoiceTranscriptResult = {
   error?: string | null;
 };
 
+const normalizeUploadName = (filePath: string, mimeType: string) => {
+  const base = path.basename(filePath, path.extname(filePath));
+  if (mimeType.includes('ogg')) return `${base}.ogg`;
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return `${base}.mp3`;
+  if (mimeType.includes('wav')) return `${base}.wav`;
+  return path.basename(filePath);
+};
+
 const transcribeViaOpenAI = async (filePath: string, mimeType = 'audio/wav') => {
   if (!process.env.OPENAI_API_KEY) return null;
 
   const form = new FormData();
   const fileBuffer = await fs.readFile(filePath);
-  form.append('file', new Blob([fileBuffer], { type: mimeType }), path.basename(filePath));
+  form.append('file', new Blob([fileBuffer], { type: mimeType }), normalizeUploadName(filePath, mimeType));
   form.append('model', 'gpt-4o-mini-transcribe');
   form.append('language', 'he');
 
