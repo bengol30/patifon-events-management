@@ -17,12 +17,12 @@ export type VoiceTranscriptResult = {
   error?: string | null;
 };
 
-const transcribeViaOpenAI = async (wavPath: string) => {
+const transcribeViaOpenAI = async (filePath: string, mimeType = 'audio/wav') => {
   if (!process.env.OPENAI_API_KEY) return null;
 
   const form = new FormData();
-  const fileBuffer = await fs.readFile(wavPath);
-  form.append('file', new Blob([fileBuffer], { type: 'audio/wav' }), path.basename(wavPath));
+  const fileBuffer = await fs.readFile(filePath);
+  form.append('file', new Blob([fileBuffer], { type: mimeType }), path.basename(filePath));
   form.append('model', 'gpt-4o-mini-transcribe');
   form.append('language', 'he');
 
@@ -42,7 +42,7 @@ const transcribeViaOpenAI = async (wavPath: string) => {
   return String(data?.text || '').trim() || null;
 };
 
-export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extension = 'ogg'): Promise<VoiceTranscriptResult> {
+export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extension = 'ogg', mimeType = 'audio/ogg'): Promise<VoiceTranscriptResult> {
   if (!downloadUrl) return { transcript: null, source: 'none', error: 'missing_download_url' };
 
   let cachePath: string | null = null;
@@ -73,10 +73,26 @@ export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extens
     const buffer = Buffer.from(await res.arrayBuffer());
     await fs.writeFile(inputPath, buffer);
 
-    await execFileAsync('ffmpeg', ['-y', '-i', inputPath, '-ar', '16000', '-ac', '1', wavPath], {
-      timeout: 30000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+    try {
+      await execFileAsync('ffmpeg', ['-y', '-i', inputPath, '-ar', '16000', '-ac', '1', wavPath], {
+        timeout: 30000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    } catch (error: any) {
+      console.error('ffmpeg conversion failed, falling back to OpenAI original-audio transcription', error);
+      try {
+        const directTranscript = await transcribeViaOpenAI(inputPath, mimeType);
+        if (directTranscript) {
+          if (cachePath) {
+            await fs.writeFile(cachePath, directTranscript, 'utf8').catch(() => {});
+          }
+          return { transcript: directTranscript, source: 'openai', error: null };
+        }
+      } catch (fallbackError: any) {
+        return { transcript: null, source: 'none', error: fallbackError?.message || error?.message || 'ffmpeg_missing_and_openai_failed' };
+      }
+      return { transcript: null, source: 'none', error: error?.message || 'ffmpeg_failed' };
+    }
 
     try {
       await execFileAsync('whisper', [
@@ -106,7 +122,7 @@ export async function transcribeWhatsappVoiceFromUrl(downloadUrl: string, extens
     }
 
     try {
-      const fallbackTranscript = await transcribeViaOpenAI(wavPath);
+      const fallbackTranscript = await transcribeViaOpenAI(wavPath, 'audio/wav');
       if (fallbackTranscript) {
         if (cachePath) {
         await fs.writeFile(cachePath, fallbackTranscript, 'utf8').catch(() => {});

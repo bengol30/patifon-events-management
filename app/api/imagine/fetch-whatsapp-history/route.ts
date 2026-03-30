@@ -118,7 +118,7 @@ export async function POST(request: Request) {
 
             if (downloadUrl) {
               const extension = String(msg.fileName || '').split('.').pop() || (String(msg.mimeType || '').includes('mpeg') ? 'mp3' : 'ogg');
-              const transcriptResult = await transcribeWhatsappVoiceFromUrl(downloadUrl, extension);
+              const transcriptResult = await transcribeWhatsappVoiceFromUrl(downloadUrl, extension, String(msg.mimeType || 'audio/ogg'));
               text = transcriptResult.transcript
                 ? `[הודעה קולית מתומללת] ${transcriptResult.transcript}`
                 : `[הודעה קולית ללא תמלול${transcriptResult.error ? ` | ${transcriptResult.error}` : ''}]`;
