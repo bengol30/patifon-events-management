@@ -620,7 +620,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
 
       {leadTypeInfo && (
         <div className="mt-4 p-4 bg-white border border-blue-200 rounded-lg" dir="rtl">
-          <div className="flex items-center gap-2 text-sm font-bold text-blue-900 mb-2">
+          <div className="flex items-center gap-2 text-sm font-bold text-blue-900">
             {leadTypeInfo.type === 'business' ? (
               <Building2 className="w-4 h-4" />
             ) : leadTypeInfo.type === 'private' ? (
@@ -628,12 +628,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
             ) : (
               <HelpCircle className="w-4 h-4" />
             )}
-            <span>סיווג ליד אוטומטי</span>
-          </div>
-          <div className="space-y-1 text-sm text-gray-800">
-            <p><span className="font-semibold">סוג:</span> {leadTypeInfo.label}</p>
-            <p><span className="font-semibold">רמת ביטחון:</span> {leadTypeInfo.confidence}</p>
-            <p><span className="font-semibold">למה:</span> {leadTypeInfo.reasons.join(' | ')}</p>
+            <span>סוג לקוח: {leadTypeInfo.label}</span>
           </div>
         </div>
       )}
