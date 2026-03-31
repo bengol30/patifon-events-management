@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { MessageCircle, Sparkles, Send, Loader2, Clock3, CalendarClock, ChevronDown, ChevronUp } from "lucide-react";
+import { MessageCircle, Sparkles, Send, Loader2, Clock3, CalendarClock, ChevronDown, ChevronUp, Building2, UserRound, HelpCircle } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { doc, updateDoc } from "firebase/firestore";
 
 interface ImagineMeCRMProps {
   projectId: string;
-  taskId: string;
+  taskId?: string;
   onTaskUpdated?: (updates: {
     status?: "TODO" | "IN_PROGRESS" | "DONE" | "STUCK";
     currentStatus?: string;
@@ -17,7 +17,7 @@ interface ImagineMeCRMProps {
     scheduleStatus?: string | null;
     customData?: Record<string, any>;
   }) => void;
-  taskData: {
+  taskData?: {
     title: string;
     currentStatus?: string;
     nextStep?: string;
@@ -73,6 +73,80 @@ const fromDatetimeLocalValue = (value: string) => {
   return parsed.toISOString();
 };
 
+type LeadTypeInfo = {
+  type: 'business' | 'private' | 'unknown';
+  label: string;
+  confidence: string;
+  reasons: string[];
+};
+
+const inferLeadBusinessType = (customData?: Record<string, any>): LeadTypeInfo | null => {
+  if (!customData) return null;
+
+  if (customData.leadType && customData.leadTypeLabel) {
+    return {
+      type: customData.leadType,
+      label: customData.leadTypeLabel,
+      confidence: customData.leadTypeConfidence || 'נמוכה',
+      reasons: Array.isArray(customData.leadTypeReasons) ? customData.leadTypeReasons : [],
+    };
+  }
+
+  const company = String(customData.company || '').trim();
+  const eventType = String(customData.eventType || '').trim();
+  const source = String(customData.source || '').trim();
+  const notes = String(customData.notes || '').trim();
+  const location = String(customData.eventLocation || '').trim();
+  const category = String(customData.leadCategory || '').trim();
+  const guestCount = Number(customData.guestCount || 0);
+  const numberOfStations = Number(customData.numberOfStations || 0);
+
+  const combined = [company, eventType, source, notes, location, category].join(' | ').toLowerCase();
+  const businessKeywords = ['חברה', 'ארגון', 'עמותה', 'כנס', 'עירייה', 'מועצה', 'מתנס', 'מתנ"ס', 'משרד', 'צוות', 'עובדים', 'אירוע חברה', 'corporate', 'conference', 'summit', 'office', 'employee', 'school', 'municipality', 'business'];
+  const privateKeywords = ['בת מצווה', 'בר מצווה', 'חתונה', 'יום הולדת', 'חינה', 'ברית', 'אירוע פרטי', 'private', 'family'];
+
+  const businessReasons: string[] = [];
+  if (company) businessReasons.push('יש שם חברה/ארגון');
+  if (guestCount >= 80) businessReasons.push('כמות מוזמנים גבוהה יחסית');
+  if (numberOfStations >= 2) businessReasons.push('יש יותר מעמדה אחת');
+  if (businessKeywords.some((keyword) => combined.includes(keyword.toLowerCase()))) {
+    businessReasons.push('נמצאו מונחים שמאפיינים לקוח עסקי/ארגוני');
+  }
+
+  if (businessReasons.length > 0) {
+    return {
+      type: 'business',
+      label: 'לקוח עסקי / ארגוני',
+      confidence: businessReasons.length >= 3 ? 'גבוהה' : 'בינונית',
+      reasons: businessReasons,
+    };
+  }
+
+  const privateReasons: string[] = [];
+  if (privateKeywords.some((keyword) => combined.includes(keyword.toLowerCase()))) {
+    privateReasons.push('נמצאו מונחים שמאפיינים אירוע פרטי');
+  }
+  if (!company && guestCount > 0 && guestCount < 80) {
+    privateReasons.push('אין חברה משויכת וכמות המוזמנים מתאימה יותר ללקוח פרטי');
+  }
+
+  if (privateReasons.length > 0) {
+    return {
+      type: 'private',
+      label: 'לקוח פרטי',
+      confidence: privateReasons.length >= 2 ? 'בינונית' : 'נמוכה',
+      reasons: privateReasons,
+    };
+  }
+
+  return {
+    type: 'unknown',
+    label: 'לא הוכרע בוודאות',
+    confidence: 'נמוכה',
+    reasons: ['אין מספיק סימנים חד-משמעיים כדי לקבוע אם הליד עסקי/ארגוני או פרטי'],
+  };
+};
+
 export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdated }: ImagineMeCRMProps) {
   const IMAGINE_ME_PROJECT_ID = "yed4WRBzsXrdGzousyq0";
 
@@ -95,11 +169,13 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
   const [scheduledAt, setScheduledAt] = useState<string>("");
   const [scheduleReason, setScheduleReason] = useState<string>("");
   const [scheduleConfidence, setScheduleConfidence] = useState<string>("");
-  const [localScheduledStatus, setLocalScheduledStatus] = useState<string>(taskData.scheduleStatus || "");
+  const [localScheduledStatus, setLocalScheduledStatus] = useState<string>(taskData?.scheduleStatus || "");
   const [error, setError] = useState<string | null>(null);
 
-  const phone = taskData.customData?.phone;
-  const customerName = taskData.title.split(" - ")[0];
+  const isProjectToolbar = !taskId || !taskData;
+  const phone = taskData?.customData?.phone;
+  const customerName = taskData?.title?.split(" - ")[0] || "";
+  const leadTypeInfo = inferLeadBusinessType(taskData?.customData);
 
   const normalizePhoneForWhatsAppLink = (rawPhone?: string) => {
     if (!rawPhone) return "";
@@ -114,6 +190,10 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
     const normalizedPhone = normalizePhoneForWhatsAppLink(phone);
     return normalizedPhone ? `https://wa.me/${normalizedPhone}` : "";
   })();
+
+  if (isProjectToolbar) {
+    return null;
+  }
 
   useEffect(() => {
     console.log('ImagineMeCRM mounted for task:', taskId, 'projectId:', projectId);
@@ -535,6 +615,26 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
       {error && (
         <div className="mt-4 p-3 bg-red-100 border border-red-300 rounded text-red-800 text-sm">
           {error}
+        </div>
+      )}
+
+      {leadTypeInfo && (
+        <div className="mt-4 p-4 bg-white border border-blue-200 rounded-lg" dir="rtl">
+          <div className="flex items-center gap-2 text-sm font-bold text-blue-900 mb-2">
+            {leadTypeInfo.type === 'business' ? (
+              <Building2 className="w-4 h-4" />
+            ) : leadTypeInfo.type === 'private' ? (
+              <UserRound className="w-4 h-4" />
+            ) : (
+              <HelpCircle className="w-4 h-4" />
+            )}
+            <span>סיווג ליד אוטומטי</span>
+          </div>
+          <div className="space-y-1 text-sm text-gray-800">
+            <p><span className="font-semibold">סוג:</span> {leadTypeInfo.label}</p>
+            <p><span className="font-semibold">רמת ביטחון:</span> {leadTypeInfo.confidence}</p>
+            <p><span className="font-semibold">למה:</span> {leadTypeInfo.reasons.join(' | ')}</p>
+          </div>
         </div>
       )}
 

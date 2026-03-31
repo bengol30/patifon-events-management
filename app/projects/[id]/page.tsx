@@ -11,6 +11,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Calendar, CheckCircle2, FolderKanban, Loader2, Pencil, Users, PlusCircle, MapPin, Trash2, MessageCircle, CheckSquare, Clock, X, UserPlus } from "lucide-react";
 import TaskCard from "@/components/TaskCard";
 import ImagineMeCRM from "@/components/ImagineMeCRM";
+import ImportLeadButton from "@/components/ImportLeadButton";
 import ProjectWhatsappSummarizer from "@/components/ProjectWhatsappSummarizer";
 
 
@@ -1091,6 +1092,50 @@ export default function ProjectDetailsPage() {
                 <p className="mt-1 text-sm text-gray-600">כל המשימות של הפרויקט והאירועים המשויכים, עם היררכיה ברורה יותר ופעולות נגישות במובייל.</p>
               </div>
               <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                <ImportLeadButton
+                  projectId={projectId}
+                  onLeadImported={async () => {
+                    if (!db) return;
+                    try {
+                      const pTasksSnap = await getDocs(collection(db, "projects", projectId, "tasks"));
+                      const projectOnlyTasks: ProjectTask[] = pTasksSnap.docs.map((t) => {
+                        const d = t.data() as any;
+                        return {
+                          id: t.id,
+                          title: d.title || "משימה",
+                          status: (d.status as any) || "TODO",
+                          dueDate: d.dueDate,
+                          priority: (d.priority as any) || "NORMAL",
+                          eventId: projectId,
+                          eventTitle: project?.name,
+                          assignee: d.assignee,
+                          assignees: d.assignees,
+                          description: d.description,
+                          currentStatus: d.currentStatus,
+                          nextStep: d.nextStep,
+                          previewImage: d.previewImage,
+                          scope: "project" as const,
+                          isVolunteerTask: !!d.isVolunteerTask,
+                          volunteerHours: d.volunteerHours ?? null,
+                          customData: d.customData,
+                        };
+                      });
+                      setProjectTasks((prev) => {
+                        const nonProjectTasks = prev.filter((task) => task.scope !== "project");
+                        const merged = [...nonProjectTasks, ...projectOnlyTasks];
+                        merged.sort((a, b) => {
+                          if (a.dueDate && b.dueDate) return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+                          if (a.dueDate) return -1;
+                          if (b.dueDate) return 1;
+                          return 0;
+                        });
+                        return merged;
+                      });
+                    } catch (err) {
+                      console.error("Failed reloading project tasks after Lydia import", err);
+                    }
+                  }}
+                />
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right">
