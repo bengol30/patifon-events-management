@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { MessageCircle, Sparkles, Send, Loader2, Clock3, CalendarClock, ChevronDown, ChevronUp, Building2, UserRound, HelpCircle } from "lucide-react";
+import { MessageCircle, Sparkles, Send, Loader2, Clock3, CalendarClock, ChevronDown, ChevronUp, Building2, UserRound, HelpCircle, Phone, CalendarDays, Briefcase } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { doc, updateDoc } from "firebase/firestore";
 
@@ -177,6 +177,10 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
   const phone = taskData?.customData?.phone;
   const customerName = taskData?.title?.split(" - ")[0] || "";
   const leadTypeInfo = inferLeadBusinessType(taskData?.customData);
+  const companyName = taskData?.customData?.company || null;
+  const eventType = taskData?.customData?.eventType || null;
+  const eventDate = taskData?.customData?.eventDate || null;
+  const compactStatus = taskData?.currentStatus || taskData?.nextStep || "אין סטטוס זמין עדיין";
 
   const normalizePhoneForWhatsAppLink = (rawPhone?: string) => {
     if (!rawPhone) return "";
@@ -620,46 +624,79 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
   };
 
   return (
-    <div className="mt-6 p-6 border-2 border-blue-200 rounded-lg bg-blue-50">
-      <div
-        className="flex items-center justify-between cursor-pointer select-none"
+    <div className="mt-6 rounded-2xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 via-white to-sky-50 overflow-hidden shadow-sm">
+      <button
+        type="button"
+        className="w-full p-4 sm:p-5 text-right"
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <h3 className="text-lg font-bold text-blue-900 flex items-center gap-2">
-          <Sparkles className="w-5 h-5" />
-          Imagine Me CRM
-        </h3>
-        {isExpanded ? <ChevronUp className="w-5 h-5 text-blue-700" /> : <ChevronDown className="w-5 h-5 text-blue-700" />}
-      </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 space-y-3" dir="rtl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">
+                <Sparkles className="w-3.5 h-3.5" />
+                Imagine Me CRM
+              </span>
+              {leadTypeInfo && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-900">
+                  {leadTypeInfo.type === 'business' ? (
+                    <Building2 className="w-3.5 h-3.5" />
+                  ) : leadTypeInfo.type === 'private' ? (
+                    <UserRound className="w-3.5 h-3.5" />
+                  ) : (
+                    <HelpCircle className="w-3.5 h-3.5" />
+                  )}
+                  סוג לקוח: {leadTypeInfo.label}
+                </span>
+              )}
+              {daysSinceLastCustomerReply !== null && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  {daysSinceLastCustomerReply} ימים בלי מענה
+                </span>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-lg sm:text-xl font-black text-slate-900">{customerName}</h3>
+              <p className="mt-1 text-sm text-slate-600">{compactStatus}</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
+              <div className="flex items-center gap-2 rounded-xl bg-white/90 border border-slate-200 px-3 py-2 text-slate-700">
+                <Briefcase className="w-4 h-4 text-slate-500" />
+                <span>{companyName || eventType || 'אין חברה או סוג אירוע'}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl bg-white/90 border border-slate-200 px-3 py-2 text-slate-700">
+                <Phone className="w-4 h-4 text-slate-500" />
+                <span>{phone || 'אין טלפון זמין'}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl bg-white/90 border border-slate-200 px-3 py-2 text-slate-700">
+                <CalendarDays className="w-4 h-4 text-slate-500" />
+                <span>{eventDate ? new Date(eventDate).toLocaleDateString('he-IL') : 'אין תאריך אירוע'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="shrink-0 pt-1">
+            {isExpanded ? <ChevronUp className="w-5 h-5 text-blue-700" /> : <ChevronDown className="w-5 h-5 text-blue-700" />}
+          </div>
+        </div>
+      </button>
 
       {error && (
-        <div className="mt-4 p-3 bg-red-100 border border-red-300 rounded text-red-800 text-sm">
+        <div className="mx-4 mb-4 p-3 bg-red-100 border border-red-300 rounded text-red-800 text-sm">
           {error}
         </div>
       )}
 
-      {leadTypeInfo && (
-        <div className="mt-4 p-4 bg-white border border-blue-200 rounded-lg" dir="rtl">
-          <div className="flex items-center gap-2 text-sm font-bold text-blue-900">
-            {leadTypeInfo.type === 'business' ? (
-              <Building2 className="w-4 h-4" />
-            ) : leadTypeInfo.type === 'private' ? (
-              <UserRound className="w-4 h-4" />
-            ) : (
-              <HelpCircle className="w-4 h-4" />
-            )}
-            <span>סוג לקוח: {leadTypeInfo.label}</span>
-          </div>
-        </div>
-      )}
-
       {isExpanded && (
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center gap-3 flex-wrap">
+        <div className="border-t border-blue-100 bg-white/70 px-4 sm:px-5 pb-5 pt-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-[auto_auto_1fr] gap-3 items-center">
             <button
               onClick={handleFetchHistory}
               disabled={fetchingHistory || !phone}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
             >
               {fetchingHistory ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -673,7 +710,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
               target="_blank"
               rel="noopener noreferrer"
               aria-disabled={!whatsappDirectLink}
-              className={`flex items-center justify-center w-10 h-10 rounded-full transition ${whatsappDirectLink
+              className={`flex items-center justify-center w-11 h-11 rounded-2xl transition ${whatsappDirectLink
                 ? "bg-[#25D366] text-white hover:scale-105 shadow"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed pointer-events-none"
                 }`}
@@ -682,9 +719,9 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
               <MessageCircle className="w-5 h-5" />
             </a>
             {whatsappHistory && (
-              <span className="text-sm text-green-700">
+              <div className="text-sm text-green-700 rounded-xl bg-green-50 border border-green-200 px-3 py-2 justify-self-start sm:justify-self-end" dir="rtl">
                 ✓ {whatsappHistory.messageCount} הודעות נמצאו
-              </span>
+              </div>
             )}
           </div>
 
