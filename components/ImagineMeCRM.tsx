@@ -170,6 +170,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
   const [scheduleReason, setScheduleReason] = useState<string>("");
   const [scheduleConfidence, setScheduleConfidence] = useState<string>("");
   const [localScheduledStatus, setLocalScheduledStatus] = useState<string>(taskData?.scheduleStatus || "");
+  const [daysSinceLastCustomerReply, setDaysSinceLastCustomerReply] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isProjectToolbar = !taskId || !taskData;
@@ -190,6 +191,24 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
     const normalizedPhone = normalizePhoneForWhatsAppLink(phone);
     return normalizedPhone ? `https://wa.me/${normalizedPhone}` : "";
   })();
+
+  const calculateDaysSinceLastCustomerReply = (messages: any[]) => {
+    if (!Array.isArray(messages) || messages.length === 0) return null;
+
+    const sorted = [...messages].sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+    const lastUsMessage = sorted.find((msg) => msg.from === 'us' && Number(msg.timestamp));
+    if (!lastUsMessage) return null;
+
+    const laterCustomerReply = sorted.find(
+      (msg) => msg.from === 'customer' && Number(msg.timestamp) > Number(lastUsMessage.timestamp)
+    );
+
+    if (laterCustomerReply) return 0;
+
+    const diffMs = Date.now() - Number(lastUsMessage.timestamp) * 1000;
+    if (diffMs <= 0) return 0;
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  };
 
   if (isProjectToolbar) {
     return null;
@@ -290,6 +309,7 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
       }
 
       setWhatsappHistory(data);
+      setDaysSinceLastCustomerReply(calculateDaysSinceLastCustomerReply(data.messages || []));
 
       if (data.messages && data.messages.length > 0) {
         const last5 = data.messages.slice(0, 5);
@@ -667,6 +687,12 @@ export default function ImagineMeCRM({ projectId, taskId, taskData, onTaskUpdate
               </span>
             )}
           </div>
+
+          {whatsappHistory && daysSinceLastCustomerReply !== null && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900" dir="rtl">
+              הלקוח לא ענה כבר <span className="font-bold">{daysSinceLastCustomerReply}</span> ימים מאז ההודעה האחרונה שנשלחה.
+            </div>
+          )}
 
           {conversationSummary && (
             <div className="p-4 bg-white border border-green-200 rounded-lg space-y-3">
