@@ -29,6 +29,17 @@ type StockReport = {
     title: string;
     body: string;
   }[];
+  activeMonitoring?: {
+    trackBeyondPrice: string[];
+    entryCatalysts: string[];
+    redFlags: string[];
+    checkpoints: {
+      date?: string;
+      event: string;
+      action: string;
+    }[];
+    additionalConsiderations: string[];
+  };
 };
 
 const FALLBACK_REPORTS: StockReport[] = [
@@ -507,6 +518,93 @@ export default function StockTrackingPreviewPanel() {
               </section>
             </div>
           </div>
+
+          {selectedReport.activeMonitoring && (
+            <div className="rounded-3xl border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50 p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-indigo-900">
+                <Activity size={20} className="text-indigo-600" />
+                <h3 className="text-xl font-bold">מעקב אקטיבי ומשימות המשך</h3>
+              </div>
+              <p className="mt-2 text-sm text-indigo-700">
+                מה לעקוב אחריו מעבר למחיר — כדי לזהות את נקודת הכניסה והתזמון המושלם
+              </p>
+
+              <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                {selectedReport.activeMonitoring.trackBeyondPrice && selectedReport.activeMonitoring.trackBeyondPrice.length > 0 && (
+                  <div className="rounded-2xl border border-indigo-200 bg-white p-5">
+                    <div className="text-sm font-bold text-indigo-900">🎯 מה לעקוב אחריו (מעבר למחיר)</div>
+                    <div className="mt-3 space-y-2">
+                      {selectedReport.activeMonitoring.trackBeyondPrice.map((item, idx) => (
+                        <div key={idx} className="flex items-start gap-2 text-sm text-slate-700">
+                          <div className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"></div>
+                          <div>{item}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedReport.activeMonitoring.entryCatalysts && selectedReport.activeMonitoring.entryCatalysts.length > 0 && (
+                  <div className="rounded-2xl border border-green-200 bg-white p-5">
+                    <div className="text-sm font-bold text-green-900">🚀 טריגרים לכניסה (מעבר לטכני)</div>
+                    <div className="mt-3 space-y-2">
+                      {selectedReport.activeMonitoring.entryCatalysts.map((item, idx) => (
+                        <div key={idx} className="flex items-start gap-2 text-sm text-slate-700">
+                          <div className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"></div>
+                          <div>{item}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedReport.activeMonitoring.redFlags && selectedReport.activeMonitoring.redFlags.length > 0 && (
+                  <div className="rounded-2xl border border-red-200 bg-white p-5">
+                    <div className="text-sm font-bold text-red-900">🔴 דגלים אדומים (ביטול התזה)</div>
+                    <div className="mt-3 space-y-2">
+                      {selectedReport.activeMonitoring.redFlags.map((item, idx) => (
+                        <div key={idx} className="flex items-start gap-2 text-sm text-slate-700">
+                          <div className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"></div>
+                          <div>{item}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedReport.activeMonitoring.checkpoints && selectedReport.activeMonitoring.checkpoints.length > 0 && (
+                  <div className="rounded-2xl border border-amber-200 bg-white p-5">
+                    <div className="text-sm font-bold text-amber-900">📅 נקודות ביקורת קבועות</div>
+                    <div className="mt-3 space-y-3">
+                      {selectedReport.activeMonitoring.checkpoints.map((cp, idx) => (
+                        <div key={idx} className="rounded-xl border border-amber-100 bg-amber-50/50 p-3">
+                          {cp.date && (
+                            <div className="text-xs font-semibold text-amber-700">{cp.date}</div>
+                          )}
+                          <div className="mt-1 text-sm font-medium text-slate-900">{cp.event}</div>
+                          <div className="mt-1 text-xs text-slate-600">{cp.action}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {selectedReport.activeMonitoring.additionalConsiderations && selectedReport.activeMonitoring.additionalConsiderations.length > 0 && (
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="text-sm font-bold text-slate-900">🧠 שיקולים נוספים</div>
+                  <div className="mt-3 space-y-2">
+                    {selectedReport.activeMonitoring.additionalConsiderations.map((item, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-sm text-slate-700">
+                        <div className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400"></div>
+                        <div>{item}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </>
     );

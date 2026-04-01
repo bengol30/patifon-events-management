@@ -32,6 +32,17 @@ export interface StockReport {
     title: string;
     body: string;
   }[];
+  activeMonitoring?: {
+    trackBeyondPrice: string[];
+    entryCatalysts: string[];
+    redFlags: string[];
+    checkpoints: {
+      date?: string;
+      event: string;
+      action: string;
+    }[];
+    additionalConsiderations: string[];
+  };
   createdAt: Timestamp;
   updatedAtTimestamp: Timestamp;
 }
