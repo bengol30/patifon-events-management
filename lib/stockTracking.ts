@@ -43,6 +43,14 @@ export interface StockReport {
     }[];
     additionalConsiderations: string[];
   };
+  entryScore?: {
+    score: number;              // 0-100
+    technical: number;          // 0-50 (מניתוח טכני)
+    fundamental: number;        // 0-50 (מניתוח פונדמנטלי)
+    reasoning: string;          // הסבר מפורט
+    recommendation: 'strong-buy' | 'buy' | 'hold' | 'wait' | 'avoid';
+    lastCalculated: string;     // תאריך חישוב
+  };
   createdAt: Timestamp;
   updatedAtTimestamp: Timestamp;
 }

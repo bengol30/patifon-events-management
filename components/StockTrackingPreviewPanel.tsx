@@ -40,6 +40,14 @@ type StockReport = {
     }[];
     additionalConsiderations: string[];
   };
+  entryScore?: {
+    score: number;
+    technical: number;
+    fundamental: number;
+    reasoning: string;
+    recommendation: 'strong-buy' | 'buy' | 'hold' | 'wait' | 'avoid';
+    lastCalculated: string;
+  };
 };
 
 const FALLBACK_REPORTS: StockReport[] = [
@@ -363,7 +371,7 @@ export default function StockTrackingPreviewPanel() {
             <div className="absolute inset-y-0 left-0 w-40 bg-gradient-to-r from-blue-500/10 to-transparent pointer-events-none" />
             <div className="relative z-10 flex flex-col gap-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
+                <div className="flex-1">
                   <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-400/10 px-3 py-1 text-xs font-medium text-blue-100">
                     <BarChart3 size={14} />
                     דוח מניה מלא
@@ -373,9 +381,49 @@ export default function StockTrackingPreviewPanel() {
                     שילוב של תמלול, בדיקת טענות, מחקר עומק, ניתוח טכני ותוכנית כניסה — בתוך ממשק מובנה של PATIFON.
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-                  <div><span className="text-slate-400">מקור:</span> {selectedReport.source}</div>
-                  <div className="mt-1"><span className="text-slate-400">עודכן:</span> {selectedReport.updatedAt}</div>
+                <div className="flex flex-col gap-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+                    <div><span className="text-slate-400">מקור:</span> {selectedReport.source}</div>
+                    <div className="mt-1"><span className="text-slate-400">עודכן:</span> {selectedReport.updatedAt}</div>
+                  </div>
+                  
+                  {selectedReport.entryScore && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="text-xs text-slate-400 mb-2">מד המלצת כניסה</div>
+                      <div className="flex items-end gap-3">
+                        <div className="text-4xl font-bold">{selectedReport.entryScore.score}</div>
+                        <div className="text-sm text-slate-400 pb-1">/100</div>
+                      </div>
+                      <div className="mt-3 h-2 rounded-full bg-white/10 overflow-hidden">
+                        <div 
+                          className={`h-full transition-all ${
+                            selectedReport.entryScore.score >= 75 ? 'bg-green-400' :
+                            selectedReport.entryScore.score >= 50 ? 'bg-yellow-400' :
+                            selectedReport.entryScore.score >= 25 ? 'bg-orange-400' :
+                            'bg-red-400'
+                          }`}
+                          style={{ width: `${selectedReport.entryScore.score}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs">
+                        <span className="text-slate-400">טכני: {selectedReport.entryScore.technical}/50</span>
+                        <span className="text-slate-400">פונדמנטלי: {selectedReport.entryScore.fundamental}/50</span>
+                      </div>
+                      <div className={`mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        selectedReport.entryScore.recommendation === 'strong-buy' ? 'bg-green-500/20 text-green-300' :
+                        selectedReport.entryScore.recommendation === 'buy' ? 'bg-green-500/10 text-green-200' :
+                        selectedReport.entryScore.recommendation === 'hold' ? 'bg-yellow-500/20 text-yellow-300' :
+                        selectedReport.entryScore.recommendation === 'wait' ? 'bg-orange-500/20 text-orange-300' :
+                        'bg-red-500/20 text-red-300'
+                      }`}>
+                        {selectedReport.entryScore.recommendation === 'strong-buy' && '🚀 קנייה חזקה'}
+                        {selectedReport.entryScore.recommendation === 'buy' && '✓ קנייה'}
+                        {selectedReport.entryScore.recommendation === 'hold' && '⏸ המתן'}
+                        {selectedReport.entryScore.recommendation === 'wait' && '⏳ חכה'}
+                        {selectedReport.entryScore.recommendation === 'avoid' && '✗ הימנע'}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -412,6 +460,97 @@ export default function StockTrackingPreviewPanel() {
               </div>
             </div>
           </div>
+
+          {selectedReport.entryScore && (
+            <div className="rounded-3xl border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-6 shadow-lg">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 text-indigo-900">
+                    <Sparkles size={20} className="text-indigo-600" />
+                    <h3 className="text-xl font-bold">מד המלצת כניסה</h3>
+                  </div>
+                  <p className="mt-2 text-sm text-indigo-700">
+                    ציון משולב של ניתוח טכני ({selectedReport.entryScore.technical}/50) + פונדמנטלי ({selectedReport.entryScore.fundamental}/50)
+                  </p>
+                </div>
+                <div className="flex flex-col items-center gap-2">
+                  <div className="relative flex h-24 w-24 items-center justify-center">
+                    <svg className="absolute h-24 w-24 -rotate-90" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="45" fill="none" stroke="#e0e7ff" strokeWidth="8" />
+                      <circle 
+                        cx="50" 
+                        cy="50" 
+                        r="45" 
+                        fill="none" 
+                        stroke={
+                          selectedReport.entryScore.score >= 75 ? '#10b981' :
+                          selectedReport.entryScore.score >= 50 ? '#eab308' :
+                          selectedReport.entryScore.score >= 25 ? '#f97316' :
+                          '#ef4444'
+                        }
+                        strokeWidth="8" 
+                        strokeDasharray={`${selectedReport.entryScore.score * 2.827} 282.7`}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <div className="text-3xl font-bold text-slate-900">{selectedReport.entryScore.score}</div>
+                  </div>
+                  <div className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold ${
+                    selectedReport.entryScore.recommendation === 'strong-buy' ? 'bg-green-100 text-green-700' :
+                    selectedReport.entryScore.recommendation === 'buy' ? 'bg-green-50 text-green-600' :
+                    selectedReport.entryScore.recommendation === 'hold' ? 'bg-yellow-100 text-yellow-700' :
+                    selectedReport.entryScore.recommendation === 'wait' ? 'bg-orange-100 text-orange-700' :
+                    'bg-red-100 text-red-700'
+                  }`}>
+                    {selectedReport.entryScore.recommendation === 'strong-buy' && '🚀 קנייה חזקה'}
+                    {selectedReport.entryScore.recommendation === 'buy' && '✓ קנייה'}
+                    {selectedReport.entryScore.recommendation === 'hold' && '⏸ המתן'}
+                    {selectedReport.entryScore.recommendation === 'wait' && '⏳ חכה להזדמנות'}
+                    {selectedReport.entryScore.recommendation === 'avoid' && '✗ הימנע'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-indigo-200 bg-white p-4">
+                <div className="text-sm font-bold text-slate-900 mb-2">הסבר הציון</div>
+                <div className="text-sm leading-6 text-slate-700 whitespace-pre-wrap">{selectedReport.entryScore.reasoning}</div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                  <div className="text-xs font-medium text-blue-700">ניתוח טכני</div>
+                  <div className="mt-2 flex items-end gap-2">
+                    <div className="text-3xl font-bold text-blue-900">{selectedReport.entryScore.technical}</div>
+                    <div className="text-sm text-blue-600 pb-1">/50</div>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-blue-200 overflow-hidden">
+                    <div 
+                      className="h-full bg-blue-600"
+                      style={{ width: `${(selectedReport.entryScore.technical / 50) * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-purple-200 bg-purple-50 p-4">
+                  <div className="text-xs font-medium text-purple-700">ניתוח פונדמנטלי</div>
+                  <div className="mt-2 flex items-end gap-2">
+                    <div className="text-3xl font-bold text-purple-900">{selectedReport.entryScore.fundamental}</div>
+                    <div className="text-sm text-purple-600 pb-1">/50</div>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-purple-200 overflow-hidden">
+                    <div 
+                      className="h-full bg-purple-600"
+                      style={{ width: `${(selectedReport.entryScore.fundamental / 50) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 text-xs text-slate-500 text-center">
+                עודכן לאחרונה: {selectedReport.entryScore.lastCalculated}
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
             <div className="space-y-6">
