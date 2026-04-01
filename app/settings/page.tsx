@@ -7,10 +7,11 @@ import { auth, db, storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc, getDoc, setDoc, getDocs, where, collectionGroup, limit } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar, Brain } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar, Brain, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import ImportantDocuments from "@/components/ImportantDocuments";
 import ImagineMeStyleInsightsPanel from "@/components/ImagineMeStyleInsightsPanel";
+import StockTrackingPreviewPanel from "@/components/StockTrackingPreviewPanel";
 const ADMIN_EMAIL = "bengo0469@gmail.com";
 
 interface DefaultTask {
@@ -135,7 +136,7 @@ export default function SettingsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user, loading: authLoading } = useAuth();
-    const validTabs = ["defaultTasks", "documents", "account", "whatsapp", "metricool", "instagram", "exportDocs"] as const;
+    const validTabs = ["defaultTasks", "documents", "account", "stockTracking", "whatsapp", "metricool", "instagram", "exportDocs"] as const;
     const getInitialTab = () => {
         const tabParam = searchParams.get("tab");
         // Start on WhatsApp tab only after auth check; default to main tab on first render
@@ -2530,6 +2531,16 @@ export default function SettingsPage() {
                                 <ShieldCheck size={18} />
                                 חשבון ואבטחה
                             </button>
+                            <button
+                                onClick={() => handleTabChange("stockTracking")}
+                                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === "stockTracking"
+                                    ? "bg-indigo-50 text-indigo-700"
+                                    : "text-gray-600 hover:bg-gray-50"
+                                    }`}
+                            >
+                                <BarChart3 size={18} />
+                                מעקב מניות
+                            </button>
                         </nav>
                     </div>
 
@@ -3657,6 +3668,10 @@ export default function SettingsPage() {
                                     </div>
                                 </div>
                             </div>
+                        )}
+
+                        {activeTab === "stockTracking" && (
+                            <StockTrackingPreviewPanel />
                         )}
 
                         {activeTab === "account" && (
