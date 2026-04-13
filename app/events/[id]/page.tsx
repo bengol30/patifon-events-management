@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskCard from "@/components/TaskCard";
-import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat, PauseCircle, Folder, FolderKanban, Settings, Link2 } from "lucide-react";
+import { Plus, MapPin, Calendar, ArrowRight, UserPlus, Save, Trash2, X, AlertTriangle, Users, Target, Handshake, DollarSign, FileText, CheckSquare, Square, Edit2, Share2, Check, Sparkles, MessageCircle, User, Clock, List, Paperclip, ChevronDown, Copy, Repeat, PauseCircle, Folder, FolderKanban, Settings, Link2, Pencil, ChevronUp, GripVertical } from "lucide-react";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { db, storage } from "@/lib/firebase";
 import { deleteEventCascade } from "@/lib/firestoreCleanup";
@@ -162,6 +162,21 @@ interface EventVolunteer {
     createdAt?: any;
 }
 
+interface FormField {
+    id: string;
+    label: string;
+    type: "text" | "tel" | "email" | "number" | "select" | "textarea" | "checkbox";
+    required: boolean;
+    placeholder?: string;
+    options?: string[];
+}
+
+const DEFAULT_FORM_SCHEMA: FormField[] = [
+    { id: "name", label: "שם מלא", type: "text", required: true, placeholder: "לדוגמה: רוני כהן" },
+    { id: "phone", label: "טלפון", type: "tel", required: true, placeholder: "050-0000000" },
+    { id: "email", label: "אימייל", type: "email", required: true, placeholder: "you@example.com" },
+];
+
 const dedupeById = <T extends { id?: string }>(arr: T[]): T[] => {
     const seen = new Set<string>();
     return arr.filter(item => {
@@ -222,6 +237,7 @@ interface EventData {
     coverImage?: string;
     coverImageUrl?: string;
     imageUrl?: string;
+    formSchema?: FormField[];
 }
 
 interface ProjectOption {
@@ -249,6 +265,14 @@ export default function EventDetailsPage() {
     const [error, setError] = useState("");
     const [copied, setCopied] = useState(false);
     const [copiedRegister, setCopiedRegister] = useState(false);
+    const [showFormEditor, setShowFormEditor] = useState(false);
+    const [formEditorSchema, setFormEditorSchema] = useState<FormField[]>([]);
+    const [formEditorSaving, setFormEditorSaving] = useState(false);
+    const [formEditorNewField, setFormEditorNewField] = useState<Partial<FormField>>({
+        label: "", type: "text", required: false, placeholder: "", options: []
+    });
+    const [formEditorAddingNew, setFormEditorAddingNew] = useState(false);
+    const [formEditorEditingId, setFormEditorEditingId] = useState<string | null>(null);
     const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
     const [eventOptions, setEventOptions] = useState<{ id: string, name: string }[]>([]);
     const [selectedProject, setSelectedProject] = useState<string>("");
@@ -3469,7 +3493,7 @@ export default function EventDetailsPage() {
         scrollToRef(volunteerTasksRef);
     };
 
-    return (
+    return (<>
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(241,143,58,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf5_0%,_#f7efe6_48%,_#f4e7d7_100%)] px-4 py-4 sm:px-6 sm:py-6 relative">
             <div className="mx-auto max-w-7xl">
                 {/* Confirmation Modal */}
@@ -4290,6 +4314,18 @@ export default function EventDetailsPage() {
                             <button onClick={copyRegisterLink} className={`shrink-0 flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-xs font-bold transition drop-shadow-sm ${copiedRegister ? "border-green-400 text-green-700 bg-green-50" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
                                 {copiedRegister ? <Check size={14} /> : <Link2 size={14} />}
                                 {copiedRegister ? "הועתק" : "טופס הרשמה"}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setFormEditorSchema(event.formSchema && event.formSchema.length > 0 ? event.formSchema : DEFAULT_FORM_SCHEMA);
+                                    setFormEditorAddingNew(false);
+                                    setFormEditorEditingId(null);
+                                    setFormEditorNewField({ label: "", type: "text", required: false, placeholder: "", options: [] });
+                                    setShowFormEditor(true);
+                                }}
+                                className="shrink-0 flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition drop-shadow-sm"
+                            >
+                                <Pencil size={14} /> ערוך טופס
                             </button>
                             {event.needsVolunteers || <button onClick={() => router.push(`/events/${id}/registrants`)} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition drop-shadow-sm"><Users size={14} /> נרשמים</button>}
                             <button onClick={() => setIsEditEventOpen(true)} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition drop-shadow-sm">
@@ -6505,5 +6541,313 @@ export default function EventDetailsPage() {
                 )}
             </div>
         </div>
-    );
+
+        {/* ===== Registration Form Editor Modal ===== */}
+        {showFormEditor && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150" dir="rtl">
+                <div className="relative w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl flex flex-col">
+                    {/* Header */}
+                    <div className="bg-gradient-to-l from-indigo-600 to-violet-600 px-6 py-5 flex items-center justify-between">
+                        <div>
+                            <p className="text-xs font-bold text-indigo-200 tracking-widest uppercase mb-0.5">ניהול טופס</p>
+                            <h2 className="text-xl font-black text-white">עריכת טופס הרשמה</h2>
+                            <p className="text-indigo-200 text-xs mt-1">ערוך, הוסף או מחק שדות — השינויים ישפיעו על הטופס הציבורי ועל דף הנרשמים</p>
+                        </div>
+                        <button onClick={() => setShowFormEditor(false)} className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/25 flex items-center justify-center text-white transition">
+                            <X size={18} />
+                        </button>
+                    </div>
+
+                    {/* Field List */}
+                    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
+                        {formEditorSchema.map((field, idx) => (
+                            <div key={field.id} className={`group rounded-2xl border bg-white shadow-sm transition ${formEditorEditingId === field.id ? "border-indigo-300 ring-1 ring-indigo-200" : "border-slate-200 hover:border-slate-300"
+                                }`}>
+                                {formEditorEditingId === field.id ? (
+                                    /* Edit Mode */
+                                    <div className="p-4 space-y-3">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full">עריכה</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-600 mb-1">שם השדה</label>
+                                                <input
+                                                    type="text"
+                                                    value={field.label}
+                                                    onChange={e => setFormEditorSchema(prev => prev.map(f => f.id === field.id ? { ...f, label: e.target.value } : f))}
+                                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                                                    placeholder="שם השדה"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-600 mb-1">סוג השדה</label>
+                                                <select
+                                                    value={field.type}
+                                                    onChange={e => setFormEditorSchema(prev => prev.map(f => f.id === field.id ? { ...f, type: e.target.value as FormField["type"] } : f))}
+                                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                                                >
+                                                    <option value="text">טקסט חופשי</option>
+                                                    <option value="tel">טלפון</option>
+                                                    <option value="email">אימייל</option>
+                                                    <option value="number">מספר</option>
+                                                    <option value="textarea">אזור טקסט</option>
+                                                    <option value="select">בחירה מרשימה</option>
+                                                    <option value="checkbox">תיבת סימון</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">טקסט דוגמה (placeholder)</label>
+                                            <input
+                                                type="text"
+                                                value={field.placeholder || ""}
+                                                onChange={e => setFormEditorSchema(prev => prev.map(f => f.id === field.id ? { ...f, placeholder: e.target.value } : f))}
+                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                                                placeholder="לדוגמה: הכנס טקסט..."
+                                            />
+                                        </div>
+                                        {field.type === "select" && (
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-600 mb-1">אפשרויות בחירה (מופרדות בפסיק)</label>
+                                                <input
+                                                    type="text"
+                                                    value={(field.options || []).join(", ")}
+                                                    onChange={e => setFormEditorSchema(prev => prev.map(f => f.id === field.id ? { ...f, options: e.target.value.split(",").map(s => s.trim()).filter(Boolean) } : f))}
+                                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                                                    placeholder="אפשרות א, אפשרות ב, אפשרות ג"
+                                                />
+                                            </div>
+                                        )}
+                                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={field.required}
+                                                onChange={e => setFormEditorSchema(prev => prev.map(f => f.id === field.id ? { ...f, required: e.target.checked } : f))}
+                                                className="w-4 h-4 accent-indigo-600"
+                                            />
+                                            <span className="text-sm font-medium text-slate-700">שדה חובה</span>
+                                        </label>
+                                        <div className="flex gap-2 pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormEditorEditingId(null)}
+                                                className="px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition"
+                                            >
+                                                סיים עריכה
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* View Mode */
+                                    <div className="flex items-center gap-3 px-4 py-3">
+                                        <GripVertical size={16} className="text-slate-300 shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                            <span className="font-semibold text-slate-800 text-sm">{field.label}</span>
+                                            <span className="text-xs text-slate-400 mr-2">({field.type})</span>
+                                            {field.required && <span className="text-[10px] bg-red-50 text-red-600 border border-red-200 px-1.5 py-0.5 rounded-full font-bold mr-1">חובה</span>}
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                                            <button
+                                                onClick={() => {
+                                                    if (idx > 0) {
+                                                        const next = [...formEditorSchema];
+                                                        [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                                                        setFormEditorSchema(next);
+                                                    }
+                                                }}
+                                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition"
+                                                title="העלה"
+                                                disabled={idx === 0}
+                                            >
+                                                <ChevronUp size={14} />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    if (idx < formEditorSchema.length - 1) {
+                                                        const next = [...formEditorSchema];
+                                                        [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+                                                        setFormEditorSchema(next);
+                                                    }
+                                                }}
+                                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition"
+                                                title="הורד"
+                                                disabled={idx === formEditorSchema.length - 1}
+                                            >
+                                                <ChevronDown size={14} />
+                                            </button>
+                                            <button
+                                                onClick={() => setFormEditorEditingId(field.id)}
+                                                className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition"
+                                                title="ערוך"
+                                            >
+                                                <Pencil size={14} />
+                                            </button>
+                                            <button
+                                                onClick={() => setFormEditorSchema(prev => prev.filter(f => f.id !== field.id))}
+                                                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition"
+                                                title="מחק שדה"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+
+                        {/* Add New Field Panel */}
+                        {formEditorAddingNew ? (
+                            <div className="rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/60 p-4 space-y-3 mt-2">
+                                <p className="text-sm font-bold text-indigo-700">שדה חדש</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1">שם השדה</label>
+                                        <input
+                                            type="text"
+                                            value={formEditorNewField.label || ""}
+                                            onChange={e => setFormEditorNewField(prev => ({ ...prev, label: e.target.value }))}
+                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none bg-white"
+                                            placeholder="לדוגמה: גיל"
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1">סוג</label>
+                                        <select
+                                            value={formEditorNewField.type || "text"}
+                                            onChange={e => setFormEditorNewField(prev => ({ ...prev, type: e.target.value as FormField["type"] }))}
+                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none bg-white"
+                                        >
+                                            <option value="text">טקסט חופשי</option>
+                                            <option value="tel">טלפון</option>
+                                            <option value="email">אימייל</option>
+                                            <option value="number">מספר</option>
+                                            <option value="textarea">אזור טקסט</option>
+                                            <option value="select">בחירה מרשימה</option>
+                                            <option value="checkbox">תיבת סימון</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1">טקסט דוגמה (אופציונלי)</label>
+                                    <input
+                                        type="text"
+                                        value={formEditorNewField.placeholder || ""}
+                                        onChange={e => setFormEditorNewField(prev => ({ ...prev, placeholder: e.target.value }))}
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none bg-white"
+                                        placeholder="לדוגמה..."
+                                    />
+                                </div>
+                                {formEditorNewField.type === "select" && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1">אפשרויות (מופרדות בפסיק)</label>
+                                        <input
+                                            type="text"
+                                            value={(formEditorNewField.options || []).join(", ")}
+                                            onChange={e => setFormEditorNewField(prev => ({ ...prev, options: e.target.value.split(",").map(s => s.trim()).filter(Boolean) }))}
+                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none bg-white"
+                                            placeholder="אפשרות א, אפשרות ב"
+                                        />
+                                    </div>
+                                )}
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={formEditorNewField.required || false}
+                                        onChange={e => setFormEditorNewField(prev => ({ ...prev, required: e.target.checked }))}
+                                        className="w-4 h-4 accent-indigo-600"
+                                    />
+                                    <span className="text-sm font-medium text-slate-700">שדה חובה</span>
+                                </label>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={!formEditorNewField.label?.trim()}
+                                        onClick={() => {
+                                            if (!formEditorNewField.label?.trim()) return;
+                                            const newField: FormField = {
+                                                id: `field_${Date.now()}`,
+                                                label: formEditorNewField.label!.trim(),
+                                                type: (formEditorNewField.type || "text") as FormField["type"],
+                                                required: formEditorNewField.required || false,
+                                                placeholder: formEditorNewField.placeholder || "",
+                                                options: formEditorNewField.options || [],
+                                            };
+                                            setFormEditorSchema(prev => [...prev, newField]);
+                                            setFormEditorNewField({ label: "", type: "text", required: false, placeholder: "", options: [] });
+                                            setFormEditorAddingNew(false);
+                                        }}
+                                        className="px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition disabled:opacity-50"
+                                    >
+                                        הוסף שדה
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setFormEditorAddingNew(false); setFormEditorNewField({ label: "", type: "text", required: false, placeholder: "", options: [] }); }}
+                                        className="px-4 py-1.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 transition"
+                                    >
+                                        ביטול
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => setFormEditorAddingNew(true)}
+                                className="w-full mt-2 flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 py-3 text-sm font-semibold text-slate-500 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/40 transition"
+                            >
+                                <Plus size={16} /> הוסף שדה חדש
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (window.confirm("לאפס את הטופס לברירת המחדל (שם, טלפון, אימייל)?")) {
+                                    setFormEditorSchema(DEFAULT_FORM_SCHEMA);
+                                    setFormEditorEditingId(null);
+                                }
+                            }}
+                            className="text-xs text-slate-500 hover:text-red-500 transition font-medium"
+                        >
+                            איפוס לברירת מחדל
+                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowFormEditor(false)}
+                                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-bold hover:bg-slate-100 transition"
+                            >
+                                ביטול
+                            </button>
+                            <button
+                                type="button"
+                                disabled={formEditorSaving}
+                                onClick={async () => {
+                                    if (!db || !id) return;
+                                    setFormEditorSaving(true);
+                                    try {
+                                        await updateDoc(doc(db, "events", id), { formSchema: formEditorSchema });
+                                        setShowFormEditor(false);
+                                    } catch (err) {
+                                        console.error("Failed to save formSchema", err);
+                                        alert("שגיאה בשמירה, נסה שוב.");
+                                    } finally {
+                                        setFormEditorSaving(false);
+                                    }
+                                }}
+                                className="px-5 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition shadow-sm disabled:opacity-60"
+                            >
+                                {formEditorSaving ? "שומר..." : "שמור טופס"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+    </>);
 }
