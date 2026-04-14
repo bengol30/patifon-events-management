@@ -7,12 +7,46 @@ import { auth, db, storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc, getDoc, setDoc, getDocs, where, collectionGroup, limit } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar, Brain, BarChart3 } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar, Brain, BarChart3, ChevronDown, Users } from "lucide-react";
 import Link from "next/link";
 import ImportantDocuments from "@/components/ImportantDocuments";
 import ImagineMeStyleInsightsPanel from "@/components/ImagineMeStyleInsightsPanel";
 import StockTrackingPreviewPanel from "@/components/StockTrackingPreviewPanel";
 const ADMIN_EMAIL = "bengo0469@gmail.com";
+
+function WaAccordion({ id, icon, title, subtitle, children, isOpen, onToggle }: {
+    id: string;
+    icon: React.ReactNode;
+    title: string;
+    subtitle?: string;
+    children: React.ReactNode;
+    isOpen: boolean;
+    onToggle: () => void;
+}) {
+    return (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <button
+                type="button"
+                onClick={onToggle}
+                className="w-full flex items-center justify-between gap-3 px-5 py-4 text-right hover:bg-gray-50/70 transition"
+            >
+                <div className="flex items-center gap-3">
+                    {icon}
+                    <div>
+                        <div className="font-semibold text-gray-900 text-sm">{title}</div>
+                        {subtitle && <div className="text-xs text-gray-400 mt-0.5">{subtitle}</div>}
+                    </div>
+                </div>
+                <ChevronDown size={16} className={`text-gray-400 transition-transform duration-200 flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isOpen && (
+                <div className="px-5 pb-5 pt-1 border-t border-gray-100">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+}
 
 interface DefaultTask {
     id: string;
@@ -132,6 +166,21 @@ interface BulkFailure {
     record: any;
 }
 
+interface SendingListMember {
+    type: "user" | "volunteer" | "wa_group";
+    id: string;
+    name: string;
+    phone?: string;
+    chatId?: string;
+}
+
+interface SendingList {
+    id: string;
+    name: string;
+    members: SendingListMember[];
+    createdAt?: any;
+}
+
 export default function SettingsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -242,6 +291,23 @@ export default function SettingsPage() {
     const [groupEventId, setGroupEventId] = useState("");
     const [sendingGroupsMsg, setSendingGroupsMsg] = useState(false);
     const [eventsOptions, setEventsOptions] = useState<{ id: string; title?: string; startTime?: any; location?: string }[]>([]);
+    const [waOpenSections, setWaOpenSections] = useState<Set<string>>(new Set(["connection"]));
+    const toggleWaSection = (id: string) => setWaOpenSections(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    // Sending lists
+    const [sendingLists, setSendingLists] = useState<SendingList[]>([]);
+    const [loadingSendingLists, setLoadingSendingLists] = useState(false);
+    const [editingSendingListId, setEditingSendingListId] = useState<string | null>(null);
+    const [newListName, setNewListName] = useState("");
+    const [creatingList, setCreatingList] = useState(false);
+    const [listMemberSearch, setListMemberSearch] = useState("");
+    const [listMemberType, setListMemberType] = useState<"user" | "volunteer" | "wa_group">("user");
+    const [sendingToListId, setSendingToListId] = useState<string | null>(null);
+    const [listSendMode, setListSendMode] = useState<"custom" | "event" | "openTasks" | "upcomingEvents">("custom");
+    const [listCustomMessage, setListCustomMessage] = useState("");
+    const [listEventId, setListEventId] = useState("");
+    const [listMediaFile, setListMediaFile] = useState<File | null>(null);
+    const [listSending, setListSending] = useState(false);
+    const [listSendFailures, setListSendFailures] = useState<BulkFailure[]>([]);
     // Selection State
     const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
 
@@ -529,6 +595,17 @@ export default function SettingsPage() {
             }
         };
         loadEvents();
+    }, [db, isAdmin, activeTab]);
+
+    // Load sending lists
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "whatsapp") { setLoadingSendingLists(false); return; }
+        setLoadingSendingLists(true);
+        const unsub = onSnapshot(collection(db, "whatsapp_sending_lists"), (snap) => {
+            setSendingLists(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as SendingList[]);
+            setLoadingSendingLists(false);
+        }, () => setLoadingSendingLists(false));
+        return () => unsub();
     }, [db, isAdmin, activeTab]);
 
     useEffect(() => {
@@ -1949,6 +2026,217 @@ export default function SettingsPage() {
         setBulkFailures(prev => prev.filter(f => f.id !== id));
     };
 
+    // ── Sending Lists handlers ──────────────────────────────────────────────
+    const handleCreateSendingList = async () => {
+        if (!db || !newListName.trim()) return;
+        setCreatingList(true);
+        try {
+            await addDoc(collection(db, "whatsapp_sending_lists"), {
+                name: newListName.trim(),
+                members: [],
+                createdAt: new Date(),
+            });
+            setNewListName("");
+        } catch (err) {
+            console.error("Failed creating sending list", err);
+            setMessage({ text: "שגיאה ביצירת הרשימה", type: "error" });
+        } finally {
+            setCreatingList(false);
+        }
+    };
+
+    const handleDeleteSendingList = async (id: string) => {
+        if (!db) return;
+        await deleteDoc(doc(db, "whatsapp_sending_lists", id));
+        if (editingSendingListId === id) setEditingSendingListId(null);
+        if (sendingToListId === id) setSendingToListId(null);
+    };
+
+    const handleAddMemberToList = async (listId: string, member: SendingListMember) => {
+        if (!db) return;
+        const list = sendingLists.find(l => l.id === listId);
+        if (!list) return;
+        const existingMembers = list.members || [];
+        if (existingMembers.some(m => m.id === member.id && m.type === member.type)) return;
+        // Strip undefined values — Firestore rejects them
+        const cleanMember: Record<string, any> = { type: member.type, id: member.id, name: member.name };
+        if (member.phone) cleanMember.phone = member.phone;
+        if (member.chatId) cleanMember.chatId = member.chatId;
+        await updateDoc(doc(db, "whatsapp_sending_lists", listId), {
+            members: [...existingMembers, cleanMember],
+        });
+    };
+
+    const handleRemoveMemberFromList = async (listId: string, memberId: string, memberType: string) => {
+        if (!db) return;
+        const list = sendingLists.find(l => l.id === listId);
+        if (!list) return;
+        await updateDoc(doc(db, "whatsapp_sending_lists", listId), {
+            members: list.members.filter(m => !(m.id === memberId && m.type === memberType)),
+        });
+    };
+
+    const handleRenameSendingList = async (listId: string, newName: string) => {
+        if (!db || !newName.trim()) return;
+        await updateDoc(doc(db, "whatsapp_sending_lists", listId), { name: newName.trim() });
+    };
+
+    const handleSendToList = async (list: SendingList) => {
+        if (!db || !user || !isAdmin) return;
+        if (!whatsappConfig.idInstance.trim() || !whatsappConfig.apiTokenInstance.trim()) {
+            setMessage({ text: "חסר ID/Token", type: "error" });
+            return;
+        }
+        if (!list.members.length) {
+            setMessage({ text: "הרשימה ריקה", type: "error" });
+            return;
+        }
+        if ((listSendMode === "custom") && !listCustomMessage.trim()) {
+            setMessage({ text: "כתוב הודעה לפני שליחה", type: "error" });
+            return;
+        }
+        if (listSendMode === "event" && !listEventId) {
+            setMessage({ text: "בחר אירוע לשליחה", type: "error" });
+            return;
+        }
+
+        setListSending(true);
+        setListSendFailures([]);
+        const failures: BulkFailure[] = [];
+        let successCount = 0;
+
+        try {
+            const origin = getPublicBaseUrl(whatsappConfig.baseUrl);
+
+            // Resolve event data if needed
+            let eventText = "";
+            let eventMediaUrl = "";
+            if (listSendMode === "event") {
+                const eventSnap = await getDoc(doc(db, "events", listEventId));
+                if (!eventSnap.exists()) { setMessage({ text: "האירוע לא נמצא", type: "error" }); return; }
+                const ed = eventSnap.data() as any;
+                const publicBase = getPublicBaseUrl(whatsappConfig.baseUrl || ed?.baseUrl);
+                const replaceOriginLocal = (text: string) => {
+                    if (!publicBase) return text;
+                    const local = typeof window !== "undefined" ? window.location.origin : "";
+                    let out = text;
+                    if (local && local !== publicBase) out = out.split(local).join(publicBase);
+                    out = out.replace(/https?:\/\/localhost:\d+/g, publicBase);
+                    return out;
+                };
+                eventText = replaceOriginLocal((ed.officialPostText || "").trim());
+                eventMediaUrl = (ed.officialFlyerUrl || "").trim();
+                if (!eventText) { setMessage({ text: "אין מלל רשמי לאירוע", type: "error" }); return; }
+            }
+
+            // Upload media file if needed
+            let uploadedMediaUrl = "";
+            if (listSendMode === "custom" && listMediaFile && storage) {
+                try {
+                    const storageRef = ref(storage, `whatsapp_uploads/${Date.now()}_${listMediaFile.name}`);
+                    await uploadBytes(storageRef, listMediaFile);
+                    uploadedMediaUrl = await getDownloadURL(storageRef);
+                } catch (uploadErr) {
+                    console.error("Failed to upload media for list send", uploadErr);
+                }
+            }
+
+            const idInstance = whatsappConfig.idInstance.trim();
+            const apiTokenInstance = whatsappConfig.apiTokenInstance.trim();
+            const parentsIndex = (listSendMode === "openTasks" || listSendMode === "upcomingEvents") ? await loadParentsIndex() : null;
+
+            // Helper: send a single message (text or media) to any chatId
+            const sendOne = async (chatId: string, text: string, mediaUrl?: string, mediaFileName?: string) => {
+                if (mediaUrl) {
+                    const res = await fetch("/api/whatsapp/send", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            method: "url",
+                            chatId,
+                            urlFile: mediaUrl,
+                            fileName: mediaFileName || "media",
+                            caption: text,
+                            idInstance,
+                            apiTokenInstance,
+                        }),
+                    });
+                    return res;
+                } else {
+                    const res = await fetch("/api/whatsapp/send", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ chatId, message: text }),
+                    });
+                    return res;
+                }
+            };
+
+            for (const member of list.members) {
+                await ensureGlobalRateLimit();
+
+                let text = "";
+                let mediaUrl = "";
+                let mediaFileName = "";
+
+                if (listSendMode === "event") {
+                    text = eventText;
+                    mediaUrl = eventMediaUrl;
+                    mediaFileName = mediaUrl ? (mediaUrl.split("?")[0].split("/").pop() || "flyer.jpg") : "";
+                } else if (listSendMode === "custom") {
+                    text = listCustomMessage.trim();
+                    mediaUrl = uploadedMediaUrl;
+                    mediaFileName = listMediaFile?.name || "media";
+                } else if ((listSendMode === "openTasks" || listSendMode === "upcomingEvents") && parentsIndex) {
+                    const fakeRecord = { id: member.id, fullName: member.name, phone: member.phone };
+                    const lines = await generateMessageLines(fakeRecord, origin, parentsIndex);
+                    text = lines.join("\n");
+                }
+
+                if (!text && !mediaUrl) continue;
+
+                let chatId = "";
+                if (member.type === "wa_group") {
+                    chatId = member.chatId || "";
+                } else {
+                    const phone = normalizePhone(member.phone || "");
+                    if (!phone) {
+                        failures.push({ id: member.id, name: member.name, phone: "", reason: "חסר מספר טלפון", type: member.type as any, record: member });
+                        continue;
+                    }
+                    chatId = `${phone}@c.us`;
+                }
+
+                if (!chatId) continue;
+
+                try {
+                    const res = await sendOne(chatId, text, mediaUrl || undefined, mediaFileName || undefined);
+                    if (res.ok) {
+                        successCount++;
+                    } else {
+                        const errText = await res.text();
+                        failures.push({ id: member.id, name: member.name, phone: member.phone || "", reason: errText || "שגיאת שליחה", type: member.type as any, record: member });
+                    }
+                } catch {
+                    failures.push({ id: member.id, name: member.name, phone: member.phone || "", reason: "שגיאת רשת", type: member.type as any, record: member });
+                }
+            }
+
+            setListSendFailures(failures);
+            if (failures.length > 0) {
+                setMessage({ text: `נשלח ל-${successCount}, נכשל ${failures.length}`, type: "error" });
+            } else {
+                setMessage({ text: `נשלח בהצלחה ל-${successCount} נמענים!`, type: "success" });
+            }
+        } catch (err) {
+            console.error("List send failed", err);
+            setMessage({ text: "שגיאה כללית בשליחה", type: "error" });
+        } finally {
+            setListSending(false);
+        }
+    };
+    // ── End Sending Lists handlers ──────────────────────────────────────────
+
     const handleGenerateEventSummary = async () => {
         if (!exportSelectedEventId) {
             setMessage({ text: "בחר אירוע לסיכום", type: "error" });
@@ -2695,611 +2983,632 @@ export default function SettingsPage() {
                         )}
 
                         {activeTab === "whatsapp" && isAdmin && (
-                            <div className="space-y-6">
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <PlugZap size={20} className="text-indigo-500" />
-                                                <h2 className="text-xl font-bold text-gray-900">חיבור וואטסאפ (Green API)</h2>
-                                            </div>
-                                            <p className="text-gray-500 text-sm mt-1">
-                                                הזן את מזהה האינסטנס והאסימון מ-Green API כדי לשלוח הודעות וואטסאפ מהמערכת.
-                                            </p>
-                                        </div>
-                                        <a
-                                            href="https://green-api.com/en/docs/"
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="text-sm text-indigo-600 hover:text-indigo-800 underline"
-                                        >
-                                            מדריך Green API
-                                        </a>
+                            <div className="space-y-3">
+
+                                {/* Status bar */}
+                                <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4 flex flex-wrap items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <PlugZap size={18} className="text-indigo-500" />
+                                        <span className="font-semibold text-gray-800 text-sm">וואטסאפ</span>
+                                        <span className="text-xs text-gray-400">Green API</span>
                                     </div>
-
-                                    {loadingWhatsapp ? (
-                                        <div className="mt-4 text-gray-500 text-sm">טוען הגדרות...</div>
-                                    ) : (
-                                        <form className="space-y-4 mt-6" onSubmit={handleSaveWhatsapp}>
-                                            <div className="grid sm:grid-cols-2 gap-4">
-                                                <div className="space-y-1">
-                                                    <label className="text-sm text-gray-600">ID אינסטנס</label>
-                                                    <input
-                                                        type="text"
-                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                        value={whatsappConfig.idInstance}
-                                                        onChange={(e) => setWhatsappConfig(prev => ({ ...prev, idInstance: e.target.value }))}
-                                                        placeholder="לדוגמה: 1100123456"
-                                                        required
-                                                    />
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-sm text-gray-600">API Token</label>
-                                                    <input
-                                                        type="password"
-                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                        value={whatsappConfig.apiTokenInstance}
-                                                        onChange={(e) => setWhatsappConfig(prev => ({ ...prev, apiTokenInstance: e.target.value }))}
-                                                        placeholder="token מ-Green API"
-                                                        required
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <label className="text-sm text-gray-600">מספר שולח (אופציונלי)</label>
-                                                <input
-                                                    type="text"
-                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                    value={whatsappConfig.senderPhone || ""}
-                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, senderPhone: e.target.value }))}
-                                                    placeholder="לדוגמה: 972501234567"
-                                                />
-                                                <p className="text-xs text-gray-500">שמור כאן את המספר שמחובר לאינסטנס כדי להציגו במסכים אחרים.</p>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <label className="text-sm text-gray-600">כתובת בסיס לקישורים (חובה לוואטסאפ)</label>
-                                                <input
-                                                    type="url"
-                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                    value={whatsappConfig.baseUrl || ""}
-                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
-                                                    placeholder="https://app.domain.com"
-                                                    required
-                                                />
-                                                <p className="text-xs text-gray-500">הקישורים בהודעות ייבנו מהכתובת הזו (לא localhost).</p>
-                                            </div>
-                                            <div className="rounded-xl border border-violet-200 bg-violet-50 p-4 space-y-3">
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div>
-                                                        <div className="flex items-center gap-2 text-sm font-bold text-violet-900">
-                                                            <Brain size={16} className="text-violet-600" />
-                                                            לימוד סגנון Imagine Me
-                                                        </div>
-                                                        <p className="text-xs text-violet-800 mt-1 leading-5">
-                                                            כשהפיצ'ר פעיל, כל שליחה מתוך Imagine Me CRM מנותחת ונשמרות ממנה תובנות כדי לשפר את "הצעת הודעה".
-                                                        </p>
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setWhatsappConfig(prev => ({ ...prev, imagineMeStyleLearningEnabled: !(prev.imagineMeStyleLearningEnabled !== false) }))}
-                                                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'bg-violet-600' : 'bg-gray-300'}`}
-                                                        aria-pressed={whatsappConfig.imagineMeStyleLearningEnabled !== false}
-                                                        title="הפעל/כבה לימוד סגנון"
-                                                    >
-                                                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'translate-x-6' : 'translate-x-1'}`} />
-                                                    </button>
-                                                </div>
-                                                <div className="text-xs font-medium text-violet-900">
-                                                    מצב נוכחי: {whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'פעיל' : 'כבוי'}
-                                                </div>
-                                            </div>
-
-                                            <div className="flex items-center gap-3">
-                                                <button
-                                                    type="submit"
-                                                    disabled={savingWhatsapp}
-                                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
-                                                >
-                                                    {savingWhatsapp ? "שומר..." : "שמור הגדרות"}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={handleCheckConnection}
-                                                    disabled={checkingConnection}
-                                                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
-                                                >
-                                                    {checkingConnection ? "בודק..." : "בדוק חיבור"}
-                                                </button>
-                                                <span className="text-xs text-gray-500">השמירה מתבצעת ב-Firestore ותהיה זמינה לכלי שליחה.</span>
-                                            </div>
-                                        </form>
-                                    )}
-                                </div>
-
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                                    <div className="flex items-start justify-between gap-3 mb-4">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <MessageCircle size={20} className="text-green-600" />
-                                                <h3 className="text-lg font-bold text-gray-900">שליחת הודעת וואטסאפ למשתמשים</h3>
-                                            </div>
-                                            <p className="text-gray-500 text-sm mt-1">
-                                                בחר משתמש מהמערכת או הזן מספר באופן ידני ושלח הודעה ישירה דרך Green API.
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <form className="space-y-4" onSubmit={handleSendWhatsapp}>
-                                        <div className="grid sm:grid-cols-2 gap-4">
-                                            <div className="space-y-2">
-                                                <label className="text-sm text-gray-600">חיפוש משתמש</label>
-                                                <input
-                                                    type="text"
-                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                    value={waSearch}
-                                                    onChange={(e) => setWaSearch(e.target.value)}
-                                                    placeholder="חפש לפי שם, אימייל או טלפון"
-                                                />
-                                                <div className="relative">
-                                                    <select
-                                                        value={waSelectedUserId}
-                                                        onChange={(e) => handleSelectWaUser(e.target.value)}
-                                                        className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                                                    >
-                                                        <option value="">בחר משתמש</option>
-                                                        {(loadingUsersDirectory ? [] : usersDirectory)
-                                                            .filter((u) => {
-                                                                const search = waSearch.toLowerCase();
-                                                                if (!search) return true;
-                                                                return (u.fullName || "").toLowerCase().includes(search) ||
-                                                                    (u.email || "").toLowerCase().includes(search) ||
-                                                                    (u.phone || "").includes(search);
-                                                            })
-                                                            .slice(0, 30)
-                                                            .map((u) => (
-                                                                <option key={u.id} value={u.id}>
-                                                                    {u.fullName || u.email || "משתמש"} {u.phone ? `(${u.phone})` : ""}
-                                                                </option>
-                                                            ))}
-                                                    </select>
-                                                    {loadingUsersDirectory && (
-                                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">טוען משתמשים...</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="space-y-2">
-                                                <label className="text-sm text-gray-600">מספר וואטסאפ</label>
-                                                <input
-                                                    type="tel"
-                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                    value={waPhoneInput}
-                                                    onChange={(e) => setWaPhoneInput(e.target.value)}
-                                                    placeholder="לדוגמה: 05x-xxxxxxx או 9725..."
-                                                    required
-                                                />
-                                                <p className="text-xs text-gray-500">המספר מנורמל אוטומטית לפורמט 972 לפני השליחה.</p>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <label className="text-sm text-gray-600">תוכן ההודעה</label>
-                                            <textarea
-                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                rows={4}
-                                                value={waMessageText}
-                                                onChange={(e) => setWaMessageText(e.target.value)}
-                                                placeholder="מה תרצה לשלוח?"
-                                                required
-                                            />
-                                        </div>
-
-                                        <div className="flex items-center gap-3">
-                                            <button
-                                                type="submit"
-                                                disabled={waSending}
-                                                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
-                                            >
-                                                {waSending ? "שולח..." : "שלח הודעה"}
-                                            </button>
-                                            <div className="text-xs text-gray-500">
-                                                יש לוודא שה-ID וה-Token תקפים ושהמספר מאומת ב-Green API.
-                                            </div>
-                                        </div>
-                                    </form>
-                                </div>
-
-                                <ImagineMeStyleInsightsPanel 
-                                    insights={imagineMeStyleInsights}
-                                    enabled={whatsappConfig.imagineMeStyleLearningEnabled !== false}
-                                />
-
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                                    <div className="flex items-start justify-between gap-3 mb-4">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <PlugZap size={20} className="text-indigo-500" />
-                                                <h3 className="text-lg font-bold text-gray-900">שליחה מרוכזת</h3>
-                                            </div>
-                                            <p className="text-gray-500 text-sm mt-1">
-                                                בחר משתמשים או מתנדבים והודעה מוכנה לשליחה בבת אחת.
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-3 mb-4">
-                                        <div className="flex bg-gray-50 border rounded-lg p-1">
-                                            <button
-                                                type="button"
-                                                onClick={() => setBulkAudience("users")}
-                                                className={`px-3 py-1.5 text-sm rounded-md font-medium transition ${bulkAudience === "users" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-700 hover:bg-white"}`}
-                                            >
-                                                משתמשי מערכת
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setBulkAudience("volunteers")}
-                                                className={`px-3 py-1.5 text-sm rounded-md font-medium transition ${bulkAudience === "volunteers" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-700 hover:bg-white"}`}
-                                            >
-                                                מתנדבים רשומים
-                                            </button>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={toggleSelectAllBulk}
-                                            disabled={!filteredBulkRecipients.length}
-                                            className="text-sm px-3 py-1.5 rounded-md border border-gray-200 hover:border-indigo-300 hover:text-indigo-700 transition disabled:opacity-50"
-                                        >
-                                            {bulkAllVisibleSelected ? "בטל סימון נוכחי" : "סמן את כל הנראים"}
-                                        </button>
-                                        <span className="text-xs text-gray-500">
-                                            נבחרו {bulkVisibleSelectedCount}/{filteredBulkRecipients.length || 0} • סה״כ {bulkAudienceList.length}
+                                    <div className="flex flex-wrap items-center gap-3 mr-auto text-xs">
+                                        {whatsappConfig.idInstance ? (
+                                            <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 px-2.5 py-1 rounded-full font-medium border border-green-100">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                                                Instance: {whatsappConfig.idInstance}
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full font-medium">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
+                                                לא מוגדר
+                                            </span>
+                                        )}
+                                        {whatsappConfig.senderPhone && (
+                                            <span className="text-gray-500 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-100">{whatsappConfig.senderPhone}</span>
+                                        )}
+                                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-medium border ${whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'bg-violet-50 text-violet-700 border-violet-100' : 'bg-gray-100 text-gray-400 border-gray-100'}`}>
+                                            <Brain size={11} />
+                                            Imagine Me: {whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'פעיל' : 'כבוי'}
                                         </span>
                                     </div>
+                                </div>
 
-                                    <div className="grid sm:grid-cols-2 gap-4 mb-4">
-                                        <div>
-                                            <label className="text-sm text-gray-600">חיפוש</label>
-                                            <input
-                                                type="text"
-                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                value={waSearch}
-                                                onChange={(e) => setWaSearch(e.target.value)}
-                                                placeholder="חפש לפי שם, אימייל או טלפון"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="text-sm text-gray-600">סוג הודעה</label>
-                                            <select
-                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                                                value={bulkTemplate}
-                                                onChange={(e) => setBulkTemplate(e.target.value as any)}
-                                            >
-                                                <option value="openTasks">תזכורת למשימות פתוחות</option>
-                                                <option value="upcomingEvents">עדכון 3 האירועים הקרובים</option>
-                                                <option value="custom">הודעה חופשית</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    {bulkTemplate === "custom" && (
-                                        <div className="mb-4">
-                                            <label className="text-sm text-gray-600">תוכן ההודעה החופשית</label>
-                                            <textarea
-                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none min-h-[120px]"
-                                                value={bulkCustomMessage}
-                                                onChange={(e) => setBulkCustomMessage(e.target.value)}
-                                                placeholder="כתוב כאן את ההודעה שתישלח לנמענים שסימנת..."
-                                            />
-                                        </div>
-                                    )}
-
-                                    <div className="max-h-52 overflow-y-auto border rounded-lg p-3 mb-4">
-                                        {(bulkAudienceLoading ? [] : filteredBulkRecipients).map((u: any) => {
-                                            const key = `${bulkKeyPrefix}:${u.id}`;
-                                            return (
-                                                <label key={key} className="flex items-center gap-2 py-1 text-sm text-gray-700">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={bulkSelected.has(key)}
-                                                        onChange={(e) => {
-                                                            setBulkSelected((prev) => {
-                                                                const next = new Set(prev);
-                                                                if (e.target.checked) next.add(key); else next.delete(key);
-                                                                return next;
-                                                            });
-                                                        }}
-                                                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                                                    />
-                                                    <span className="flex-1 truncate">{u.fullName || u.name || u.email || "איש קשר"}</span>
-                                                    {u.phone && <span className="text-xs text-gray-400">{u.phone}</span>}
-                                                </label>
-                                            );
-                                        })}
-                                        {!bulkAudienceLoading && filteredBulkRecipients.length === 0 && (
-                                            <div className="text-sm text-gray-500">לא נמצאו תוצאות.</div>
-                                        )}
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={handleSendBulk}
-                                        disabled={bulkSending}
-                                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
-                                    >
-                                        {bulkSending ? "שולח..." : "שלח לנבחרים"}
-                                    </button>
-                                    <p className="text-xs text-gray-400 mt-2">
-                                        דוח תקלות יופיע כאן במידה והיו שגיאות בשליחה.
-                                    </p>
-
-                                    {bulkFailures.length > 0 && (
-                                        <div className="mt-6 bg-red-50 border border-red-200 rounded-xl p-4">
-                                            <div className="flex items-center gap-2 mb-3 text-red-800">
-                                                <AlertTriangle size={20} />
-                                                <h4 className="font-bold">דוח תקלות בשליחה ({bulkFailures.length})</h4>
-                                            </div>
-                                            <div className="space-y-2">
-                                                {bulkFailures.map((fail) => (
-                                                    <div key={fail.id} className="bg-white p-3 rounded-lg border border-red-100 flex items-center justify-between gap-4">
-                                                        <div>
-                                                            <p className="font-medium text-gray-900">{fail.name}</p>
-                                                            <p className="text-xs text-red-600">{fail.reason}</p>
-                                                            {fail.phone && <p className="text-xs text-gray-500">{fail.phone}</p>}
+                                {/* Accordion sections */}
+                                <>
+                                    {/* 1. הגדרות חיבור */}
+                                            <WaAccordion id="connection" isOpen={waOpenSections.has("connection")} onToggle={() => toggleWaSection("connection")} icon={<PlugZap size={17} className="text-indigo-500 flex-shrink-0" />} title="הגדרות חיבור" subtitle="ID אינסטנס, Token, מספר שולח וכתובת בסיס">
+                                                {loadingWhatsapp ? (
+                                                    <div className="pt-3 text-gray-500 text-sm">טוען הגדרות...</div>
+                                                ) : (
+                                                    <form className="space-y-4 pt-4" onSubmit={handleSaveWhatsapp}>
+                                                        <div className="grid sm:grid-cols-2 gap-4">
+                                                            <div className="space-y-1">
+                                                                <label className="text-sm text-gray-600">ID אינסטנס</label>
+                                                                <input
+                                                                    type="text"
+                                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                    value={whatsappConfig.idInstance}
+                                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, idInstance: e.target.value }))}
+                                                                    placeholder="לדוגמה: 1100123456"
+                                                                    required
+                                                                />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <label className="text-sm text-gray-600">API Token</label>
+                                                                <input
+                                                                    type="password"
+                                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                    value={whatsappConfig.apiTokenInstance}
+                                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, apiTokenInstance: e.target.value }))}
+                                                                    placeholder="token מ-Green API"
+                                                                    required
+                                                                />
+                                                            </div>
                                                         </div>
-                                                        <div className="flex items-center gap-2">
-                                                            {fail.phone && (
-                                                                <button
-                                                                    onClick={() => handleRetryBulkItem(fail)}
-                                                                    className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-100 transition"
-                                                                >
-                                                                    נסה שוב
-                                                                </button>
-                                                            )}
+                                                        <div className="grid sm:grid-cols-2 gap-4">
+                                                            <div className="space-y-1">
+                                                                <label className="text-sm text-gray-600">מספר שולח (אופציונלי)</label>
+                                                                <input
+                                                                    type="text"
+                                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                    value={whatsappConfig.senderPhone || ""}
+                                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, senderPhone: e.target.value }))}
+                                                                    placeholder="לדוגמה: 972501234567"
+                                                                />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <label className="text-sm text-gray-600">כתובת בסיס לקישורים</label>
+                                                                <input
+                                                                    type="url"
+                                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                    value={whatsappConfig.baseUrl || ""}
+                                                                    onChange={(e) => setWhatsappConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                                                    placeholder="https://app.domain.com"
+                                                                    required
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <Brain size={15} className="text-violet-600" />
+                                                                <div>
+                                                                    <div className="text-sm font-semibold text-violet-900">לימוד סגנון Imagine Me</div>
+                                                                    <div className="text-xs text-violet-700 mt-0.5">ניתוח שליחות לשיפור הצעות הודעה</div>
+                                                                </div>
+                                                            </div>
                                                             <button
-                                                                onClick={() => handleRemoveBulkFailure(fail.id)}
-                                                                className="text-gray-400 hover:text-red-500 transition"
+                                                                type="button"
+                                                                onClick={() => setWhatsappConfig(prev => ({ ...prev, imagineMeStyleLearningEnabled: !(prev.imagineMeStyleLearningEnabled !== false) }))}
+                                                                className={`relative inline-flex h-7 w-12 items-center rounded-full transition flex-shrink-0 ${whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'bg-violet-600' : 'bg-gray-300'}`}
+                                                                aria-pressed={whatsappConfig.imagineMeStyleLearningEnabled !== false}
                                                             >
-                                                                <X size={16} />
+                                                                <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${whatsappConfig.imagineMeStyleLearningEnabled !== false ? 'translate-x-6' : 'translate-x-1'}`} />
+                                                            </button>
+                                                        </div>
+                                                        <div className="flex items-center gap-3 pt-1">
+                                                            <button type="submit" disabled={savingWhatsapp} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60">
+                                                                {savingWhatsapp ? "שומר..." : "שמור הגדרות"}
+                                                            </button>
+                                                            <button type="button" onClick={handleCheckConnection} disabled={checkingConnection} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60">
+                                                                {checkingConnection ? "בודק..." : "בדוק חיבור"}
+                                                            </button>
+                                                            <a href="https://green-api.com/en/docs/" target="_blank" rel="noreferrer" className="text-xs text-indigo-500 hover:text-indigo-700 underline mr-auto">מדריך Green API</a>
+                                                        </div>
+                                                    </form>
+                                                )}
+                                            </WaAccordion>
+
+                                            {/* 2. שליחה ישירה */}
+                                            <WaAccordion id="direct" isOpen={waOpenSections.has("direct")} onToggle={() => toggleWaSection("direct")} icon={<MessageCircle size={17} className="text-green-600 flex-shrink-0" />} title="שליחה ישירה" subtitle="שלח הודעה למשתמש לפי שם או מספר">
+                                                <form className="space-y-4 pt-4" onSubmit={handleSendWhatsapp}>
+                                                    <div className="grid sm:grid-cols-2 gap-4">
+                                                        <div className="space-y-2">
+                                                            <label className="text-sm text-gray-600">חיפוש משתמש</label>
+                                                            <input
+                                                                type="text"
+                                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                value={waSearch}
+                                                                onChange={(e) => setWaSearch(e.target.value)}
+                                                                placeholder="חפש לפי שם, אימייל או טלפון"
+                                                            />
+                                                            <div className="relative">
+                                                                <select
+                                                                    value={waSelectedUserId}
+                                                                    onChange={(e) => handleSelectWaUser(e.target.value)}
+                                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                                                >
+                                                                    <option value="">בחר משתמש</option>
+                                                                    {(loadingUsersDirectory ? [] : usersDirectory)
+                                                                        .filter((u) => {
+                                                                            const search = waSearch.toLowerCase();
+                                                                            if (!search) return true;
+                                                                            return (u.fullName || "").toLowerCase().includes(search) ||
+                                                                                (u.email || "").toLowerCase().includes(search) ||
+                                                                                (u.phone || "").includes(search);
+                                                                        })
+                                                                        .slice(0, 30)
+                                                                        .map((u) => (
+                                                                            <option key={u.id} value={u.id}>
+                                                                                {u.fullName || u.email || "משתמש"} {u.phone ? `(${u.phone})` : ""}
+                                                                            </option>
+                                                                        ))}
+                                                                </select>
+                                                                {loadingUsersDirectory && (
+                                                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">טוען...</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <label className="text-sm text-gray-600">מספר וואטסאפ</label>
+                                                            <input
+                                                                type="tel"
+                                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                value={waPhoneInput}
+                                                                onChange={(e) => setWaPhoneInput(e.target.value)}
+                                                                placeholder="05x-xxxxxxx או 9725..."
+                                                                required
+                                                            />
+                                                            <p className="text-xs text-gray-400">מנורמל אוטומטית לפורמט 972.</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-sm text-gray-600">תוכן ההודעה</label>
+                                                        <textarea
+                                                            className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                            rows={3}
+                                                            value={waMessageText}
+                                                            onChange={(e) => setWaMessageText(e.target.value)}
+                                                            placeholder="מה תרצה לשלוח?"
+                                                            required
+                                                        />
+                                                    </div>
+                                                    <button type="submit" disabled={waSending} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60">
+                                                        {waSending ? "שולח..." : "שלח הודעה"}
+                                                    </button>
+                                                </form>
+                                            </WaAccordion>
+
+                                            {/* 3. שליחה מרוכזת */}
+                                            <WaAccordion id="bulk" isOpen={waOpenSections.has("bulk")} onToggle={() => toggleWaSection("bulk")} icon={<Users size={17} className="text-indigo-500 flex-shrink-0" />} title="שליחה מרוכזת" subtitle="שלח הודעה לקבוצת משתמשים או מתנדבים">
+                                                <div className="pt-4 space-y-4">
+                                                    <div className="flex flex-wrap items-center gap-3">
+                                                        <div className="flex bg-gray-50 border rounded-lg p-1">
+                                                            <button type="button" onClick={() => setBulkAudience("users")} className={`px-3 py-1.5 text-sm rounded-md font-medium transition ${bulkAudience === "users" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-700 hover:bg-white"}`}>
+                                                                משתמשי מערכת
+                                                            </button>
+                                                            <button type="button" onClick={() => setBulkAudience("volunteers")} className={`px-3 py-1.5 text-sm rounded-md font-medium transition ${bulkAudience === "volunteers" ? "bg-indigo-600 text-white shadow-sm" : "text-gray-700 hover:bg-white"}`}>
+                                                                מתנדבים רשומים
+                                                            </button>
+                                                        </div>
+                                                        <button type="button" onClick={toggleSelectAllBulk} disabled={!filteredBulkRecipients.length} className="text-sm px-3 py-1.5 rounded-md border border-gray-200 hover:border-indigo-300 hover:text-indigo-700 transition disabled:opacity-50">
+                                                            {bulkAllVisibleSelected ? "בטל סימון נוכחי" : "סמן את כל הנראים"}
+                                                        </button>
+                                                        <span className="text-xs text-gray-400 mr-auto">{bulkVisibleSelectedCount}/{filteredBulkRecipients.length || 0} נבחרו</span>
+                                                    </div>
+                                                    <div className="grid sm:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label className="text-sm text-gray-600">חיפוש</label>
+                                                            <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none mt-1" value={waSearch} onChange={(e) => setWaSearch(e.target.value)} placeholder="שם, אימייל או טלפון" />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-sm text-gray-600">סוג הודעה</label>
+                                                            <select className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white mt-1" value={bulkTemplate} onChange={(e) => setBulkTemplate(e.target.value as any)}>
+                                                                <option value="openTasks">תזכורת למשימות פתוחות</option>
+                                                                <option value="upcomingEvents">עדכון 3 האירועים הקרובים</option>
+                                                                <option value="custom">הודעה חופשית</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    {bulkTemplate === "custom" && (
+                                                        <textarea className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none min-h-[100px]" value={bulkCustomMessage} onChange={(e) => setBulkCustomMessage(e.target.value)} placeholder="כתוב כאן את ההודעה שתישלח לנמענים שסימנת..." />
+                                                    )}
+                                                    <div className="max-h-48 overflow-y-auto border rounded-lg p-3">
+                                                        {(bulkAudienceLoading ? [] : filteredBulkRecipients).map((u: any) => {
+                                                            const key = `${bulkKeyPrefix}:${u.id}`;
+                                                            return (
+                                                                <label key={key} className="flex items-center gap-2 py-1 text-sm text-gray-700">
+                                                                    <input type="checkbox" checked={bulkSelected.has(key)} onChange={(e) => { setBulkSelected((prev) => { const next = new Set(prev); if (e.target.checked) next.add(key); else next.delete(key); return next; }); }} className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
+                                                                    <span className="flex-1 truncate">{u.fullName || u.name || u.email || "איש קשר"}</span>
+                                                                    {u.phone && <span className="text-xs text-gray-400">{u.phone}</span>}
+                                                                </label>
+                                                            );
+                                                        })}
+                                                        {!bulkAudienceLoading && filteredBulkRecipients.length === 0 && <div className="text-sm text-gray-500">לא נמצאו תוצאות.</div>}
+                                                    </div>
+                                                    <button type="button" onClick={handleSendBulk} disabled={bulkSending} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60">
+                                                        {bulkSending ? "שולח..." : "שלח לנבחרים"}
+                                                    </button>
+                                                    {bulkFailures.length > 0 && (
+                                                        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                                                            <div className="flex items-center gap-2 mb-3 text-red-800">
+                                                                <AlertTriangle size={16} />
+                                                                <span className="font-bold text-sm">שגיאות שליחה ({bulkFailures.length})</span>
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                {bulkFailures.map((fail) => (
+                                                                    <div key={fail.id} className="bg-white p-3 rounded-lg border border-red-100 flex items-center justify-between gap-4">
+                                                                        <div>
+                                                                            <p className="font-medium text-gray-900 text-sm">{fail.name}</p>
+                                                                            <p className="text-xs text-red-600">{fail.reason}</p>
+                                                                            {fail.phone && <p className="text-xs text-gray-400">{fail.phone}</p>}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            {fail.phone && <button onClick={() => handleRetryBulkItem(fail)} className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-100 transition">נסה שוב</button>}
+                                                                            <button onClick={() => handleRemoveBulkFailure(fail.id)} className="text-gray-400 hover:text-red-500 transition"><X size={14} /></button>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </WaAccordion>
+
+                                            {/* 4. הודעות לקבוצות */}
+                                            <WaAccordion id="groups" isOpen={waOpenSections.has("groups")} onToggle={() => toggleWaSection("groups")} icon={<MessageCircle size={17} className="text-indigo-500 flex-shrink-0" />} title="הודעות לקבוצות" subtitle={`${groups.length} קבוצות במאגר`}>
+                                                <div className="pt-4 space-y-4">
+                                                    <div>
+                                                        <label className="text-sm text-gray-600">חפש לפי שם קבוצה</label>
+                                                        <div className="flex gap-2 mt-1">
+                                                            <input type="text" className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" value={groupSearch} onChange={(e) => setGroupSearch(e.target.value)} placeholder="לדוגמה: צוות הפקה" />
+                                                            <button type="button" onClick={handleSearchGroups} disabled={searchingGroups} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60">{searchingGroups ? "מחפש..." : "חפש"}</button>
+                                                        </div>
+                                                    </div>
+                                                    {groupSearchResults.length > 0 && (
+                                                        <div className="max-h-40 overflow-y-auto border rounded-lg p-2 space-y-1.5">
+                                                            {groupSearchResults.map((g, idx) => (
+                                                                <div key={`${g.chatId}-${idx}`} className="flex items-center justify-between p-2 border rounded-lg">
+                                                                    <div>
+                                                                        <p className="font-medium text-sm text-gray-800">{g.name}</p>
+                                                                        <p className="text-xs text-gray-400 break-all">{g.chatId}</p>
+                                                                    </div>
+                                                                    <button onClick={() => handleAddGroup(g)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium" type="button" disabled={savingGroup}>הוסף</button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <div>
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <span className="text-sm font-semibold text-gray-800">קבוצות במאגר</span>
+                                                            <span className="text-xs text-gray-400">{groups.length} קבוצות</span>
+                                                        </div>
+                                                        <div className="max-h-44 overflow-y-auto border rounded-lg p-2 space-y-1.5">
+                                                            {loadingGroups && <div className="text-sm text-gray-500 p-1">טוען קבוצות...</div>}
+                                                            {!loadingGroups && groups.map((g) => (
+                                                                <div key={g.id} className="flex items-center justify-between p-2 border rounded-lg gap-2">
+                                                                    <label className="flex items-center gap-2 flex-1 cursor-pointer">
+                                                                        <input type="checkbox" checked={selectedGroups.has(g.id)} onChange={(e) => { setSelectedGroups((prev) => { const next = new Set(prev); if (e.target.checked) next.add(g.id); else next.delete(g.id); return next; }); }} className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
+                                                                        <div className="min-w-0">
+                                                                            <p className="font-medium text-sm text-gray-800 truncate">{g.name}</p>
+                                                                            <p className="text-xs text-gray-400 break-all">{g.chatId}</p>
+                                                                        </div>
+                                                                    </label>
+                                                                    <button onClick={() => handleDeleteGroup(g.id)} className="text-xs text-red-500 hover:text-red-700 flex-shrink-0" type="button">מחק</button>
+                                                                </div>
+                                                            ))}
+                                                            {!loadingGroups && groups.length === 0 && <div className="text-sm text-gray-500 p-1">עדיין לא נוספו קבוצות.</div>}
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-3 pt-1">
+                                                        <div className="flex items-center gap-4 text-sm">
+                                                            <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="groupSendMode" checked={groupSendMode === "custom"} onChange={() => setGroupSendMode("custom")} /> הודעה חופשית</label>
+                                                            <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="groupSendMode" checked={groupSendMode === "event"} onChange={() => setGroupSendMode("event")} /> הזמנה לאירוע</label>
+                                                        </div>
+                                                        {groupSendMode === "custom" && (
+                                                            <>
+                                                                <textarea className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" rows={3} value={groupMessage} onChange={(e) => setGroupMessage(e.target.value)} placeholder="מה תרצה לשלוח לקבוצות?" />
+                                                                <div className="space-y-1">
+                                                                    <label className="text-xs text-gray-600">מדיה מצורפת (אופציונלי)</label>
+                                                                    <input type="file" accept="image/*,video/*" onChange={(e) => setGroupMediaFile(e.target.files?.[0] || null)} className="w-full p-2 border rounded-lg text-sm bg-white" />
+                                                                    {groupMediaFile && <p className="text-xs text-gray-500">נבחר: {groupMediaFile.name}</p>}
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                        {groupSendMode === "event" && (
+                                                            <select className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white" value={groupEventId} onChange={(e) => setGroupEventId(e.target.value)}>
+                                                                <option value="">בחר אירוע</option>
+                                                                {eventsOptions.map((ev) => (
+                                                                    <option key={ev.id} value={ev.id}>{ev.title || "אירוע"} {ev.startTime ? `(${new Date(ev.startTime).toLocaleDateString("he-IL")})` : ""}</option>
+                                                                ))}
+                                                            </select>
+                                                        )}
+                                                        <div className="flex items-center gap-3">
+                                                            <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                                                                <input type="checkbox" id="useAiFormatting" checked={useAiFormatting} onChange={(e) => setUseAiFormatting(e.target.checked)} className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
+                                                                עיצוב חכם (AI)
+                                                            </label>
+                                                            <button type="button" onClick={handleSendGroupsMessage} disabled={sendingGroupsMsg} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60 mr-auto">
+                                                                {sendingGroupsMsg ? "שולח..." : "שלח לקבוצות שנבחרו"}
                                                             </button>
                                                         </div>
                                                     </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                                    <div className="flex items-start justify-between gap-3 mb-4">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <MessageCircle size={20} className="text-indigo-500" />
-                                                <h3 className="text-lg font-bold text-gray-900">הודעות לקבוצות</h3>
-                                            </div>
-                                            <p className="text-gray-500 text-sm mt-1">חפש קבוצות וואטסאפ לפי שם, והוסף למאגר לשליחה עתידית.</p>
-                                        </div>
-                                    </div>
-                                    <div className="mb-3">
-                                        <label className="text-sm text-gray-600">חפש לפי שם קבוצה</label>
-                                        <div className="flex gap-2">
-                                            <input
-                                                type="text"
-                                                className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                value={groupSearch}
-                                                onChange={(e) => setGroupSearch(e.target.value)}
-                                                placeholder="לדוגמה: צוות הפקה"
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={handleSearchGroups}
-                                                disabled={searchingGroups}
-                                                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-60"
-                                            >
-                                                {searchingGroups ? "מחפש..." : "חפש"}
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="max-h-48 overflow-y-auto border rounded-lg p-3 space-y-2 mb-4">
-                                        {searchingGroups && <div className="text-sm text-gray-500">מחפש קבוצות...</div>}
-                                        {!searchingGroups && groupSearchResults.map((g, idx) => (
-                                            <div key={`${g.chatId}-${idx}`} className="flex items-center justify-between p-2 border rounded-lg">
-                                                <div>
-                                                    <p className="font-medium text-sm text-gray-800">{g.name}</p>
-                                                    <p className="text-xs text-gray-500 break-all">{g.chatId}</p>
                                                 </div>
-                                                <button
-                                                    onClick={() => handleAddGroup(g)}
-                                                    className="text-xs text-indigo-600 hover:text-indigo-800"
-                                                    type="button"
-                                                    disabled={savingGroup}
-                                                >
-                                                    הוסף למאגר
-                                                </button>
-                                            </div>
-                                        ))}
-                                        {!searchingGroups && !groupSearchResults.length && (
-                                            <div className="text-sm text-gray-500">אין תוצאות לחיפוש.</div>
-                                        )}
-                                    </div>
-                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">קבוצות במאגר</h4>
-                                    <div className="max-h-48 overflow-y-auto border rounded-lg p-3 space-y-2">
-                                        {loadingGroups && <div className="text-sm text-gray-500">טוען קבוצות...</div>}
-                                        {!loadingGroups && groups.map((g) => (
-                                            <div key={g.id} className="flex items-center justify-between p-2 border rounded-lg gap-2">
-                                                <label className="flex items-center gap-2 flex-1">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedGroups.has(g.id)}
-                                                        onChange={(e) => {
-                                                            setSelectedGroups((prev) => {
-                                                                const next = new Set(prev);
-                                                                if (e.target.checked) next.add(g.id); else next.delete(g.id);
-                                                                return next;
-                                                            });
-                                                        }}
-                                                    />
-                                                    <div className="min-w-0">
-                                                        <p className="font-medium text-sm text-gray-800 truncate">{g.name}</p>
-                                                        <p className="text-xs text-gray-500 break-all">{g.chatId}</p>
+                                            </WaAccordion>
+
+                                            {/* 5. קבוצות שליחה */}
+                                            <WaAccordion id="sending-lists" isOpen={waOpenSections.has("sending-lists")} onToggle={() => toggleWaSection("sending-lists")} icon={<Users size={17} className="text-emerald-600 flex-shrink-0" />} title="קבוצות שליחה" subtitle={`${sendingLists.length} קבוצות מוגדרות`}>
+                                                <div className="pt-4 space-y-4">
+                                                    {/* Create new list */}
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            className="flex-1 p-2.5 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                                                            value={newListName}
+                                                            onChange={(e) => setNewListName(e.target.value)}
+                                                            placeholder="שם קבוצת שליחה חדשה..."
+                                                            onKeyDown={(e) => e.key === "Enter" && handleCreateSendingList()}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleCreateSendingList}
+                                                            disabled={creatingList || !newListName.trim()}
+                                                            className="bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700 transition text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"
+                                                        >
+                                                            <Plus size={14} />
+                                                            צור קבוצה
+                                                        </button>
                                                     </div>
-                                                </label>
-                                                <button
-                                                    onClick={() => handleDeleteGroup(g.id)}
-                                                    className="text-xs text-red-600 hover:text-red-800"
-                                                    type="button"
-                                                >
-                                                    מחק
-                                                </button>
-                                            </div>
-                                        ))}
-                                        {!loadingGroups && groups.length === 0 && (
-                                            <div className="text-sm text-gray-500">עדיין לא נוספו קבוצות למאגר.</div>
-                                        )}
-                                    </div>
 
-                                    <div className="mt-4 space-y-2">
-                                        <h4 className="text-sm font-semibold text-gray-800">תוכן ההודעה</h4>
-                                        <div className="flex items-center gap-4 text-sm">
-                                            <label className="flex items-center gap-1">
-                                                <input
-                                                    type="radio"
-                                                    name="groupSendMode"
-                                                    checked={groupSendMode === "custom"}
-                                                    onChange={() => setGroupSendMode("custom")}
-                                                />
-                                                הודעה חופשית
-                                            </label>
-                                            <label className="flex items-center gap-1">
-                                                <input
-                                                    type="radio"
-                                                    name="groupSendMode"
-                                                    checked={groupSendMode === "event"}
-                                                    onChange={() => setGroupSendMode("event")}
-                                                />
-                                                הזמנה לאירוע
-                                            </label>
-                                        </div>
+                                                    {loadingSendingLists && <div className="text-sm text-gray-400">טוען...</div>}
 
-                                        {groupSendMode === "custom" && (
-                                            <textarea
-                                                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                rows={3}
-                                                value={groupMessage}
-                                                onChange={(e) => setGroupMessage(e.target.value)}
-                                                placeholder="מה תרצה לשלוח לקבוצות?"
-                                            />
-                                        )}
-                                        {groupSendMode === "custom" && (
-                                            <div className="space-y-1">
-                                                <label className="text-xs text-gray-600">מדיה מצורפת (אופציונלי, תמונה/וידאו)</label>
-                                                <input
-                                                    type="file"
-                                                    accept="image/*,video/*"
-                                                    onChange={(e) => {
-                                                        const file = e.target.files?.[0] || null;
-                                                        setGroupMediaFile(file);
-                                                    }}
-                                                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white"
-                                                />
-                                                {groupMediaFile && (
-                                                    <p className="text-[11px] text-gray-600">נבחר: {groupMediaFile.name}</p>
-                                                )}
-                                                <p className="text-[11px] text-gray-500">הקובץ נשלח ולא נשמר במערכת לאחר השליחה.</p>
-                                            </div>
-                                        )}
+                                                    {/* Lists */}
+                                                    <div className="space-y-3">
+                                                        {sendingLists.map((list) => {
+                                                            const isEditing = editingSendingListId === list.id;
+                                                            const isSending = sendingToListId === list.id;
 
-                                        {groupSendMode === "event" && (
-                                            <div className="grid sm:grid-cols-2 gap-2">
-                                                <select
-                                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                                                    value={groupEventId}
-                                                    onChange={(e) => setGroupEventId(e.target.value)}
-                                                >
-                                                    <option value="">בחר אירוע</option>
-                                                    {eventsOptions.map((ev) => (
-                                                        <option key={ev.id} value={ev.id}>
-                                                            {ev.title || "אירוע"} {ev.startTime ? `(${new Date(ev.startTime).toLocaleDateString("he-IL")})` : ""}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <p className="text-xs text-gray-500">נשלח המלל והתמונה הרשמיים מתוך "תוכן ומדיה" של האירוע.</p>
-                                            </div>
-                                        )}
+                                                            const memberSearchLower = listMemberSearch.toLowerCase();
+                                                            const isLoadingDir = listMemberType === "user" ? loadingUsersDirectory : listMemberType === "volunteer" ? loadingVolunteersDirectory : loadingGroups;
+                                                            const candidates = listMemberType === "user"
+                                                                ? usersDirectory.filter(u => !memberSearchLower || (u.fullName || u.email || "").toLowerCase().includes(memberSearchLower)).slice(0, 30)
+                                                                : listMemberType === "volunteer"
+                                                                ? volunteersDirectory.filter(v => !memberSearchLower || (v.name || "").toLowerCase().includes(memberSearchLower)).slice(0, 30)
+                                                                : groups.filter(g => !memberSearchLower || g.name.toLowerCase().includes(memberSearchLower)).slice(0, 30);
 
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <input
-                                                type="checkbox"
-                                                id="useAiFormatting"
-                                                checked={useAiFormatting}
-                                                onChange={(e) => setUseAiFormatting(e.target.checked)}
-                                                className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                                            />
-                                            <label htmlFor="useAiFormatting" className="text-sm text-gray-700 select-none cursor-pointer">
-                                                עיצוב חכם (AI) - הדגשות ואימוג'ים אוטומטיים
-                                            </label>
-                                        </div>
+                                                            return (
+                                                                <div key={list.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                                                                    {/* List header */}
+                                                                    <div className="flex items-center gap-3 px-4 py-3 bg-gray-50">
+                                                                        <span className="font-semibold text-gray-800 text-sm flex-1">{list.name}</span>
+                                                                        <span className="text-xs text-gray-400">{list.members?.length ?? 0} נמענים</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setEditingSendingListId(isEditing ? null : list.id);
+                                                                                setSendingToListId(null);
+                                                                                setListMemberSearch("");
+                                                                                setListMemberType("user");
+                                                                            }}
+                                                                            className={`text-xs px-2.5 py-1 rounded-md border transition font-medium ${isEditing ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'border-gray-200 hover:border-indigo-300 hover:text-indigo-700 text-gray-600'}`}
+                                                                        >
+                                                                            {isEditing ? "סגור עריכה" : "ערוך נמענים"}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => { setSendingToListId(isSending ? null : list.id); setEditingSendingListId(null); }}
+                                                                            className={`text-xs px-2.5 py-1 rounded-md border transition font-medium ${isSending ? 'bg-green-100 border-green-300 text-green-700' : 'border-green-200 hover:border-green-400 hover:text-green-700 text-gray-600'}`}
+                                                                        >
+                                                                            {isSending ? "סגור שליחה" : "שלח"}
+                                                                        </button>
+                                                                        <button type="button" onClick={() => handleDeleteSendingList(list.id)} className="text-gray-300 hover:text-red-500 transition"><X size={15} /></button>
+                                                                    </div>
 
-                                        <button
-                                            type="button"
-                                            onClick={handleSendGroupsMessage}
-                                            disabled={sendingGroupsMsg}
-                                            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
-                                        >
-                                            {sendingGroupsMsg ? "שולח..." : "שלח לקבוצות שנבחרו"}
-                                        </button>
-                                    </div>
-                                </div>
+                                                                    {/* ── Edit panel ── */}
+                                                                    {isEditing && (
+                                                                        <div className="border-t border-gray-100 divide-y divide-gray-100">
+                                                                            {/* Current members */}
+                                                                            <div className="px-4 py-3">
+                                                                                <div className="text-xs font-semibold text-gray-500 mb-2">נמענים בקבוצה ({list.members?.length ?? 0})</div>
+                                                                                {(!list.members || list.members.length === 0) && (
+                                                                                    <div className="text-xs text-gray-400 py-1">עדיין אין נמענים. הוסף מהרשימה למטה.</div>
+                                                                                )}
+                                                                                <div className="space-y-1 max-h-40 overflow-y-auto">
+                                                                                    {(list.members || []).map((m) => (
+                                                                                        <div key={`${m.type}-${m.id}`} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded-lg bg-gray-50 text-sm">
+                                                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${m.type === 'wa_group' ? 'bg-green-100 text-green-700' : m.type === 'volunteer' ? 'bg-blue-100 text-blue-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                                                                                                    {m.type === 'wa_group' ? 'קבוצה' : m.type === 'volunteer' ? 'מתנדב' : 'משתמש'}
+                                                                                                </span>
+                                                                                                <span className="truncate text-gray-700 text-xs">{m.name}</span>
+                                                                                                {m.phone && <span className="text-[11px] text-gray-400 flex-shrink-0">{m.phone}</span>}
+                                                                                            </div>
+                                                                                            <button type="button" onClick={() => handleRemoveMemberFromList(list.id, m.id, m.type)} className="text-red-400 hover:text-red-600 transition flex-shrink-0 p-0.5" title="הסר מהקבוצה"><X size={14} /></button>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
 
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Bell size={18} className="text-indigo-500" />
-                                        <h3 className="text-lg font-bold text-gray-900">חוקי התראות אוטומטיות</h3>
-                                    </div>
-                                    <p className="text-gray-500 text-sm mb-4">בחר מתי לשלוח התרעה אוטומטית בוואטסאפ. החוק פועל רק אם הוגדר אינסטנס פעיל.</p>
-                                    <div className="flex items-center gap-3">
-                                        <input
-                                            id="notifyOnMention"
-                                            type="checkbox"
-                                            checked={waRules.notifyOnMention}
-                                            onChange={(e) => {
-                                                const next = { notifyOnMention: e.target.checked, notifyOnVolunteerDone: waRules.notifyOnVolunteerDone };
-                                                setWaRules(next);
-                                                saveRulesOnly(next);
-                                            }}
-                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                                        />
-                                        <label htmlFor="notifyOnMention" className="text-sm text-gray-700 cursor-pointer">
-                                            שלח הודעה אוטומטית כשמתייגים משתמש במשימה
-                                        </label>
-                                    </div>
-                                    <div className="flex items-center gap-3 mt-3">
-                                        <input
-                                            id="notifyOnVolunteerDone"
-                                            type="checkbox"
-                                            checked={waRules.notifyOnVolunteerDone}
-                                            onChange={(e) => {
-                                                const next = { notifyOnMention: waRules.notifyOnMention, notifyOnVolunteerDone: e.target.checked };
-                                                setWaRules(next);
-                                                saveRulesOnly(next);
-                                            }}
-                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                                        />
-                                        <label htmlFor="notifyOnVolunteerDone" className="text-sm text-gray-700 cursor-pointer">
-                                            שלח הודעה ליוצר המשימה כשמתנדב מסמן ביצוע
-                                        </label>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        נשתמש במספר שמוגדר למשתמש, ואם אין – לא תישלח הודעה. השמירה מתבצעת מידית.
-                                        {savingWaRules && " שומר..."}
-                                    </p>
-                                </div>
+                                                                            {/* Add members */}
+                                                                            <div className="px-4 py-3 space-y-2.5">
+                                                                                <div className="text-xs font-semibold text-gray-500">הוסף נמענים</div>
+                                                                                {/* Type selector */}
+                                                                                <div className="flex bg-gray-100 rounded-lg p-0.5 w-fit gap-0.5">
+                                                                                    {(["user", "volunteer", "wa_group"] as const).map((t) => (
+                                                                                        <button
+                                                                                            key={t}
+                                                                                            type="button"
+                                                                                            onClick={() => { setListMemberType(t); setListMemberSearch(""); }}
+                                                                                            className={`text-xs px-2.5 py-1 rounded-md font-medium transition ${listMemberType === t ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-800'}`}
+                                                                                        >
+                                                                                            {t === 'user' ? 'משתמשים' : t === 'volunteer' ? 'מתנדבים' : 'קבוצות WA'}
+                                                                                        </button>
+                                                                                    ))}
+                                                                                </div>
+                                                                                {/* Search */}
+                                                                                <input
+                                                                                    type="text"
+                                                                                    className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                                                                    value={listMemberSearch}
+                                                                                    onChange={(e) => setListMemberSearch(e.target.value)}
+                                                                                    placeholder={`חפש ${listMemberType === 'user' ? 'משתמש' : listMemberType === 'volunteer' ? 'מתנדב' : 'קבוצה'} לפי שם...`}
+                                                                                />
+                                                                                {/* Candidates list */}
+                                                                                <div className="border rounded-lg overflow-hidden max-h-44 overflow-y-auto">
+                                                                                    {isLoadingDir && (
+                                                                                        <div className="text-xs text-gray-400 px-3 py-3">טוען רשימה...</div>
+                                                                                    )}
+                                                                                    {!isLoadingDir && candidates.length === 0 && (
+                                                                                        <div className="text-xs text-gray-400 px-3 py-3">
+                                                                                            {listMemberSearch ? "לא נמצאו תוצאות" : listMemberType === 'user' ? "אין משתמשים במערכת" : listMemberType === 'volunteer' ? "אין מתנדבים" : "אין קבוצות במאגר"}
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {!isLoadingDir && candidates.map((c: any) => {
+                                                                                        const memberId = c.id;
+                                                                                        const memberName = listMemberType === 'user' ? (c.fullName || c.email || "משתמש") : listMemberType === 'volunteer' ? (c.name || "מתנדב") : c.name;
+                                                                                        const memberPhone = listMemberType !== 'wa_group' ? (c.phone || "") : undefined;
+                                                                                        const memberChatId = listMemberType === 'wa_group' ? c.chatId : undefined;
+                                                                                        const alreadyAdded = (list.members || []).some(m => m.id === memberId && m.type === listMemberType);
+                                                                                        return (
+                                                                                            <div key={memberId} className="flex items-center justify-between gap-2 px-3 py-2 text-sm border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                                                                                                <div className="min-w-0 flex-1">
+                                                                                                    <span className="truncate block text-gray-800 text-xs">{memberName}</span>
+                                                                                                    {(memberPhone || memberChatId) && <span className="text-[11px] text-gray-400">{memberPhone || memberChatId}</span>}
+                                                                                                </div>
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    disabled={alreadyAdded}
+                                                                                                    onClick={() => handleAddMemberToList(list.id, { type: listMemberType, id: memberId, name: memberName, phone: memberPhone, chatId: memberChatId })}
+                                                                                                    className={`flex-shrink-0 text-xs px-2 py-1 rounded-md font-medium transition ${alreadyAdded ? 'text-gray-300 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                                                                                                >
+                                                                                                    {alreadyAdded ? '✓' : '+ הוסף'}
+                                                                                                </button>
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
 
-                                <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900 flex items-start gap-2">
-                                    <AlertTriangle size={18} className="mt-0.5" />
-                                    <div>
-                                        <p className="font-semibold">טיפ אבטחה</p>
-                                        <p>האסימון נשמר ב-Firestore ונגיש רק למנהלי מערכת. אם שינית את האסימון ב-Green API, עדכן אותו כאן.</p>
-                                    </div>
+                                                                    {/* ── Send panel ── */}
+                                                                    {isSending && (
+                                                                        <div className="border-t border-gray-100 px-4 py-4 space-y-4">
+                                                                            <div className="text-xs text-gray-500">שולח ל <span className="font-semibold text-gray-700">{list.members?.length ?? 0} נמענים</span> ב"{list.name}"</div>
+
+                                                                            {/* Message type — radio style */}
+                                                                            <div className="space-y-2">
+                                                                                <div className="text-xs font-semibold text-gray-600">סוג הודעה</div>
+                                                                                <div className="flex flex-wrap items-center gap-4 text-sm">
+                                                                                    {([
+                                                                                        { value: "custom", label: "הודעה חופשית" },
+                                                                                        { value: "event", label: "הזמנה לאירוע" },
+                                                                                        { value: "openTasks", label: "תזכורת משימות" },
+                                                                                        { value: "upcomingEvents", label: "3 אירועים קרובים" },
+                                                                                    ] as const).map((opt) => (
+                                                                                        <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer">
+                                                                                            <input
+                                                                                                type="radio"
+                                                                                                name={`listSendMode-${list.id}`}
+                                                                                                checked={listSendMode === opt.value}
+                                                                                                onChange={() => setListSendMode(opt.value)}
+                                                                                            />
+                                                                                            <span className="text-gray-700">{opt.label}</span>
+                                                                                        </label>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {listSendMode === "custom" && (
+                                                                                <div className="space-y-3">
+                                                                                    <div>
+                                                                                        <label className="text-xs font-semibold text-gray-600 block mb-1">תוכן ההודעה</label>
+                                                                                        <textarea
+                                                                                            className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                                                                            rows={3}
+                                                                                            value={listCustomMessage}
+                                                                                            onChange={(e) => setListCustomMessage(e.target.value)}
+                                                                                            placeholder="כתוב כאן את ההודעה..."
+                                                                                        />
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <label className="text-xs font-semibold text-gray-600 block mb-1">מדיה מצורפת (אופציונלי — תמונה / וידאו)</label>
+                                                                                        <input
+                                                                                            type="file"
+                                                                                            accept="image/*,video/*"
+                                                                                            onChange={(e) => setListMediaFile(e.target.files?.[0] || null)}
+                                                                                            className="w-full p-2 border rounded-lg text-sm bg-white"
+                                                                                        />
+                                                                                        {listMediaFile && <p className="text-xs text-gray-500 mt-1">נבחר: {listMediaFile.name}</p>}
+                                                                                        <p className="text-[11px] text-gray-400 mt-1">הקובץ נשלח לקבוצות WA. לנמענים פרטיים נשלח טקסט בלבד.</p>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+
+                                                                            {listSendMode === "event" && (
+                                                                                <div className="space-y-1">
+                                                                                    <label className="text-xs font-semibold text-gray-600 block mb-1">בחר אירוע</label>
+                                                                                    <select className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white text-sm" value={listEventId} onChange={(e) => setListEventId(e.target.value)}>
+                                                                                        <option value="">בחר אירוע...</option>
+                                                                                        {eventsOptions.map(ev => (
+                                                                                            <option key={ev.id} value={ev.id}>{ev.title || "אירוע"} {ev.startTime ? `(${new Date(ev.startTime).toLocaleDateString("he-IL")})` : ""}</option>
+                                                                                        ))}
+                                                                                    </select>
+                                                                                    <p className="text-[11px] text-gray-400">נשלח המלל והתמונה הרשמיים מ"תוכן ומדיה" של האירוע.</p>
+                                                                                </div>
+                                                                            )}
+
+                                                                            <div className="pt-1">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleSendToList(list)}
+                                                                                    disabled={listSending}
+                                                                                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
+                                                                                >
+                                                                                    {listSending ? "שולח..." : `שלח ל-${list.members?.length ?? 0} נמענים`}
+                                                                                </button>
+                                                                            </div>
+
+                                                                            {listSendFailures.length > 0 && sendingToListId === list.id && (
+                                                                                <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1">
+                                                                                    <div className="text-xs font-bold text-red-800">שגיאות שליחה ({listSendFailures.length})</div>
+                                                                                    {listSendFailures.map(f => (
+                                                                                        <div key={f.id} className="text-xs text-red-700">{f.name}: {f.reason}</div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        {!loadingSendingLists && sendingLists.length === 0 && (
+                                                            <div className="text-sm text-gray-400 text-center py-6 border-2 border-dashed border-gray-200 rounded-xl">
+                                                                עדיין אין קבוצות שליחה. צור את הראשונה למעלה.
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </WaAccordion>
+
+                                            {/* 6. התראות אוטומטיות */}
+                                            <WaAccordion id="rules" isOpen={waOpenSections.has("rules")} onToggle={() => toggleWaSection("rules")} icon={<Bell size={17} className="text-indigo-500 flex-shrink-0" />} title="התראות אוטומטיות" subtitle="שליחת הודעות אוטומטית לפי אירועי מערכת">
+                                                <div className="pt-4 space-y-3">
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <input id="notifyOnMention" type="checkbox" checked={waRules.notifyOnMention} onChange={(e) => { const next = { notifyOnMention: e.target.checked, notifyOnVolunteerDone: waRules.notifyOnVolunteerDone }; setWaRules(next); saveRulesOnly(next); }} className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
+                                                        <span className="text-sm text-gray-700">שלח הודעה אוטומטית כשמתייגים משתמש במשימה</span>
+                                                    </label>
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <input id="notifyOnVolunteerDone" type="checkbox" checked={waRules.notifyOnVolunteerDone} onChange={(e) => { const next = { notifyOnMention: waRules.notifyOnMention, notifyOnVolunteerDone: e.target.checked }; setWaRules(next); saveRulesOnly(next); }} className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
+                                                        <span className="text-sm text-gray-700">שלח הודעה ליוצר המשימה כשמתנדב מסמן ביצוע</span>
+                                                    </label>
+                                                    <p className="text-xs text-gray-400">{savingWaRules ? "שומר..." : "נשמר מידית. דורש אינסטנס פעיל ומספר מוגדר למשתמש."}</p>
+                                                </div>
+                                            </WaAccordion>
+
+                                            {/* 6. תובנות Imagine Me */}
+                                            <WaAccordion id="insights" isOpen={waOpenSections.has("insights")} onToggle={() => toggleWaSection("insights")} icon={<Brain size={17} className="text-violet-500 flex-shrink-0" />} title="תובנות Imagine Me" subtitle={`${imagineMeStyleInsights.length} תובנות נשמרו`}>
+                                                <div className="pt-3">
+                                                    <ImagineMeStyleInsightsPanel insights={imagineMeStyleInsights} enabled={whatsappConfig.imagineMeStyleLearningEnabled !== false} />
+                                                </div>
+                                            </WaAccordion>
+                                </>
+
+                                {/* Security tip */}
+                                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 flex items-center gap-2">
+                                    <AlertTriangle size={15} className="flex-shrink-0" />
+                                    <span><span className="font-semibold">אבטחה:</span> האסימון נשמר ב-Firestore ונגיש רק למנהלי מערכת. אם שינית את האסימון ב-Green API, עדכן אותו כאן.</span>
                                 </div>
                             </div>
                         )}
