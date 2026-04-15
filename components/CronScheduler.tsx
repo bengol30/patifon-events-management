@@ -17,6 +17,7 @@ export default function CronScheduler() {
                     fetch("/api/cron/publish-scheduled"),
                     fetch("/api/cron/run-scheduled-tasks"),
                     fetch("/api/cron/run-whatsapp-campaigns"),
+                    fetch("/api/cron/run-list-schedules"),
                     fetch("/api/cron/dispatch-agent-triggers"),
                     fetch("/api/imagine/send-scheduled"),
                 ]);
