@@ -147,7 +147,10 @@ export async function POST(request: Request) {
       targetChatId = `${phoneClean}@c.us`;
     }
 
-    const cfg = await readConfig();
+    // If credentials supplied in the request body, use them directly (avoids server-side Firestore auth issues)
+    const cfg = (idInstance && apiTokenInstance)
+      ? { idInstance: idInstance as string, apiTokenInstance: apiTokenInstance as string, baseUrl: "https://api.green-api.com" }
+      : await readConfig();
     if (!cfg) {
       console.error("[API] Failed to read config");
       return NextResponse.json({ error: "חסרות הגדרות וואטסאפ (idInstance/apiTokenInstance בסביבה או במסד)" }, { status: 500, headers: corsHeaders });

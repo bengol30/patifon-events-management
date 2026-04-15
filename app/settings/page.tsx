@@ -7,11 +7,13 @@ import { auth, db, storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { signOut, updateProfile, updatePassword, updateEmail, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, updateDoc, getDoc, setDoc, getDocs, where, collectionGroup, limit } from "firebase/firestore";
-import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar, Brain, BarChart3, ChevronDown, Users } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Settings, List, RefreshCw, AlertTriangle, CheckCircle, X, Edit2, Clock, User, AlignLeft, FileText, LogOut, ShieldCheck, Copy, MessageCircle, PlugZap, Bell, Share2, Instagram, UploadCloud, Calendar, Brain, BarChart3, ChevronDown, Users, Repeat } from "lucide-react";
 import Link from "next/link";
 import ImportantDocuments from "@/components/ImportantDocuments";
 import ImagineMeStyleInsightsPanel from "@/components/ImagineMeStyleInsightsPanel";
 import StockTrackingPreviewPanel from "@/components/StockTrackingPreviewPanel";
+import type { ListSchedule } from "@/lib/whatsapp-list-scheduler/types";
+import { calculateNextRunAt, formatScheduleDescription, HEBREW_DAYS_SHORT, HEBREW_DAYS_LONG } from "@/lib/whatsapp-list-scheduler/schedule-calc";
 const ADMIN_EMAIL = "bengo0469@gmail.com";
 
 function WaAccordion({ id, icon, title, subtitle, children, isOpen, onToggle }: {
@@ -308,6 +310,22 @@ export default function SettingsPage() {
     const [listMediaFile, setListMediaFile] = useState<File | null>(null);
     const [listSending, setListSending] = useState(false);
     const [listSendFailures, setListSendFailures] = useState<BulkFailure[]>([]);
+    // ── Scheduling state ─────────────────────────────────────────────────────
+    const [schedulingListId, setSchedulingListId] = useState<string | null>(null);
+    const [listSchedules, setListSchedules] = useState<ListSchedule[]>([]);
+    const [schedFormType, setSchedFormType] = useState<"once" | "recurring">("recurring");
+    const [schedFormSendMode, setSchedFormSendMode] = useState<"custom" | "event">("custom");
+    const [schedFormMessage, setSchedFormMessage] = useState("");
+    const [schedFormEventId, setSchedFormEventId] = useState("");
+    const [schedFormDays, setSchedFormDays] = useState<number[]>([]);
+    const [schedFormTime, setSchedFormTime] = useState("14:00");
+    const [schedFormOnceAt, setSchedFormOnceAt] = useState("");
+    const [schedFormMediaFile, setSchedFormMediaFile] = useState<File | null>(null);
+    const [savingSchedule, setSavingSchedule] = useState(false);
+    const [runningNowId, setRunningNowId] = useState<string | null>(null);
+    const [runNowResults, setRunNowResults] = useState<Record<string, { ok: boolean; detail: string }>>({});
+    const [runningCron, setRunningCron] = useState(false);
+    const [cronRunResult, setCronRunResult] = useState<{ ok: boolean; detail: string } | null>(null);
     // Selection State
     const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
 
@@ -605,6 +623,21 @@ export default function SettingsPage() {
             setSendingLists(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as SendingList[]);
             setLoadingSendingLists(false);
         }, () => setLoadingSendingLists(false));
+        return () => unsub();
+    }, [db, isAdmin, activeTab]);
+
+    // Load list schedules
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "whatsapp") return;
+        const unsub = onSnapshot(
+            collection(db, "whatsapp_list_schedules"),
+            (snap) => {
+                setListSchedules(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as ListSchedule[]);
+            },
+            (err) => {
+                console.error("Failed to load list schedules – check Firestore rules for whatsapp_list_schedules:", err);
+            }
+        );
         return () => unsub();
     }, [db, isAdmin, activeTab]);
 
@@ -2235,6 +2268,204 @@ export default function SettingsPage() {
             setListSending(false);
         }
     };
+    // ── Schedule handlers ─────────────────────────────────────────────────────
+
+    const handleCreateSchedule = async (listId: string, listName: string) => {
+        if (!db) return;
+        if (schedFormType === "recurring") {
+            if (!schedFormDays.length) { setMessage({ text: "בחר לפחות יום אחד לשליחה", type: "error" }); return; }
+        } else {
+            if (!schedFormOnceAt) { setMessage({ text: "בחר תאריך ושעה לשליחה", type: "error" }); return; }
+        }
+        if (schedFormSendMode === "custom" && !schedFormMessage.trim()) { setMessage({ text: "כתוב הודעה", type: "error" }); return; }
+        if (schedFormSendMode === "event" && !schedFormEventId) { setMessage({ text: "בחר אירוע", type: "error" }); return; }
+
+        setSavingSchedule(true);
+        try {
+            let nextRunAt: string;
+            if (schedFormType === "once") {
+                nextRunAt = new Date(schedFormOnceAt).toISOString();
+            } else {
+                nextRunAt = calculateNextRunAt(schedFormDays, schedFormTime).toISOString();
+            }
+
+            // Upload media if provided
+            let mediaUrl = "";
+            if (schedFormMediaFile && storage) {
+                try {
+                    const storageRef = ref(storage, `whatsapp_uploads/schedules/${Date.now()}_${schedFormMediaFile.name}`);
+                    await uploadBytes(storageRef, schedFormMediaFile);
+                    mediaUrl = await getDownloadURL(storageRef);
+                } catch (uploadErr) {
+                    console.error("Failed to upload schedule media", uploadErr);
+                    setMessage({ text: "שגיאה בהעלאת המדיה", type: "error" });
+                    return;
+                }
+            }
+
+            await addDoc(collection(db, "whatsapp_list_schedules"), {
+                listId,
+                listName,
+                sendMode: schedFormSendMode,
+                ...(schedFormSendMode === "custom" ? { messageText: schedFormMessage.trim() } : {}),
+                ...(schedFormSendMode === "event" ? { eventId: schedFormEventId } : {}),
+                ...(mediaUrl ? { mediaUrl } : {}),
+                scheduleType: schedFormType,
+                ...(schedFormType === "once" ? { scheduledAt: new Date(schedFormOnceAt).toISOString() } : {}),
+                ...(schedFormType === "recurring" ? { recurringDays: schedFormDays, recurringTime: schedFormTime } : {}),
+                status: "active",
+                nextRunAt,
+                createdAt: new Date(),
+            });
+
+            // Reset form
+            setSchedFormMessage("");
+            setSchedFormEventId("");
+            setSchedFormDays([]);
+            setSchedFormOnceAt("");
+            setSchedFormMediaFile(null);
+            setMessage({ text: "תזמון נוצר בהצלחה!", type: "success" });
+        } catch (err) {
+            console.error("Failed creating schedule", err);
+            setMessage({ text: "שגיאה ביצירת התזמון", type: "error" });
+        } finally {
+            setSavingSchedule(false);
+        }
+    };
+
+    const handleDeleteSchedule = async (schedId: string) => {
+        if (!db) return;
+        await deleteDoc(doc(db, "whatsapp_list_schedules", schedId));
+    };
+
+    const handleToggleScheduleStatus = async (schedId: string, currentStatus: string) => {
+        if (!db) return;
+        const next = currentStatus === "active" ? "paused" : "active";
+        await updateDoc(doc(db, "whatsapp_list_schedules", schedId), { status: next });
+    };
+
+    const toggleSchedDay = (day: number) => {
+        setSchedFormDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+    };
+
+    const handleRunScheduleNow = async (schedId: string) => {
+        const sched = listSchedules.find(s => s.id === schedId);
+        const list = sched ? sendingLists.find(l => l.id === sched.listId) : undefined;
+
+        if (!sched || !list) {
+            setRunNowResults(prev => ({ ...prev, [schedId]: { ok: false, detail: "לא נמצא תזמון או רשימה" } }));
+            return;
+        }
+        if (!whatsappConfig.idInstance.trim() || !whatsappConfig.apiTokenInstance.trim()) {
+            setRunNowResults(prev => ({ ...prev, [schedId]: { ok: false, detail: "חסר ID/Token של WhatsApp בהגדרות" } }));
+            return;
+        }
+        if (!list.members?.length) {
+            setRunNowResults(prev => ({ ...prev, [schedId]: { ok: false, detail: "הרשימה ריקה" } }));
+            return;
+        }
+
+        setRunningNowId(schedId);
+        setRunNowResults(prev => ({ ...prev, [schedId]: { ok: false, detail: "שולח..." } }));
+
+        const idInstance = whatsappConfig.idInstance.trim();
+        const apiTokenInstance = whatsappConfig.apiTokenInstance.trim();
+
+        // Resolve message content
+        let messageText = sched.messageText ?? "";
+        let mediaUrl = sched.mediaUrl ?? "";
+
+        if (sched.sendMode === "event" && sched.eventId && db) {
+            try {
+                const eventSnap = await getDoc(doc(db, "events", sched.eventId));
+                if (eventSnap.exists()) {
+                    const ed = eventSnap.data() as any;
+                    messageText = (ed.officialPostText || "").trim();
+                    if (!mediaUrl) mediaUrl = (ed.officialFlyerUrl || "").trim();
+                }
+            } catch {
+                setRunNowResults(prev => ({ ...prev, [schedId]: { ok: false, detail: "שגיאה בטעינת נתוני האירוע" } }));
+                setRunningNowId(null);
+                return;
+            }
+            if (!messageText) {
+                setRunNowResults(prev => ({ ...prev, [schedId]: { ok: false, detail: "אין מלל רשמי לאירוע" } }));
+                setRunningNowId(null);
+                return;
+            }
+        }
+
+        if (!messageText && !mediaUrl) {
+            setRunNowResults(prev => ({ ...prev, [schedId]: { ok: false, detail: "אין תוכן להודעה (לא הוגדרו טקסט ולא מדיה)" } }));
+            setRunningNowId(null);
+            return;
+        }
+
+        const mediaFileName = mediaUrl ? (mediaUrl.split("?")[0].split("/").pop() || "media") : "";
+
+        let successCount = 0;
+        const failures: { name: string; reason: string }[] = [];
+
+        for (const member of list.members) {
+            await ensureGlobalRateLimit();
+            let chatId = "";
+            if (member.type === "wa_group") {
+                chatId = member.chatId || "";
+            } else {
+                const phone = normalizePhone(member.phone || "");
+                if (!phone) { failures.push({ name: member.name, reason: "חסר טלפון" }); continue; }
+                chatId = `${phone}@c.us`;
+            }
+            if (!chatId) continue;
+
+            try {
+                const body = mediaUrl
+                    ? { method: "url", chatId, urlFile: mediaUrl, fileName: mediaFileName, caption: messageText, idInstance, apiTokenInstance }
+                    : { chatId, message: messageText, idInstance, apiTokenInstance };
+                const res = await fetch("/api/whatsapp/send", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                if (res.ok) {
+                    successCount++;
+                } else {
+                    const errText = await res.text();
+                    failures.push({ name: member.name, reason: errText || "שגיאת שליחה" });
+                }
+            } catch {
+                failures.push({ name: member.name, reason: "שגיאת רשת" });
+            }
+        }
+
+        const detail = failures.length > 0
+            ? `נשלח ל-${successCount}, נכשל ${failures.length}: ${failures.slice(0, 3).map(f => `${f.name} (${f.reason})`).join(", ")}`
+            : `נשלח בהצלחה ל-${successCount} נמענים ✓`;
+        setRunNowResults(prev => ({ ...prev, [schedId]: { ok: failures.length === 0 || successCount > 0, detail } }));
+        setRunningNowId(null);
+    };
+
+    /** Manually triggers the scheduler cron – useful when Vercel cron hasn't fired yet */
+    const handleRunCronNow = async () => {
+        setRunningCron(true);
+        setCronRunResult(null);
+        try {
+            const res = await fetch("/api/cron/run-list-schedules", { method: "POST" });
+            const data = await res.json();
+            if (data.due === 0) {
+                setCronRunResult({ ok: true, detail: "אין תזמונים שהגיע זמנם כרגע" });
+            } else {
+                const sent = data.results?.filter((r: any) => r.status === "sent").length ?? 0;
+                const errs = data.results?.filter((r: any) => r.status === "error").length ?? 0;
+                setCronRunResult({ ok: errs === 0, detail: `סרוקו ${data.scanned} תזמונים, ${data.due} היו בתור – נשלחו ${sent}${errs > 0 ? `, שגיאות ${errs}` : ""}` });
+            }
+        } catch {
+            setCronRunResult({ ok: false, detail: "שגיאה בהרצת התזמונים" });
+        } finally {
+            setRunningCron(false);
+        }
+    };
+
     // ── End Sending Lists handlers ──────────────────────────────────────────
 
     const handleGenerateEventSummary = async () => {
@@ -3357,6 +3588,8 @@ export default function SettingsPage() {
                                                         {sendingLists.map((list) => {
                                                             const isEditing = editingSendingListId === list.id;
                                                             const isSending = sendingToListId === list.id;
+                                                            const isScheduling = schedulingListId === list.id;
+                                                            const thisListSchedules = listSchedules.filter(s => s.listId === list.id);
 
                                                             const memberSearchLower = listMemberSearch.toLowerCase();
                                                             const isLoadingDir = listMemberType === "user" ? loadingUsersDirectory : listMemberType === "volunteer" ? loadingVolunteersDirectory : loadingGroups;
@@ -3377,6 +3610,7 @@ export default function SettingsPage() {
                                                                             onClick={() => {
                                                                                 setEditingSendingListId(isEditing ? null : list.id);
                                                                                 setSendingToListId(null);
+                                                                                setSchedulingListId(null);
                                                                                 setListMemberSearch("");
                                                                                 setListMemberType("user");
                                                                             }}
@@ -3386,10 +3620,19 @@ export default function SettingsPage() {
                                                                         </button>
                                                                         <button
                                                                             type="button"
-                                                                            onClick={() => { setSendingToListId(isSending ? null : list.id); setEditingSendingListId(null); }}
+                                                                            onClick={() => { setSendingToListId(isSending ? null : list.id); setEditingSendingListId(null); setSchedulingListId(null); }}
                                                                             className={`text-xs px-2.5 py-1 rounded-md border transition font-medium ${isSending ? 'bg-green-100 border-green-300 text-green-700' : 'border-green-200 hover:border-green-400 hover:text-green-700 text-gray-600'}`}
                                                                         >
                                                                             {isSending ? "סגור שליחה" : "שלח"}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => { setSchedulingListId(isScheduling ? null : list.id); setEditingSendingListId(null); setSendingToListId(null); }}
+                                                                            className={`text-xs px-2.5 py-1 rounded-md border transition font-medium flex items-center gap-1 ${isScheduling ? 'bg-violet-100 border-violet-300 text-violet-700' : thisListSchedules.filter(s => s.status === "active").length > 0 ? 'border-violet-200 text-violet-600 hover:border-violet-400' : 'border-gray-200 hover:border-violet-300 hover:text-violet-700 text-gray-600'}`}
+                                                                            title="תזמן הודעות"
+                                                                        >
+                                                                            <Repeat size={11} />
+                                                                            {isScheduling ? "סגור תזמון" : `תזמן${thisListSchedules.filter(s => s.status === "active").length > 0 ? ` (${thisListSchedules.filter(s => s.status === "active").length})` : ""}`}
                                                                         </button>
                                                                         <button type="button" onClick={() => handleDeleteSendingList(list.id)} className="text-gray-300 hover:text-red-500 transition"><X size={15} /></button>
                                                                     </div>
@@ -3565,6 +3808,243 @@ export default function SettingsPage() {
                                                                                     {listSendFailures.map(f => (
                                                                                         <div key={f.id} className="text-xs text-red-700">{f.name}: {f.reason}</div>
                                                                                     ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* ── Schedule panel ── */}
+                                                                    {isScheduling && (
+                                                                        <div className="border-t border-gray-100 px-4 py-4 space-y-4">
+                                                                            <div className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
+                                                                                <Repeat size={12} className="text-violet-500" />
+                                                                                תזמוני שליחה – "{list.name}"
+                                                                            </div>
+
+                                                                            {/* Existing schedules */}
+                                                                            {thisListSchedules.length > 0 && (
+                                                                                <div className="space-y-2">
+                                                                                    {thisListSchedules.map(sched => (
+                                                                                        <div key={sched.id} className={`rounded-lg border text-xs overflow-hidden ${sched.status === "active" ? "bg-violet-50 border-violet-200" : sched.status === "paused" ? "bg-gray-50 border-gray-200" : "bg-gray-50 border-gray-200 opacity-60"}`}>
+                                                                                            <div className="flex items-center gap-2 px-3 py-2.5">
+                                                                                                <div className="flex-1 min-w-0">
+                                                                                                    <div className="font-medium text-gray-800 flex items-center gap-1.5 flex-wrap">
+                                                                                                        {sched.scheduleType === "recurring" ? <Repeat size={10} className="text-violet-500 flex-shrink-0" /> : <Clock size={10} className="text-blue-500 flex-shrink-0" />}
+                                                                                                        {formatScheduleDescription(sched)}
+                                                                                                        {sched.mediaUrl && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><UploadCloud size={9} />מדיה</span>}
+                                                                                                        {sched.status === "paused" && <span className="text-[10px] text-gray-400">(מושהה)</span>}
+                                                                                                        {sched.status === "done" && <span className="text-[10px] text-green-600">(בוצע)</span>}
+                                                                                                    </div>
+                                                                                                    <div className="text-gray-400 mt-0.5">
+                                                                                                        {sched.sendMode === "custom" ? "הודעה חופשית" : "הזמנה לאירוע"}
+                                                                                                        {sched.nextRunAt && sched.status === "active" && (
+                                                                                                            <span className="text-violet-500 mr-2">
+                                                                                                                · הבא: {new Date(sched.nextRunAt).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" })}
+                                                                                                            </span>
+                                                                                                        )}
+                                                                                                        {sched.lastRunAt && (
+                                                                                                            <span className="text-gray-400 mr-2">
+                                                                                                                · נשלח: {new Date(sched.lastRunAt).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" })}
+                                                                                                            </span>
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={() => handleRunScheduleNow(sched.id)}
+                                                                                                        disabled={runningNowId === sched.id}
+                                                                                                        className="px-2 py-1 rounded border border-emerald-200 hover:border-emerald-400 text-emerald-600 hover:text-emerald-800 transition disabled:opacity-50 whitespace-nowrap"
+                                                                                                        title="שולח את ההודעה מיד ללא תלות בתזמון (לבדיקה)"
+                                                                                                    >
+                                                                                                        {runningNowId === sched.id ? "שולח..." : "שלח עכשיו"}
+                                                                                                    </button>
+                                                                                                    {(sched.status === "active" || sched.status === "paused") && sched.scheduleType === "recurring" && (
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            onClick={() => handleToggleScheduleStatus(sched.id, sched.status)}
+                                                                                                            className="px-2 py-1 rounded border border-gray-200 hover:border-gray-400 text-gray-500 hover:text-gray-800 transition"
+                                                                                                        >
+                                                                                                            {sched.status === "active" ? "השהה" : "הפעל"}
+                                                                                                        </button>
+                                                                                                    )}
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={() => handleDeleteSchedule(sched.id)}
+                                                                                                        className="text-gray-300 hover:text-red-500 transition p-0.5"
+                                                                                                    >
+                                                                                                        <X size={13} />
+                                                                                                    </button>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            {runNowResults[sched.id] && (
+                                                                                                <div className={`px-3 py-1.5 border-t text-[11px] font-medium ${runNowResults[sched.id].ok ? "bg-green-50 border-green-100 text-green-700" : "bg-red-50 border-red-100 text-red-700"}`}>
+                                                                                                    {runNowResults[sched.id].detail}
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* ── New schedule form ── */}
+                                                                            <div className="border border-dashed border-violet-200 rounded-xl p-3 space-y-3 bg-violet-50/40">
+                                                                                <div className="text-xs font-semibold text-gray-600">+ תזמון חדש</div>
+
+                                                                                {/* Type toggle */}
+                                                                                <div className="flex bg-white rounded-lg p-0.5 border border-gray-200 w-fit gap-0.5">
+                                                                                    {(["recurring", "once"] as const).map(t => (
+                                                                                        <button
+                                                                                            key={t}
+                                                                                            type="button"
+                                                                                            onClick={() => setSchedFormType(t)}
+                                                                                            className={`text-xs px-3 py-1.5 rounded-md font-medium transition ${schedFormType === t ? "bg-violet-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
+                                                                                        >
+                                                                                            {t === "recurring" ? "שליחה קבועה" : "שליחה חד-פעמית"}
+                                                                                        </button>
+                                                                                    ))}
+                                                                                </div>
+
+                                                                                {/* Recurring: day + time pickers */}
+                                                                                {schedFormType === "recurring" && (
+                                                                                    <div className="space-y-2">
+                                                                                        <div className="text-xs text-gray-500">ימי שליחה</div>
+                                                                                        <div className="flex gap-1.5 flex-wrap">
+                                                                                            {HEBREW_DAYS_SHORT.map((label, idx) => (
+                                                                                                <button
+                                                                                                    key={idx}
+                                                                                                    type="button"
+                                                                                                    onClick={() => toggleSchedDay(idx)}
+                                                                                                    className={`w-8 h-8 rounded-full text-xs font-bold transition border ${schedFormDays.includes(idx) ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-300 text-gray-600 hover:border-violet-400"}`}
+                                                                                                >
+                                                                                                    {label}
+                                                                                                </button>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            <label className="text-xs text-gray-500 flex-shrink-0">שעה:</label>
+                                                                                            <input
+                                                                                                type="time"
+                                                                                                value={schedFormTime}
+                                                                                                onChange={e => setSchedFormTime(e.target.value)}
+                                                                                                className="p-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-400 outline-none bg-white"
+                                                                                            />
+                                                                                            <span className="text-[11px] text-gray-400">(שעון ישראל)</span>
+                                                                                        </div>
+                                                                                        {schedFormDays.length > 0 && (
+                                                                                            <div className="text-[11px] text-violet-600 font-medium">
+                                                                                                כל {schedFormDays.slice().sort().map(d => HEBREW_DAYS_LONG[d]).join(" ו")} ב-{schedFormTime}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+
+                                                                                {/* Once: datetime picker */}
+                                                                                {schedFormType === "once" && (
+                                                                                    <div className="space-y-1">
+                                                                                        <div className="text-xs text-gray-500">תאריך ושעת שליחה</div>
+                                                                                        <input
+                                                                                            type="datetime-local"
+                                                                                            value={schedFormOnceAt}
+                                                                                            onChange={e => setSchedFormOnceAt(e.target.value)}
+                                                                                            className="p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-400 outline-none bg-white w-full"
+                                                                                        />
+                                                                                    </div>
+                                                                                )}
+
+                                                                                {/* Message content */}
+                                                                                <div className="space-y-2">
+                                                                                    <div className="text-xs text-gray-500">תוכן ההודעה</div>
+                                                                                    <div className="flex bg-white rounded-lg p-0.5 border border-gray-200 w-fit gap-0.5">
+                                                                                        {(["custom", "event"] as const).map(m => (
+                                                                                            <button
+                                                                                                key={m}
+                                                                                                type="button"
+                                                                                                onClick={() => setSchedFormSendMode(m)}
+                                                                                                className={`text-xs px-2.5 py-1 rounded-md font-medium transition ${schedFormSendMode === m ? "bg-gray-800 text-white shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
+                                                                                            >
+                                                                                                {m === "custom" ? "הודעה חופשית" : "הזמנה לאירוע"}
+                                                                                            </button>
+                                                                                        ))}
+                                                                                    </div>
+
+                                                                                    {schedFormSendMode === "custom" && (
+                                                                                        <textarea
+                                                                                            className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none text-sm bg-white"
+                                                                                            rows={3}
+                                                                                            value={schedFormMessage}
+                                                                                            onChange={e => setSchedFormMessage(e.target.value)}
+                                                                                            placeholder="תוכן ההודעה שתישלח..."
+                                                                                        />
+                                                                                    )}
+
+                                                                                    {schedFormSendMode === "event" && (
+                                                                                        <div className="space-y-1">
+                                                                                            <select
+                                                                                                className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none bg-white text-sm"
+                                                                                                value={schedFormEventId}
+                                                                                                onChange={e => setSchedFormEventId(e.target.value)}
+                                                                                            >
+                                                                                                <option value="">בחר אירוע...</option>
+                                                                                                {eventsOptions.map(ev => (
+                                                                                                    <option key={ev.id} value={ev.id}>{ev.title || "אירוע"} {ev.startTime ? `(${new Date(ev.startTime).toLocaleDateString("he-IL")})` : ""}</option>
+                                                                                                ))}
+                                                                                            </select>
+                                                                                            <p className="text-[11px] text-gray-400">נשלח המלל הרשמי של האירוע בזמן הריצה.</p>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+
+                                                                                {/* Media upload */}
+                                                                                <div className="space-y-1.5">
+                                                                                    <div className="text-xs text-gray-500">מדיה מצורפת (אופציונלי — תמונה / וידאו)</div>
+                                                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                                                        <span className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition ${schedFormMediaFile ? "bg-violet-50 border-violet-300 text-violet-700" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                                                                                            <UploadCloud size={13} />
+                                                                                            {schedFormMediaFile ? schedFormMediaFile.name : "בחר קובץ"}
+                                                                                        </span>
+                                                                                        <input
+                                                                                            type="file"
+                                                                                            accept="image/*,video/*"
+                                                                                            className="hidden"
+                                                                                            onChange={e => setSchedFormMediaFile(e.target.files?.[0] ?? null)}
+                                                                                        />
+                                                                                        {schedFormMediaFile && (
+                                                                                            <button type="button" onClick={() => setSchedFormMediaFile(null)} className="text-gray-400 hover:text-red-500 transition p-1"><X size={13} /></button>
+                                                                                        )}
+                                                                                    </label>
+                                                                                    {schedFormSendMode === "event" && (
+                                                                                        <p className="text-[11px] text-gray-400">אם לא תבחר קובץ, תישלח תמונת הפלייר של האירוע אוטומטית.</p>
+                                                                                    )}
+                                                                                </div>
+
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleCreateSchedule(list.id, list.name)}
+                                                                                    disabled={savingSchedule}
+                                                                                    className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 transition text-sm font-medium disabled:opacity-60 flex items-center gap-1.5"
+                                                                                >
+                                                                                    <Repeat size={13} />
+                                                                                    {savingSchedule ? "שומר..." : "צור תזמון"}
+                                                                                </button>
+                                                                            </div>
+
+                                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={handleRunCronNow}
+                                                                                    disabled={runningCron}
+                                                                                    className="text-xs px-3 py-1.5 rounded-lg border border-violet-200 text-violet-600 hover:border-violet-400 hover:bg-violet-50 transition disabled:opacity-50 flex items-center gap-1.5"
+                                                                                    title="מריץ את מנוע התזמון ידנית – שולח כל תזמון שהגיע זמנו"
+                                                                                >
+                                                                                    <Repeat size={11} className={runningCron ? "animate-spin" : ""} />
+                                                                                    {runningCron ? "מריץ..." : "הרץ תזמונים עכשיו"}
+                                                                                </button>
+                                                                                <span className="text-[11px] text-gray-400">הcron רץ אוטומטית כל דקה בסביבת הייצור</span>
+                                                                            </div>
+                                                                            {cronRunResult && (
+                                                                                <div className={`text-[11px] px-3 py-1.5 rounded-lg border font-medium ${cronRunResult.ok ? "bg-green-50 border-green-100 text-green-700" : "bg-red-50 border-red-100 text-red-700"}`}>
+                                                                                    {cronRunResult.detail}
                                                                                 </div>
                                                                             )}
                                                                         </div>

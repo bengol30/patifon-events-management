@@ -60,6 +60,14 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // קבוצות שליחה ותזמוני שליחה - רק אדמין
+    match /whatsapp_sending_lists/{docId} {
+      allow read, write: if isAdmin();
+    }
+    match /whatsapp_list_schedules/{docId} {
+      allow read, write: if isAdmin();
+    }
+
     // סטטיסטיקות משימות חוזרות
     match /repeat_tasks/{docId} {
       allow read: if isAdmin();
