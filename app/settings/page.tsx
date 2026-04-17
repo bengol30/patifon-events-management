@@ -3629,7 +3629,7 @@ export default function SettingsPage() {
                                                                             <button
                                                                                 type="button"
                                                                                 onClick={() => { setSchedulingListId(isScheduling ? null : list.id); setEditingSendingListId(null); setSendingToListId(null); }}
-                                                                                className={`text-xs px-2.5 py-1 rounded-md border transition font-medium flex items-center gap-1 ${isScheduling ? 'bg-violet-100 border-violet-300 text-violet-700' : thisListSchedules.filter(s => s.status === "active").length > 0 ? 'border-violet-200 text-violet-600 hover:border-violet-400' : 'border-gray-200 hover:border-violet-300 hover:text-violet-700 text-gray-600'}`}
+                                                                                className={`text-xs px-2.5 py-1 rounded-md border transition font-medium flex items-center gap-1 ${isScheduling ? 'bg-violet-100 border-violet-300 text-violet-700' : thisListSchedules.filter(s => s.status === "active").length > 0 ? 'bg-violet-600 border-violet-600 text-white hover:bg-violet-700' : 'bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100'}`}
                                                                                 title="תזמן הודעות"
                                                                             >
                                                                                 <Repeat size={11} />
