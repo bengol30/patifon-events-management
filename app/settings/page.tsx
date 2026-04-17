@@ -3602,39 +3602,41 @@ export default function SettingsPage() {
                                                             return (
                                                                 <div key={list.id} className="border border-gray-200 rounded-xl overflow-hidden">
                                                                     {/* List header */}
-                                                                    <div className="flex items-center gap-3 px-4 py-3 bg-gray-50">
-                                                                        <span className="font-semibold text-gray-800 text-sm flex-1">{list.name}</span>
-                                                                        <span className="text-xs text-gray-400">{list.members?.length ?? 0} נמענים</span>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => {
-                                                                                setEditingSendingListId(isEditing ? null : list.id);
-                                                                                setSendingToListId(null);
-                                                                                setSchedulingListId(null);
-                                                                                setListMemberSearch("");
-                                                                                setListMemberType("user");
-                                                                            }}
-                                                                            className={`text-xs px-2.5 py-1 rounded-md border transition font-medium ${isEditing ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'border-gray-200 hover:border-indigo-300 hover:text-indigo-700 text-gray-600'}`}
-                                                                        >
-                                                                            {isEditing ? "סגור עריכה" : "ערוך נמענים"}
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => { setSendingToListId(isSending ? null : list.id); setEditingSendingListId(null); setSchedulingListId(null); }}
-                                                                            className={`text-xs px-2.5 py-1 rounded-md border transition font-medium ${isSending ? 'bg-green-100 border-green-300 text-green-700' : 'border-green-200 hover:border-green-400 hover:text-green-700 text-gray-600'}`}
-                                                                        >
-                                                                            {isSending ? "סגור שליחה" : "שלח"}
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => { setSchedulingListId(isScheduling ? null : list.id); setEditingSendingListId(null); setSendingToListId(null); }}
-                                                                            className={`text-xs px-2.5 py-1 rounded-md border transition font-medium flex items-center gap-1 ${isScheduling ? 'bg-violet-100 border-violet-300 text-violet-700' : thisListSchedules.filter(s => s.status === "active").length > 0 ? 'border-violet-200 text-violet-600 hover:border-violet-400' : 'border-gray-200 hover:border-violet-300 hover:text-violet-700 text-gray-600'}`}
-                                                                            title="תזמן הודעות"
-                                                                        >
-                                                                            <Repeat size={11} />
-                                                                            {isScheduling ? "סגור תזמון" : `תזמן${thisListSchedules.filter(s => s.status === "active").length > 0 ? ` (${thisListSchedules.filter(s => s.status === "active").length})` : ""}`}
-                                                                        </button>
-                                                                        <button type="button" onClick={() => handleDeleteSendingList(list.id)} className="text-gray-300 hover:text-red-500 transition"><X size={15} /></button>
+                                                                    <div className="flex items-center gap-2 px-4 py-3 bg-gray-50 flex-wrap">
+                                                                        <span className="font-semibold text-gray-800 text-sm flex-1 min-w-0 truncate">{list.name}</span>
+                                                                        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+                                                                            <span className="text-xs text-gray-400">{list.members?.length ?? 0} נמענים</span>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setEditingSendingListId(isEditing ? null : list.id);
+                                                                                    setSendingToListId(null);
+                                                                                    setSchedulingListId(null);
+                                                                                    setListMemberSearch("");
+                                                                                    setListMemberType("user");
+                                                                                }}
+                                                                                className={`text-xs px-2.5 py-1 rounded-md border transition font-medium ${isEditing ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'border-gray-200 hover:border-indigo-300 hover:text-indigo-700 text-gray-600'}`}
+                                                                            >
+                                                                                {isEditing ? "סגור עריכה" : "ערוך"}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => { setSendingToListId(isSending ? null : list.id); setEditingSendingListId(null); setSchedulingListId(null); }}
+                                                                                className={`text-xs px-2.5 py-1 rounded-md border transition font-medium ${isSending ? 'bg-green-100 border-green-300 text-green-700' : 'border-green-200 hover:border-green-400 hover:text-green-700 text-gray-600'}`}
+                                                                            >
+                                                                                {isSending ? "סגור" : "שלח"}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => { setSchedulingListId(isScheduling ? null : list.id); setEditingSendingListId(null); setSendingToListId(null); }}
+                                                                                className={`text-xs px-2.5 py-1 rounded-md border transition font-medium flex items-center gap-1 ${isScheduling ? 'bg-violet-100 border-violet-300 text-violet-700' : thisListSchedules.filter(s => s.status === "active").length > 0 ? 'border-violet-200 text-violet-600 hover:border-violet-400' : 'border-gray-200 hover:border-violet-300 hover:text-violet-700 text-gray-600'}`}
+                                                                                title="תזמן הודעות"
+                                                                            >
+                                                                                <Repeat size={11} />
+                                                                                {isScheduling ? "סגור" : `תזמן${thisListSchedules.filter(s => s.status === "active").length > 0 ? ` (${thisListSchedules.filter(s => s.status === "active").length})` : ""}`}
+                                                                            </button>
+                                                                            <button type="button" onClick={() => handleDeleteSendingList(list.id)} className="text-gray-300 hover:text-red-500 transition p-1"><X size={14} /></button>
+                                                                        </div>
                                                                     </div>
 
                                                                     {/* ── Edit panel ── */}
