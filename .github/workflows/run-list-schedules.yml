@@ -1,0 +1,27 @@
+name: Run WhatsApp List Schedules
+
+on:
+  schedule:
+    # Runs every 5 minutes — closest to real-time available on GitHub Actions free tier
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # allow manual trigger from GitHub UI
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call schedule runner
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "${APP_URL}/api/cron/run-list-schedules" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            --max-time 30)
+          echo "Response status: $STATUS"
+          if [ "$STATUS" -ge 500 ]; then
+            echo "Cron endpoint returned server error $STATUS"
+            exit 1
+          fi
