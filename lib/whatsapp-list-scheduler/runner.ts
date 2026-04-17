@@ -1,7 +1,28 @@
+import admin from "firebase-admin";
 import { adminDb } from "../firebase-admin";
 import { readWhatsappConfig } from "../whatsapp-campaign/sender";
 import { calculateNextRunAt } from "./schedule-calc";
 import type { ListSchedule } from "./types";
+
+// ─── Storage cleanup helper ───────────────────────────────────────────────────
+
+/** Extracts the object path from a Firebase Storage download URL, or null for external URLs */
+function storagePathFromUrl(url: string): string | null {
+  if (!url.includes("firebasestorage.googleapis.com")) return null;
+  const match = url.match(/\/o\/([^?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+async function deleteStorageFile(mediaUrl: string): Promise<void> {
+  const path = storagePathFromUrl(mediaUrl);
+  if (!path) return; // external URL, nothing to delete
+  try {
+    const bucket = admin.storage().bucket();
+    await bucket.file(path).delete();
+  } catch (err) {
+    console.warn("[runner] Could not delete media from Storage (non-critical):", err);
+  }
+}
 
 // ─── Phone normalisation (same logic as settings page) ───────────────────────
 
@@ -179,8 +200,16 @@ export async function runScheduledListMessage(
   if (!force) {
     const now = new Date().toISOString();
     if (sched.scheduleType === "once") {
-      await schedRef.update({ status: "done", lastRunAt: now, nextRunAt: null });
+      // Delete media from Storage – one-time schedule is done, file no longer needed
+      if (mediaUrl) await deleteStorageFile(mediaUrl);
+      await schedRef.update({
+        status: "done",
+        lastRunAt: now,
+        nextRunAt: null,
+        ...(mediaUrl ? { mediaUrl: admin.firestore.FieldValue.delete() } : {}),
+      });
     } else {
+      // Recurring – keep media for future runs
       const nextRun = calculateNextRunAt(sched.recurringDays ?? [], sched.recurringTime ?? "09:00");
       await schedRef.update({ lastRunAt: now, nextRunAt: nextRun.toISOString() });
     }

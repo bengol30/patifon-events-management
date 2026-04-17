@@ -4,9 +4,12 @@ import fs from 'fs';
 let adminDb: admin.firestore.Firestore | undefined;
 let adminAuth: admin.auth.Auth | undefined;
 
+const STORAGE_BUCKET = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "patifon-events.firebasestorage.app";
+
 const initWithServiceAccount = (serviceAccount: Record<string, string>) => {
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
+        storageBucket: STORAGE_BUCKET,
     });
     adminDb = admin.firestore();
     adminAuth = admin.auth();
