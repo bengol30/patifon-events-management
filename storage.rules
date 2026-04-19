@@ -11,11 +11,15 @@ service firebase.storage {
                       && request.query.token in resource.metadata.firebaseStorageDownloadTokens.split(","));
       // כתיבה: רק משתמש מחובר.
       // חריג 1: תיקיית instagram_uploads מוגבלת לאדמין בלבד.
-      // חריג 2: העלאות מלקוחות ל-whatsapp_uploads/schedules/client_
-      allow write: if (request.auth != null && (
+      allow write: if request.auth != null && (
         !allPaths.matches('^instagram_uploads/.*') || 
         request.auth.token.email == "bengo0469@gmail.com"
-      )) || allPaths.matches('^whatsapp_uploads/schedules/client_.*');
+      );
+    }
+
+    match /whatsapp_uploads/schedules/{fileName} {
+      allow write: if fileName.matches('^client_.*');
+      allow read: if true;
     }
   }
 }
