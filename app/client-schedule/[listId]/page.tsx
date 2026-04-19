@@ -104,8 +104,10 @@ export default function ClientSchedulePage() {
         setError("");
 
         try {
-            // Calculate scheduledAt ISO string
-            const datetimeStr = `${date}T${time}:00`;
+            // Ensure time string is padded properly for mobile Safari
+            const [timeH = "00", timeM = "00"] = time.split(':');
+            const parsedTime = `${timeH.padStart(2, '0')}:${timeM.padStart(2, '0')}:00`;
+            const datetimeStr = `${date}T${parsedTime}`;
             const scheduledAt = new Date(datetimeStr).toISOString();
 
             let mediaUrl = "";
