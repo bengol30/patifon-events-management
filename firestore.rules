@@ -60,12 +60,14 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    // קבוצות שליחה ותזמוני שליחה - רק אדמין
+    // קבוצות שליחה ותזמוני שליחה
     match /whatsapp_sending_lists/{docId} {
-      allow read, write: if isAdmin();
+      allow read: if true;
+      allow write: if isAdmin();
     }
     match /whatsapp_list_schedules/{docId} {
-      allow read, write: if isAdmin();
+      allow read, update, delete: if isAdmin();
+      allow create: if isAdmin() || (request.resource.data.status == "pending_client" && request.resource.data.isClientSubmitted == true);
     }
 
     // סטטיסטיקות משימות חוזרות
