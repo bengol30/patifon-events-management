@@ -2,7 +2,7 @@ export const ISRAEL_TZ = "Asia/Jerusalem";
 
 export type ListScheduleSendMode = "custom" | "event";
 export type ListScheduleType = "once" | "recurring";
-export type ListScheduleStatus = "active" | "paused" | "done" | "failed";
+export type ListScheduleStatus = "active" | "paused" | "done" | "failed" | "pending_client";
 
 export interface ListSchedule {
   id: string;
