@@ -133,9 +133,9 @@ export default function ClientSchedulePage() {
             });
 
             setSubmitted(true);
-        } catch (err) {
+        } catch (err: any) {
             console.error("Error submitting schedule", err);
-            setError("אירעה שגיאה בשליחת הבקשה. אנא נסה שנית.");
+            setError(`אירעה שגיאה: ${err?.message || "נא לנסות שוב"}`);
         } finally {
             setSubmitting(false);
         }
