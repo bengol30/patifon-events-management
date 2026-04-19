@@ -15,11 +15,15 @@ jobs:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
+          if [ -z "$APP_URL" ]; then
+            echo "Error: APP_URL secret is not configured"
+            exit 1
+          fi
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             "${APP_URL}/api/cron/run-list-schedules" \
             -H "Content-Type: application/json" \
             -H "x-cron-secret: ${CRON_SECRET}" \
-            --max-time 30)
+            --max-time 30) || { echo "curl failed with exit code $?"; exit 1; }
           echo "Response status: $STATUS"
           if [ "$STATUS" -ge 500 ]; then
             echo "Cron endpoint returned server error $STATUS"

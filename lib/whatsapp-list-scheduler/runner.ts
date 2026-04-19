@@ -62,7 +62,11 @@ async function greenApiSendFile(
   cfg: { idInstance: string; apiTokenInstance: string; baseUrl: string },
 ): Promise<void> {
   const endpoint = `${cfg.baseUrl}/waInstance${cfg.idInstance}/SendFileByUrl/${cfg.apiTokenInstance}`;
-  const fileName = urlFile.split("?")[0].split("/").pop() ?? "media";
+  // Firebase Storage URLs encode '/' as '%2F', so decode the last path segment
+  // and extract only the actual filename (after the last '/').
+  const rawSegment = urlFile.split("?")[0].split("/").pop() ?? "media";
+  const decoded = (() => { try { return decodeURIComponent(rawSegment); } catch { return rawSegment; } })();
+  const fileName = decoded.includes("/") ? (decoded.split("/").pop() ?? "media") : decoded;
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -193,6 +197,25 @@ export async function runScheduledListMessage(
         name: member.name,
         reason: err instanceof Error ? err.message : "שגיאה",
       });
+    }
+  }
+
+  // Save to message history (before any media cleanup)
+  if (successCount > 0 && (messageText || mediaUrl)) {
+    try {
+      const isRecurring = sched.scheduleType === "recurring";
+      await adminDb.collection("whatsapp_message_history").add({
+        messageText,
+        mediaUrl: mediaUrl || "",
+        // For recurring: file stays in storage. For once: file will be deleted below.
+        mediaAvailable: isRecurring || !mediaUrl,
+        sentAt: admin.firestore.Timestamp.now(),
+        listId: sched.listId,
+        listName: sched.listName,
+        source: isRecurring ? "scheduled_recurring" : "scheduled_once",
+      });
+    } catch (histErr) {
+      console.warn("[runner] Failed to save message history (non-critical):", histErr);
     }
   }
 

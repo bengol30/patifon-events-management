@@ -304,7 +304,7 @@ export default function SettingsPage() {
     const [listMemberSearch, setListMemberSearch] = useState("");
     const [listMemberType, setListMemberType] = useState<"user" | "volunteer" | "wa_group">("user");
     const [sendingToListId, setSendingToListId] = useState<string | null>(null);
-    const [listSendMode, setListSendMode] = useState<"custom" | "event" | "openTasks" | "upcomingEvents">("custom");
+    const [listSendMode, setListSendMode] = useState<"custom" | "event" | "openTasks" | "upcomingEvents" | "recent">("custom");
     const [listCustomMessage, setListCustomMessage] = useState("");
     const [listEventId, setListEventId] = useState("");
     const [listMediaFile, setListMediaFile] = useState<File | null>(null);
@@ -314,13 +314,24 @@ export default function SettingsPage() {
     const [schedulingListId, setSchedulingListId] = useState<string | null>(null);
     const [listSchedules, setListSchedules] = useState<ListSchedule[]>([]);
     const [schedFormType, setSchedFormType] = useState<"once" | "recurring">("recurring");
-    const [schedFormSendMode, setSchedFormSendMode] = useState<"custom" | "event">("custom");
+    const [schedFormSendMode, setSchedFormSendMode] = useState<"custom" | "event" | "recent">("custom");
     const [schedFormMessage, setSchedFormMessage] = useState("");
     const [schedFormEventId, setSchedFormEventId] = useState("");
     const [schedFormDays, setSchedFormDays] = useState<number[]>([]);
     const [schedFormTime, setSchedFormTime] = useState("14:00");
     const [schedFormOnceAt, setSchedFormOnceAt] = useState("");
     const [schedFormMediaFile, setSchedFormMediaFile] = useState<File | null>(null);
+    const [schedFormPresetMediaUrl, setSchedFormPresetMediaUrl] = useState<string>("");
+    const [listPresetMediaUrl, setListPresetMediaUrl] = useState<string>("");
+    const [messageHistory, setMessageHistory] = useState<Array<{
+        id: string;
+        messageText: string;
+        mediaUrl: string;
+        mediaAvailable: boolean;
+        sentAt: any;
+        listName: string;
+        source: string;
+    }>>([]);
     const [savingSchedule, setSavingSchedule] = useState(false);
     const [runningNowId, setRunningNowId] = useState<string | null>(null);
     const [runNowResults, setRunNowResults] = useState<Record<string, { ok: boolean; detail: string }>>({});
@@ -638,6 +649,21 @@ export default function SettingsPage() {
                 console.error("Failed to load list schedules – check Firestore rules for whatsapp_list_schedules:", err);
             }
         );
+        return () => unsub();
+    }, [db, isAdmin, activeTab]);
+
+    useEffect(() => {
+        if (!db || !isAdmin || activeTab !== "whatsapp") return;
+        const q = query(
+            collection(db, "whatsapp_message_history"),
+            orderBy("sentAt", "desc"),
+            limit(5)
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            setMessageHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
+        }, (err) => {
+            console.error("Failed to load message history:", err);
+        });
         return () => unsub();
     }, [db, isAdmin, activeTab]);
 
@@ -1259,8 +1285,13 @@ export default function SettingsPage() {
     const fileNameFromUrl = (url: string) => {
         try {
             const clean = url.split("?")[0];
-            const last = clean.split("/").pop() || "media.jpg";
-            return last || "media.jpg";
+            const raw = clean.split("/").pop() || "media.jpg";
+            // Firebase Storage URLs encode '/' as '%2F' so the last segment may be
+            // the full path (e.g. "whatsapp_uploads%2Fschedules%2F1234_photo.jpg").
+            // Decode it, then take only the actual filename after the last '/'.
+            const decoded = decodeURIComponent(raw);
+            const filename = decoded.includes("/") ? (decoded.split("/").pop() || "media.jpg") : decoded;
+            return filename || "media.jpg";
         } catch {
             return "media.jpg";
         }
@@ -2124,6 +2155,10 @@ export default function SettingsPage() {
             setMessage({ text: "הרשימה ריקה", type: "error" });
             return;
         }
+        if (listSendMode === "recent") {
+            setMessage({ text: "בחר הודעה מהרשימה", type: "error" });
+            return;
+        }
         if ((listSendMode === "custom") && !listCustomMessage.trim()) {
             setMessage({ text: "כתוב הודעה לפני שליחה", type: "error" });
             return;
@@ -2162,9 +2197,9 @@ export default function SettingsPage() {
                 if (!eventText) { setMessage({ text: "אין מלל רשמי לאירוע", type: "error" }); return; }
             }
 
-            // Upload media file if needed
-            let uploadedMediaUrl = "";
-            if (listSendMode === "custom" && listMediaFile && storage) {
+            // Upload media file if needed (new file takes precedence over preset URL from history)
+            let uploadedMediaUrl = listPresetMediaUrl;
+            if (listMediaFile && storage) {
                 try {
                     const storageRef = ref(storage, `whatsapp_uploads/${Date.now()}_${listMediaFile.name}`);
                     await uploadBytes(storageRef, listMediaFile);
@@ -2219,7 +2254,7 @@ export default function SettingsPage() {
                 } else if (listSendMode === "custom") {
                     text = listCustomMessage.trim();
                     mediaUrl = uploadedMediaUrl;
-                    mediaFileName = listMediaFile?.name || "media";
+                    mediaFileName = listMediaFile?.name || (uploadedMediaUrl ? fileNameFromUrl(uploadedMediaUrl) : "media");
                 } else if ((listSendMode === "openTasks" || listSendMode === "upcomingEvents") && parentsIndex) {
                     const fakeRecord = { id: member.id, fullName: member.name, phone: member.phone };
                     const lines = await generateMessageLines(fakeRecord, origin, parentsIndex);
@@ -2261,10 +2296,28 @@ export default function SettingsPage() {
             } else {
                 setMessage({ text: `נשלח בהצלחה ל-${successCount} נמענים!`, type: "success" });
             }
+
+            // Save to message history
+            if (db && successCount > 0 && (listCustomMessage.trim() || uploadedMediaUrl)) {
+                try {
+                    await addDoc(collection(db, "whatsapp_message_history"), {
+                        messageText: listCustomMessage.trim(),
+                        mediaUrl: uploadedMediaUrl || "",
+                        mediaAvailable: true,
+                        sentAt: serverTimestamp(),
+                        listId: list.id,
+                        listName: list.name,
+                        source: "immediate",
+                    });
+                } catch (histErr) {
+                    console.warn("Failed to save message history (non-critical)", histErr);
+                }
+            }
         } catch (err) {
             console.error("List send failed", err);
             setMessage({ text: "שגיאה כללית בשליחה", type: "error" });
         } finally {
+            setListPresetMediaUrl("");
             setListSending(false);
         }
     };
@@ -2277,6 +2330,7 @@ export default function SettingsPage() {
         } else {
             if (!schedFormOnceAt) { setMessage({ text: "בחר תאריך ושעה לשליחה", type: "error" }); return; }
         }
+        if (schedFormSendMode === "recent") { setMessage({ text: "בחר הודעה מהרשימה", type: "error" }); return; }
         if (schedFormSendMode === "custom" && !schedFormMessage.trim()) { setMessage({ text: "כתוב הודעה", type: "error" }); return; }
         if (schedFormSendMode === "event" && !schedFormEventId) { setMessage({ text: "בחר אירוע", type: "error" }); return; }
 
@@ -2289,8 +2343,8 @@ export default function SettingsPage() {
                 nextRunAt = calculateNextRunAt(schedFormDays, schedFormTime).toISOString();
             }
 
-            // Upload media if provided
-            let mediaUrl = "";
+            // Upload media if provided (new file takes precedence over preset URL from history)
+            let mediaUrl = schedFormPresetMediaUrl;
             if (schedFormMediaFile && storage) {
                 try {
                     const storageRef = ref(storage, `whatsapp_uploads/schedules/${Date.now()}_${schedFormMediaFile.name}`);
@@ -2324,6 +2378,7 @@ export default function SettingsPage() {
             setSchedFormDays([]);
             setSchedFormOnceAt("");
             setSchedFormMediaFile(null);
+            setSchedFormPresetMediaUrl("");
             setMessage({ text: "תזמון נוצר בהצלחה!", type: "success" });
         } catch (err) {
             console.error("Failed creating schedule", err);
@@ -2401,7 +2456,7 @@ export default function SettingsPage() {
             return;
         }
 
-        const mediaFileName = mediaUrl ? (mediaUrl.split("?")[0].split("/").pop() || "media") : "";
+        const mediaFileName = mediaUrl ? fileNameFromUrl(mediaUrl) : "";
 
         let successCount = 0;
         const failures: { name: string; reason: string }[] = [];
@@ -3740,6 +3795,7 @@ export default function SettingsPage() {
                                                                                         { value: "event", label: "הזמנה לאירוע" },
                                                                                         { value: "openTasks", label: "תזכורת משימות" },
                                                                                         { value: "upcomingEvents", label: "3 אירועים קרובים" },
+                                                                                        { value: "recent", label: "הודעות אחרונות" },
                                                                                     ] as const).map((opt) => (
                                                                                         <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer">
                                                                                             <input
@@ -3768,10 +3824,22 @@ export default function SettingsPage() {
                                                                                     </div>
                                                                                     <div>
                                                                                         <label className="text-xs font-semibold text-gray-600 block mb-1">מדיה מצורפת (אופציונלי — תמונה / וידאו)</label>
+                                                                                        {listPresetMediaUrl && !listMediaFile && (
+                                                                                            <div className="flex items-center gap-2 mb-1.5 px-2 py-1.5 bg-violet-50 border border-violet-200 rounded-lg">
+                                                                                                <img
+                                                                                                    src={listPresetMediaUrl}
+                                                                                                    alt=""
+                                                                                                    className="w-8 h-8 rounded object-cover flex-shrink-0 bg-gray-100"
+                                                                                                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                                                                                />
+                                                                                                <span className="text-xs text-violet-700 flex-1">מדיה מהיסטוריה: {fileNameFromUrl(listPresetMediaUrl)}</span>
+                                                                                                <button type="button" onClick={() => setListPresetMediaUrl("")} className="text-violet-400 hover:text-red-500 transition"><X size={13} /></button>
+                                                                                            </div>
+                                                                                        )}
                                                                                         <input
                                                                                             type="file"
                                                                                             accept="image/*,video/*"
-                                                                                            onChange={(e) => setListMediaFile(e.target.files?.[0] || null)}
+                                                                                            onChange={(e) => { setListMediaFile(e.target.files?.[0] || null); setListPresetMediaUrl(""); }}
                                                                                             className="w-full p-2 border rounded-lg text-sm bg-white"
                                                                                         />
                                                                                         {listMediaFile && <p className="text-xs text-gray-500 mt-1">נבחר: {listMediaFile.name}</p>}
@@ -3790,6 +3858,48 @@ export default function SettingsPage() {
                                                                                         ))}
                                                                                     </select>
                                                                                     <p className="text-[11px] text-gray-400">נשלח המלל והתמונה הרשמיים מ"תוכן ומדיה" של האירוע.</p>
+                                                                                </div>
+                                                                            )}
+
+                                                                            {listSendMode === "recent" && (
+                                                                                <div className="space-y-1.5">
+                                                                                    <p className="text-xs text-gray-500">בחר הודעה — המלל והמדיה יועתקו לשדות ותוכל לשלוח ישירות</p>
+                                                                                    {messageHistory.length === 0 ? (
+                                                                                        <p className="text-xs text-gray-400 py-2">אין הודעות שנשלחו עדיין</p>
+                                                                                    ) : (
+                                                                                        <div className="space-y-1.5">
+                                                                                            {messageHistory.map(item => (
+                                                                                                <button
+                                                                                                    key={item.id}
+                                                                                                    type="button"
+                                                                                                    onClick={() => {
+                                                                                                        setListCustomMessage(item.messageText);
+                                                                                                        setListPresetMediaUrl(item.mediaAvailable && item.mediaUrl ? item.mediaUrl : "");
+                                                                                                        setListMediaFile(null);
+                                                                                                        setListSendMode("custom");
+                                                                                                    }}
+                                                                                                    className="w-full text-right p-2.5 border border-gray-200 rounded-lg hover:bg-violet-50 hover:border-violet-300 transition flex items-start gap-2.5"
+                                                                                                >
+                                                                                                    {item.mediaAvailable && item.mediaUrl && (
+                                                                                                        <img
+                                                                                                            src={item.mediaUrl}
+                                                                                                            alt=""
+                                                                                                            className="w-10 h-10 rounded object-cover flex-shrink-0 bg-gray-100"
+                                                                                                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                                                                                        />
+                                                                                                    )}
+                                                                                                    <div className="flex-1 min-w-0 text-right">
+                                                                                                        <p className="text-xs text-gray-700 line-clamp-2">{item.messageText || "(ללא טקסט)"}</p>
+                                                                                                        <p className="text-[11px] text-gray-400 mt-0.5">
+                                                                                                            {item.listName}
+                                                                                                            {item.mediaAvailable && item.mediaUrl ? " · עם מדיה" : ""}
+                                                                                                            {!item.mediaAvailable && item.mediaUrl ? " · מדיה כבר לא זמינה" : ""}
+                                                                                                        </p>
+                                                                                                    </div>
+                                                                                                </button>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
 
@@ -3957,15 +4067,15 @@ export default function SettingsPage() {
                                                                                 {/* Message content */}
                                                                                 <div className="space-y-2">
                                                                                     <div className="text-xs text-gray-500">תוכן ההודעה</div>
-                                                                                    <div className="flex bg-white rounded-lg p-0.5 border border-gray-200 w-fit gap-0.5">
-                                                                                        {(["custom", "event"] as const).map(m => (
+                                                                                    <div className="flex bg-white rounded-lg p-0.5 border border-gray-200 w-fit gap-0.5 flex-wrap">
+                                                                                        {(["custom", "event", "recent"] as const).map(m => (
                                                                                             <button
                                                                                                 key={m}
                                                                                                 type="button"
                                                                                                 onClick={() => setSchedFormSendMode(m)}
                                                                                                 className={`text-xs px-2.5 py-1 rounded-md font-medium transition ${schedFormSendMode === m ? "bg-gray-800 text-white shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
                                                                                             >
-                                                                                                {m === "custom" ? "הודעה חופשית" : "הזמנה לאירוע"}
+                                                                                                {m === "custom" ? "הודעה חופשית" : m === "event" ? "הזמנה לאירוע" : "הודעות אחרונות"}
                                                                                             </button>
                                                                                         ))}
                                                                                     </div>
@@ -3995,24 +4105,66 @@ export default function SettingsPage() {
                                                                                             <p className="text-[11px] text-gray-400">נשלח המלל הרשמי של האירוע בזמן הריצה.</p>
                                                                                         </div>
                                                                                     )}
+
+                                                                                    {schedFormSendMode === "recent" && (
+                                                                                        <div className="space-y-1.5">
+                                                                                            <p className="text-xs text-gray-500">בחר הודעה — המלל והמדיה יועתקו לשדות ותוכל לתזמן ישירות</p>
+                                                                                            {messageHistory.length === 0 ? (
+                                                                                                <p className="text-xs text-gray-400 py-2">אין הודעות שנשלחו עדיין</p>
+                                                                                            ) : (
+                                                                                                <div className="space-y-1.5">
+                                                                                                    {messageHistory.map(item => (
+                                                                                                        <button
+                                                                                                            key={item.id}
+                                                                                                            type="button"
+                                                                                                            onClick={() => {
+                                                                                                                setSchedFormMessage(item.messageText);
+                                                                                                                setSchedFormPresetMediaUrl(item.mediaAvailable && item.mediaUrl ? item.mediaUrl : "");
+                                                                                                                setSchedFormMediaFile(null);
+                                                                                                                setSchedFormSendMode("custom");
+                                                                                                            }}
+                                                                                                            className="w-full text-right p-2.5 border border-gray-200 rounded-lg hover:bg-violet-50 hover:border-violet-300 transition flex items-start gap-2.5"
+                                                                                                        >
+                                                                                                            {item.mediaAvailable && item.mediaUrl && (
+                                                                                                                <img
+                                                                                                                    src={item.mediaUrl}
+                                                                                                                    alt=""
+                                                                                                                    className="w-10 h-10 rounded object-cover flex-shrink-0 bg-gray-100"
+                                                                                                                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                                                                                                />
+                                                                                                            )}
+                                                                                                            <div className="flex-1 min-w-0 text-right">
+                                                                                                                <p className="text-xs text-gray-700 line-clamp-2">{item.messageText || "(ללא טקסט)"}</p>
+                                                                                                                <p className="text-[11px] text-gray-400 mt-0.5">
+                                                                                                                    {item.listName}
+                                                                                                                    {item.mediaAvailable && item.mediaUrl ? " · עם מדיה" : ""}
+                                                                                                                    {!item.mediaAvailable && item.mediaUrl ? " · מדיה כבר לא זמינה" : ""}
+                                                                                                                </p>
+                                                                                                            </div>
+                                                                                                        </button>
+                                                                                                    ))}
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
 
                                                                                 {/* Media upload */}
                                                                                 <div className="space-y-1.5">
                                                                                     <div className="text-xs text-gray-500">מדיה מצורפת (אופציונלי — תמונה / וידאו)</div>
                                                                                     <label className="flex items-center gap-2 cursor-pointer">
-                                                                                        <span className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition ${schedFormMediaFile ? "bg-violet-50 border-violet-300 text-violet-700" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                                                                                        <span className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition ${schedFormMediaFile || schedFormPresetMediaUrl ? "bg-violet-50 border-violet-300 text-violet-700" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
                                                                                             <UploadCloud size={13} />
-                                                                                            {schedFormMediaFile ? schedFormMediaFile.name : "בחר קובץ"}
+                                                                                            {schedFormMediaFile ? schedFormMediaFile.name : schedFormPresetMediaUrl ? "מדיה מהיסטוריה" : "בחר קובץ"}
                                                                                         </span>
                                                                                         <input
                                                                                             type="file"
                                                                                             accept="image/*,video/*"
                                                                                             className="hidden"
-                                                                                            onChange={e => setSchedFormMediaFile(e.target.files?.[0] ?? null)}
+                                                                                            onChange={e => { setSchedFormMediaFile(e.target.files?.[0] ?? null); setSchedFormPresetMediaUrl(""); }}
                                                                                         />
-                                                                                        {schedFormMediaFile && (
-                                                                                            <button type="button" onClick={() => setSchedFormMediaFile(null)} className="text-gray-400 hover:text-red-500 transition p-1"><X size={13} /></button>
+                                                                                        {(schedFormMediaFile || schedFormPresetMediaUrl) && (
+                                                                                            <button type="button" onClick={() => { setSchedFormMediaFile(null); setSchedFormPresetMediaUrl(""); }} className="text-gray-400 hover:text-red-500 transition p-1"><X size={13} /></button>
                                                                                         )}
                                                                                     </label>
                                                                                     {schedFormSendMode === "event" && (
