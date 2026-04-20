@@ -40,6 +40,11 @@ service cloud.firestore {
     match /integrations/whatsapp {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+      
+      match /{document=**} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
+      }
     }
 
     // אינסטגרם ומטריקול - רק אדמין
@@ -68,6 +73,25 @@ service cloud.firestore {
     match /whatsapp_list_schedules/{docId} {
       allow read, update, delete: if isAdmin();
       allow create: if isAdmin() || (request.resource.data.status == "pending_client" && request.resource.data.isClientSubmitted == true);
+    }
+
+    match /whatsapp_message_history/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /scheduled_posts/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{path=**}/volunteers/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /general_volunteers/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // סטטיסטיקות משימות חוזרות
